@@ -176,7 +176,6 @@
   "shop.not_verified": "Ma'muriyat tekshiruvini kutmoqda",
   "shop.channels": "Ulangan kanallar",
   "listing.buy_delivery": "Yetkazib berish bilan sotib olish",
-  "listing.delivery_soon": "Ko'rik bilan yetkazib berish buyurtmasi tez orada paydo bo'ladi. Hozircha sotuvchiga yozishingiz mumkin.",
   "listing.seller": "Sotuvchi",
   "listing.seller_since": "Ishonch'da {date} dan beri",
   "listing.sales": "Platforma orqali sotuvlar: {n}",

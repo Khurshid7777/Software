@@ -176,7 +176,6 @@
   "shop.not_verified": "Ожидает проверки администрацией",
   "shop.channels": "Привязанные каналы",
   "listing.buy_delivery": "Купить с доставкой",
-  "listing.delivery_soon": "Заказ доставки с осмотром появится совсем скоро. Пока можно написать продавцу.",
   "listing.seller": "Продавец",
   "listing.seller_since": "На Ishonch с {date}",
   "listing.sales": "Продаж через платформу: {n}",

@@ -11,6 +11,9 @@ const csvNumbers = z
       .map(Number),
   );
 
+/** Optional number where an empty value (`OPERATOR_CHAT_ID=`) means "not set". */
+const optionalNumber = z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().optional());
+
 const EnvSchema = z.object({
   NODE_ENV: z.string().default("development"),
   PORT: z.coerce.number().default(3000),
@@ -28,9 +31,9 @@ const EnvSchema = z.object({
   // Delivery operators (role "operator"): change order statuses via bot buttons.
   OPERATOR_TELEGRAM_IDS: csvNumbers,
   // Telegram group for operators (confirmed orders with addresses and phones). Empty: DM each operator.
-  OPERATOR_CHAT_ID: z.coerce.number().optional(),
+  OPERATOR_CHAT_ID: optionalNumber,
   // Telegram group for moderators (pending listings, complaints). Empty: DM each admin.
-  MODERATION_CHAT_ID: z.coerce.number().optional(),
+  MODERATION_CHAT_ID: optionalNumber,
   // Courier integration. Only "manual" exists: operators arrange couriers themselves.
   COURIER_PROVIDER: z.enum(["manual"]).default("manual"),
   // AI pre-moderation of listings at publication. "false": rules and duplicate checks only.

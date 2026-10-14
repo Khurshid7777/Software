@@ -87,6 +87,8 @@ describe.skipIf(!reachable)("seller cabinet (integration)", () => {
     db = created.db;
     close = () => created.sql.end();
     app = await buildApp({ config, db, ai, storage: new FsStorage(storageDir), stt, publisher });
+    // Isolate from live listings left by other test files or dev seeds: duplicate-photo checks see every live listing.
+    await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved')`);
   });
 
   beforeEach(async () => {

@@ -264,7 +264,7 @@ export class CatalogService {
       .select({ id: favorites.listingId })
       .from(favorites)
       .innerJoin(listings, eq(listings.id, favorites.listingId))
-      .where(and(eq(favorites.userId, user.id), inArray(listings.status, ["active", "sold"])))
+      .where(and(eq(favorites.userId, user.id), inArray(listings.status, ["active", "reserved", "sold"])))
       .orderBy(desc(favorites.createdAt));
     return this.items(
       rows.map((r) => r.id),

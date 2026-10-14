@@ -7,9 +7,18 @@ import type {
   CatalogSort,
   CheckResult,
   CompareResponse,
+  ComplaintReason,
+  CreateOrderInput,
+  DeliveryMode,
+  DeliveryQuote,
+  District,
   Lang,
   ListingDto,
   ListingStatus,
+  ModerationDecision,
+  OrderDto,
+  ReviewDto,
+  SellerRating,
 } from "@ishonch/shared";
 
 export interface SavedSearch {
@@ -115,7 +124,7 @@ export function createApi(initData: string | null) {
     },
     deletePhoto: (id: string, photoId: number) => request<ListingDto>(`/listings/${id}/photos/${photoId}`, { method: "DELETE" }),
     publish: (id: string, channelIds: number[]) =>
-      request<{ listing: ListingDto; postedChannels: number; failedChannels: number }>(
+      request<{ listing: ListingDto; postedChannels: number; failedChannels: number; moderation: ModerationDecision }>(
         `/listings/${id}/publish`,
         json("POST", { channelIds }),
       ),
@@ -124,6 +133,7 @@ export function createApi(initData: string | null) {
     markSold: (id: string, via: "platform" | "elsewhere") => request<ListingDto>(`/listings/${id}/sold`, json("POST", { via })),
     archive: (id: string) => request<ListingDto>(`/listings/${id}/archive`, { method: "POST" }),
     bump: (id: string) => request<ListingDto>(`/listings/${id}/bump`, { method: "POST" }),
+    renew: (id: string) => request<ListingDto>(`/listings/${id}/renew`, { method: "POST" }),
     deleteDraft: (id: string) => request(`/listings/${id}`, { method: "DELETE" }),
     shop: () => request<ShopInfo>("/shops/mine"),
     saveShop: (name: string, marketLocation: string) =>
@@ -144,6 +154,22 @@ export function createApi(initData: string | null) {
     saveSearch: (f: CatalogFilters) => request<SavedSearch>("/searches", json("POST", f)),
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
     contact: (id: string, text: string) => request<{ ok: true }>(`/listings/${id}/contact`, json("POST", { text })),
+    complain: (id: string, reason: ComplaintReason, text: string) =>
+      request<{ ok: true; duplicate: boolean; hidden: boolean }>(`/listings/${id}/complaints`, json("POST", { reason, text: text || undefined })),
+    sellerReviews: (sellerId: string) => request<{ rating: SellerRating; reviews: ReviewDto[] }>(`/sellers/${sellerId}/reviews`),
+
+    // ---- delivery ----
+    quote: (listingId: string, district: District, mode: DeliveryMode) =>
+      request<DeliveryQuote & { modes: DeliveryMode[] }>(
+        `/orders/quote?${new URLSearchParams({ listingId, district, mode }).toString()}`,
+      ),
+    createOrder: (input: CreateOrderInput) => request<OrderDto>("/orders", json("POST", input)),
+    myOrders: (role: "buyer" | "seller") => request<OrderDto[]>(`/orders/mine?role=${role}`),
+    order: (id: string) => request<OrderDto>(`/orders/${encodeURIComponent(id)}`),
+    orderAction: (id: string, action: "confirm" | "decline" | "cancel") => request<OrderDto>(`/orders/${id}/${action}`, { method: "POST" }),
+    review: (id: string, rating: number, text: string) =>
+      request<OrderDto>(`/orders/${id}/review`, json("POST", { rating, text: text.trim() || undefined })),
+
     assistant: (messages: AssistantMessage[], lang: Lang) => request<AssistantResponse>("/assistant", json("POST", { messages, lang })),
     compare: (ids: string[], lang: Lang, needs?: string) =>
       request<CompareResponse>("/assistant/compare", json("POST", { ids, lang, needs })),

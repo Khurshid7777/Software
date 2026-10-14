@@ -3,7 +3,7 @@ import { useLang, useT } from "../i18n";
 
 interface Props {
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "my" | "shop" | "catalog" | "assistant" | "favorites") => void;
+  onOpen: (screen: "check" | "sell" | "my" | "shop" | "catalog" | "assistant" | "favorites" | "orders") => void;
   onLanguage: (lang: Lang) => void;
   onDeleteAccount: () => void;
 }
@@ -57,6 +57,14 @@ export function Home({ remaining, onOpen, onLanguage, onDeleteAccount }: Props) 
         <span>
           <strong>{t("home.favorites.title")}</strong>
           <span className="hint">{t("home.favorites.desc")}</span>
+        </span>
+      </button>
+
+      <button className="tile" onClick={() => onOpen("orders")} data-testid="open-orders">
+        <span className="tile-icon">🚚</span>
+        <span>
+          <strong>{t("home.orders.title")}</strong>
+          <span className="hint">{t("home.orders.desc")}</span>
         </span>
       </button>
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listingPlainText, type ListingDto } from "@ishonch/shared";
+import { listingPlainText, type ListingDto, type ModerationDecision } from "@ishonch/shared";
 import { ApiError, compressImage, type Api, type ShopInfo } from "../api";
 import { ListingEditor } from "../components/ListingEditor";
 import { useRecorder } from "../components/useRecorder";
@@ -29,6 +29,7 @@ export function Sell({ api, existing, onDone }: Props) {
   const [channels, setChannels] = useState<ShopInfo["channels"]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [posted, setPosted] = useState(0);
+  const [moderation, setModeration] = useState<ModerationDecision>("approved");
   const [copied, setCopied] = useState(false);
   const recorder = useRecorder();
 
@@ -78,6 +79,7 @@ export function Sell({ api, existing, onDone }: Props) {
       const res = await api.publish(listing.id, selected);
       setListing(res.listing);
       setPosted(res.postedChannels);
+      setModeration(res.moderation);
       setStep("done");
     } catch (e) {
       if (e instanceof ApiError && e.code === "phone_required") setNeedPhone(true);
@@ -208,7 +210,7 @@ export function Sell({ api, existing, onDone }: Props) {
           </div>
         )}
         {error && <p className="error" role="alert">{error}</p>}
-        {listing.status === "active" ? (
+        {["active", "pending", "reserved"].includes(listing.status) ? (
           <button className="primary" onClick={onDone}>
             {t("shop.save")}
           </button>
@@ -224,7 +226,14 @@ export function Sell({ api, existing, onDone }: Props) {
   if (step === "done" && listing) {
     return (
       <div className="stack center">
-        <h2>🎉 {t("sell.published")}</h2>
+        {moderation === "approved" && <h2>🎉 {t("sell.published")}</h2>}
+        {moderation === "needs_review" && <h2>⏸ {t("sell.published_pending")}</h2>}
+        {moderation === "rejected" && (
+          <>
+            <h2>⛔️ {t("sell.published_rejected")}</h2>
+            {listing.moderation?.message && <p>{listing.moderation.message}</p>}
+          </>
+        )}
         {posted > 0 && <p>{t("sell.posted_to_channels", { n: posted })}</p>}
         <button
           className="secondary"

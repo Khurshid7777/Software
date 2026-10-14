@@ -145,6 +145,8 @@ describe.skipIf(!reachable)("delivery, moderation, complaints, expiry, bans (int
     db = created.db;
     close = () => created.sql.end();
     app = await buildApp({ config, db, ai, storage: new FsStorage(storageDir), publisher: gateway, courier });
+    // Isolate from live listings left by other test files or dev seeds: duplicate-photo checks see every live listing.
+    await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved')`);
     await app.services.orders.replaceTariffs([
       { name: "default", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, active: true },
       { name: "sergeli", fromDistrict: null, toDistrict: "sergeli", price: 40_000, codFeePct: 1, active: true },

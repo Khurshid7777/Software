@@ -6,10 +6,12 @@ import { LangContext } from "./i18n";
 import { Assistant } from "./screens/Assistant";
 import { Catalog } from "./screens/Catalog";
 import { Check } from "./screens/Check";
+import { Checkout } from "./screens/Checkout";
 import { Favorites } from "./screens/Favorites";
 import { Home } from "./screens/Home";
 import { ListingView } from "./screens/ListingView";
 import { MyListings } from "./screens/MyListings";
+import { Orders } from "./screens/Orders";
 import { Sell } from "./screens/Sell";
 import { Shop } from "./screens/Shop";
 import { Terms } from "./screens/Terms";
@@ -24,17 +26,22 @@ type Screen =
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
   | { name: "assistant" }
-  | { name: "favorites" };
+  | { name: "favorites" }
+  | { name: "checkout"; listing: ListingDto }
+  | { name: "orders"; focusId?: string };
 
 /** "Find similar at verified sellers" from a check result. */
 export function similarFilters(check: Pick<CheckResult, "title" | "category">): CatalogFilters {
   return { q: check.title, category: check.category === "other" ? undefined : check.category, verifiedOnly: true };
 }
 
-/** Start params: `listing_<uuid>` (channel button), `screen_sell` / `screen_my` (bot buttons). */
+/** Start params: `listing_<uuid>` (channel button), `order_<uuid>` (order notifications), `screen_*` (bot buttons). */
 function initialScreen(startParam?: string): Screen {
   const m = startParam?.match(/^listing_([0-9a-f-]{36})$/i);
   if (m) return { name: "listing", id: m[1]! };
+  const o = startParam?.match(/^order_([0-9a-f-]{36})$/i);
+  if (o) return { name: "orders", focusId: o[1]! };
+  if (startParam === "screen_orders") return { name: "orders" };
   if (startParam === "screen_sell") return { name: "sell" };
   if (startParam === "screen_my") return { name: "my" };
   if (startParam === "screen_check") return { name: "check" };
@@ -131,7 +138,21 @@ export function App({ env }: { env: TelegramEnv }) {
         body = <Shop api={api} />;
         break;
       case "listing":
-        body = <ListingView key={screen.id} api={api} id={screen.id} meId={me.id} />;
+        body = (
+          <ListingView
+            key={screen.id}
+            api={api}
+            id={screen.id}
+            meId={me.id}
+            onBuy={(listing) => setScreen({ name: "checkout", listing })}
+          />
+        );
+        break;
+      case "checkout":
+        body = <Checkout api={api} listing={screen.listing} onDone={(id) => setScreen({ name: "orders", focusId: id })} />;
+        break;
+      case "orders":
+        body = <Orders api={api} focusId={screen.focusId} onOpenListing={(id) => setScreen({ name: "listing", id })} />;
         break;
       case "catalog":
         body = (
