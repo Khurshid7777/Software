@@ -30,13 +30,22 @@ queue.start();
 // 30 days), delivery requests unanswered for 48 h, expired price offers, review reminders, cleanup of finished jobs.
 const hourly = () =>
   singleton(db, LOCKS.hourly, async () => {
-    const r = await listings.runExpiry();
-    const staleOrders = await orders.expireStale();
-    await orders.expireOffers();
-    await orders.remindReviews();
-    await queue.cleanup();
-    await app.services.catalog.cleanupPendingReplies();
-    if (r.reminded || r.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
+    // Each step on its own: one failing (e.g. expiry) must not skip stale orders, reminders or cleanup.
+    const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch (err) {
+        app.log.error({ err, step: name }, "hourly step failed");
+        return null;
+      }
+    };
+    const r = await step("expiry", () => listings.runExpiry());
+    const staleOrders = await step("stale_orders", () => orders.expireStale());
+    await step("offers", () => orders.expireOffers());
+    await step("review_reminders", () => orders.remindReviews());
+    await step("jobs_cleanup", () => queue.cleanup());
+    await step("pending_replies", () => app.services.catalog.cleanupPendingReplies());
+    if (r?.reminded || r?.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
   }).catch((err) => app.log.error({ err }, "hourly job failed"));
 setTimeout(hourly, 30_000);
 hourlyTimer = setInterval(hourly, 3600_000);

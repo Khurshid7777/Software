@@ -71,6 +71,13 @@
       "when": 1792006317021,
       "tag": "0009_trust_features",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792013048771,
+      "tag": "0010_dedup_and_invariants",
+      "breakpoints": true
     }
   ]
 }

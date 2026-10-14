@@ -291,6 +291,8 @@ describe.skipIf(!reachable)("offers, price drops, IMEI, reply time (integration)
     await chat(buyers[1]!, 20);
     expect((await card(BUYER, l.id)).listing.seller!.responseMinutes).toBeNull();
     await chat(buyers[2]!, 90);
+    // Messages were inserted directly (not through the bot relay, which resets the 10-minute cache).
+    app.services.listings.forgetResponseTime(seller);
     expect((await card(BUYER, l.id)).listing.seller!.responseMinutes).toBe(20);
     await db.delete(conversations).where(eq(conversations.sellerUserId, seller));
   });

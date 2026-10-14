@@ -36,6 +36,8 @@ export class AiLimitExceededError extends Error {
 }
 
 export class AiOutputError extends Error {}
+/** The provider failed (overload, network, 5xx): callers treat it like bad output — "AI unavailable", quota back. */
+export class AiUnavailableError extends AiOutputError {}
 
 export interface StructuredCall<S extends z.ZodType> {
   feature: string;
@@ -75,13 +77,20 @@ export class AiService {
     const model = this.deps.models[prompt.model];
     const started = Date.now();
 
-    const response = await this.deps.client.messages.parse({
-      model,
-      max_tokens: prompt.maxTokens,
-      system: renderPrompt(prompt.body, call.vars),
-      messages: [{ role: "user", content: call.content }],
-      output_config: { effort: prompt.effort, format: zodOutputFormat(call.schema) },
-    });
+    let response: Awaited<ReturnType<AiServiceDeps["client"]["messages"]["parse"]>>;
+    try {
+      response = await this.deps.client.messages.parse({
+        model,
+        max_tokens: prompt.maxTokens,
+        system: renderPrompt(prompt.body, call.vars),
+        messages: [{ role: "user", content: call.content }],
+        output_config: { effort: prompt.effort, format: zodOutputFormat(call.schema) },
+      });
+    } catch (err) {
+      // An outage must reach users as "AI is unavailable, try later" (and give their quota back), not as a 500.
+      this.deps.logger?.warn({ err: String(err), promptId: prompt.id }, "AI provider error");
+      throw new AiUnavailableError(`AI provider error: ${String(err)}`);
+    }
 
     const usage: AiUsageRecord = {
       feature: call.feature,

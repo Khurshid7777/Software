@@ -58,7 +58,8 @@ export type OrderError =
   | "offer_not_lower"
   | "offer_pending"
   | "too_many_offers"
-  | "bundle_invalid";
+  | "bundle_invalid"
+  | "no_tariff";
 
 export class OrderRejected extends Error {
   constructor(
@@ -76,6 +77,8 @@ export interface OrderServiceDeps {
   staff: StaffNotifier;
   courier: CourierProvider;
   codPlatformEnabled: boolean;
+  /** A reserved listing is back on sale: re-check complaints that arrived meanwhile (TrustService). */
+  onListingRestored?: (listingId: string) => Promise<unknown>;
 }
 
 /** Drizzle wraps driver errors; the PostgreSQL code may sit on the error or its cause. */
@@ -144,6 +147,8 @@ export class OrderService {
     const modes = this.allowedModes(l);
     if (!modes.includes(mode)) throw new OrderRejected("mode_not_allowed", 400);
     const tariff = pickTariff(await this.tariffs(), (l.district as District | null) ?? null, district);
+    // No tariff for the route would mean a free courier trip: refuse (operators fix the tariff table).
+    if (!tariff) throw new OrderRejected("no_tariff", 409);
     const offer = buyerId ? await this.acceptedOffer(l.id, buyerId) : null;
     const itemPrice = offer ? Math.min(offer.amount, l.price!) : l.price!;
     const main = quoteDelivery({ tariff, itemPrice, mode, feePayer: l.feePayer as FeePayer });
@@ -409,7 +414,7 @@ export class OrderService {
           { text: t(lang, "order.confirm"), callbackData: `order:confirm:${order.id}` },
           { text: t(lang, "order.decline"), callbackData: `order:decline:${order.id}` },
         ],
-        [{ text: t(lang, "order.open"), url: await this.link(order.id) }],
+        ...(await this.openButton(lang, order.id)),
       ]);
     }
     return this.dto(order.id, buyer);
@@ -465,20 +470,30 @@ export class OrderService {
     const o = await this.load(id);
     if (o.sellerUserId !== seller.id) throw new OrderRejected("forbidden", 403);
     if (o.status !== "new") throw new OrderRejected("bad_state", 409);
-    const group = await this.withBundle(o, ["new"]);
-    let lastConfirmed: Order | null = null;
-    for (const item of group) {
+    // The bundle's first order carries the delivery fee: it is confirmed first, and if its item is gone the
+    // whole request closes (the rest was priced without a delivery fee of its own).
+    const group = (await this.withBundle(o, ["new"])).sort((a, b) => Number(b.id === b.bundleId) - Number(a.id === a.bundleId));
+    const [main, ...rest] = group;
+    let confirmedMain: Order;
+    try {
+      confirmedMain = await this.confirmOne(main!, seller);
+    } catch (err) {
+      if (rest.length && err instanceof OrderRejected && err.code === "not_available") {
+        await this.cascade(main!, "cancelled", "seller", seller, "listing_unavailable").catch(() => undefined);
+      }
+      throw err;
+    }
+    for (const item of rest) {
       try {
-        lastConfirmed = await this.confirmOne(item, seller);
+        await this.confirmOne(item, seller);
       } catch (err) {
-        // A bundle item sold meanwhile is cancelled for the buyer; the rest still goes.
-        if (group.length === 1 || !(err instanceof OrderRejected) || err.code !== "not_available") throw err;
-        await this.transition(item, "cancelled", "seller", seller, "listing_unavailable", {}, { quiet: true }).catch(() => undefined);
+        if (!(err instanceof OrderRejected) || err.code !== "not_available") throw err;
+        // An extra item sold meanwhile: the buyer is told it dropped out; the rest of the trip goes.
+        await this.transition(item, "cancelled", "seller", seller, "listing_unavailable").catch(() => undefined);
       }
     }
-    if (!lastConfirmed) throw new OrderRejected("not_available", 409);
     // One courier booking, one operator card and one message to the buyer for the whole trip.
-    await this.announceConfirmed(lastConfirmed);
+    await this.announceConfirmed(confirmedMain);
     return this.dto(id, seller);
   }
 
@@ -550,22 +565,25 @@ export class OrderService {
 
   async operatorList(status?: OrderStatus) {
     const rows = await this.db
-      .select({ id: orders.id })
+      .select()
       .from(orders)
       .where(status ? eq(orders.status, status) : inArray(orders.status, OPEN_ORDER_STATUSES))
       .orderBy(asc(orders.createdAt))
       .limit(100);
-    return Promise.all(
-      rows.map(async (r) => {
-        const o = await this.load(r.id);
-        const [buyer, seller] = await Promise.all([this.user(o.buyerUserId), this.user(o.sellerUserId)]);
-        return {
-          ...(await this.dto(r.id, null, "operator")),
-          contacts: { buyerPhone: buyer?.phone ?? null, sellerPhone: seller?.phone ?? null, courierPhone: o.courierPhone },
-          imei: (await this.db.select({ imei: listings.imei }).from(listings).where(eq(listings.id, o.listingId)))[0]?.imei ?? null,
-        };
-      }),
-    );
+    if (!rows.length) return [];
+    const userIds = [...new Set(rows.flatMap((o) => [o.buyerUserId, o.sellerUserId]))];
+    const [dtos, people, imeis] = await Promise.all([
+      this.dtos(rows, null, "operator"),
+      this.db.select({ id: users.id, phone: users.phone }).from(users).where(inArray(users.id, userIds)),
+      this.db.select({ id: listings.id, imei: listings.imei }).from(listings).where(inArray(listings.id, [...new Set(rows.map((o) => o.listingId))])),
+    ]);
+    const phoneOf = new Map(people.map((u) => [u.id, u.phone]));
+    const imeiOf = new Map(imeis.map((l) => [l.id, l.imei]));
+    return rows.map((o, i) => ({
+      ...dtos[i]!,
+      contacts: { buyerPhone: phoneOf.get(o.buyerUserId) ?? null, sellerPhone: phoneOf.get(o.sellerUserId) ?? null, courierPhone: o.courierPhone },
+      imei: imeiOf.get(o.listingId) ?? null,
+    }));
   }
 
   /** Text + buttons for the operators' chat; the bot edits the message with it after every change. */
@@ -617,7 +635,12 @@ export class OrderService {
       .from(orders)
       .where(and(eq(orders.status, "new"), lt(orders.createdAt, new Date(now.getTime() - hours * 3600_000))))
       .limit(500);
-    for (const o of stale) await this.transition(o, "cancelled", "operator", null, "seller_timeout").catch(() => undefined);
+    const seen = new Set<string>();
+    for (const o of stale) {
+      if (o.bundleId && seen.has(o.bundleId)) continue;
+      if (o.bundleId) seen.add(o.bundleId);
+      await this.cascade(o, "cancelled", "operator", null, "seller_timeout").catch(() => undefined);
+    }
     return stale.length;
   }
 
@@ -662,18 +685,17 @@ export class OrderService {
       .limit(500);
     for (const o of due) {
       // Mark first: a failing DM must not turn into a reminder every hour.
+      // A bundle gets one reminder (all its delivered orders are marked together).
       const claimed = await this.db
         .update(orders)
         .set({ reviewRemindedAt: now })
-        .where(and(eq(orders.id, o.id), sql`${orders.reviewRemindedAt} is null`))
+        .where(and(o.bundleId ? eq(orders.bundleId, o.bundleId) : eq(orders.id, o.id), sql`${orders.reviewRemindedAt} is null`))
         .returning({ id: orders.id });
-      if (!claimed.length) continue;
+      if (!claimed.some((c) => c.id === o.id)) continue;
       const [buyer, [l]] = await Promise.all([this.user(o.buyerUserId), this.db.select().from(listings).where(eq(listings.id, o.listingId))]);
       if (!buyer) continue;
       const lang = buyer.language as Lang;
-      await this.dm(buyer, t(lang, "order.review_reminder", { title: l ? listingTitle(l, lang) : "" }), [
-        [{ text: t(lang, "order.leave_review"), url: await this.link(o.id) }],
-      ]);
+      await this.dm(buyer, t(lang, "order.review_reminder", { title: l ? listingTitle(l, lang) : "" }), await this.openButton(lang, o.id, "order.leave_review"));
     }
     return due.length;
   }
@@ -689,19 +711,25 @@ export class OrderService {
           inArray(orders.status, ["new", "confirmed", "courier_assigned"]),
         ),
       );
-    for (const o of open) await this.transition(o, "cancelled", "operator", null, "banned").catch(() => undefined);
+    const seen = new Set<string>();
+    for (const o of open) {
+      const key = `${o.bundleId ?? o.id}:${o.status}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      await this.cascade(o, "cancelled", "operator", null, "banned").catch(() => undefined);
+    }
     return open.length;
   }
 
   // ---------- reads ----------
   async mine(user: User, role: "buyer" | "seller") {
     const rows = await this.db
-      .select({ id: orders.id })
+      .select()
       .from(orders)
       .where(eq(role === "buyer" ? orders.buyerUserId : orders.sellerUserId, user.id))
       .orderBy(desc(orders.createdAt))
       .limit(50);
-    return Promise.all(rows.map((r) => this.dto(r.id, user)));
+    return this.dtos(rows, user);
   }
 
   async get(user: User, id: string) {
@@ -746,8 +774,15 @@ export class OrderService {
     return u ?? null;
   }
 
-  private link(orderId: string) {
-    return this.d.notifier ? this.d.notifier.miniAppLink(`order_${orderId}`) : Promise.resolve("");
+  /** Deep link to the order, or null (a Telegram API hiccup must not fail the request that sends it). */
+  private async link(orderId: string): Promise<string | null> {
+    if (!this.d.notifier) return null;
+    return this.d.notifier.miniAppLink(`order_${orderId}`).catch((err) => (console.error("mini app link failed", err), null));
+  }
+
+  private async openButton(lang: Lang, orderId: string, key: "order.open" | "order.leave_review" = "order.open"): Promise<NotifyButton[][]> {
+    const url = await this.link(orderId);
+    return url ? [[{ text: t(lang, key), url }]] : [];
   }
 
   private async dm(u: User, text: string, buttons: NotifyButton[][] = []) {
@@ -756,8 +791,10 @@ export class OrderService {
   }
 
   /**
-   * The only place that changes an order's status: validates the transition for the actor, applies it
-   * atomically (compare-and-set on the old status), logs the event and runs the side effects.
+   * The only place that changes an order's status: validates the transition for the actor, then in ONE
+   * database transaction applies it (compare-and-set on the old status), writes the history and updates
+   * the listing (reserved / back on sale / sold). Messages, the courier and the operator card come after
+   * the commit: a crash in between can lose a message, never leave a listing reserved without an order.
    */
   private async transition(
     o: Order,
@@ -772,59 +809,86 @@ export class OrderService {
     const from = o.status as OrderStatus;
     if (!canTransition(from, to, actor)) throw new OrderRejected("bad_state", 409);
     const now = new Date();
-    const updated = await this.db
-      .update(orders)
-      .set({
-        status: to,
-        updatedAt: now,
-        ...extra,
-        ...(to === "cancelled" ? { cancelReason: note } : {}),
-        ...(to === "delivered" ? { deliveredAt: now } : {}),
-      })
-      .where(and(eq(orders.id, o.id), eq(orders.status, from)))
-      .returning();
-    if (!updated.length) throw new OrderRejected("bad_state", 409);
-    const order = updated[0]!;
-    await this.db.insert(orderEvents).values({ orderId: o.id, status: to, actorUserId: actorUser?.id ?? null, actor, note });
-    await this.d.repo.event(actorUser?.id ?? null, "order_status", { orderId: o.id, from, to, actor });
-
-    const [l] = await this.db.select().from(listings).where(eq(listings.id, o.listingId));
     const wasReserving = RESERVING_ORDER_STATUSES.includes(from);
 
-    if (to === "confirmed") {
-      // Other requests for the same item are closed: it is reserved for this buyer.
-      const others = await this.db
+    const { order, rivals, restored } = await this.db.transaction(async (tx) => {
+      const updated = await tx
         .update(orders)
-        .set({ status: "cancelled", cancelReason: "reserved_by_other", updatedAt: now })
-        .where(and(eq(orders.listingId, o.listingId), eq(orders.status, "new")))
+        .set({
+          status: to,
+          updatedAt: now,
+          ...extra,
+          ...(to === "cancelled" ? { cancelReason: note } : {}),
+          ...(to === "delivered" ? { deliveredAt: now } : {}),
+        })
+        .where(and(eq(orders.id, o.id), eq(orders.status, from)))
         .returning();
-      for (const other of others) {
-        await this.db.insert(orderEvents).values({ orderId: other.id, status: "cancelled", actor: "seller", note: "reserved_by_other" });
-        await this.notifyStatus(other, l ?? null, "cancelled", "seller"); // the seller caused it: tell the buyer only
+      if (!updated.length) throw new OrderRejected("bad_state", 409);
+      await tx.insert(orderEvents).values({ orderId: o.id, status: to, actorUserId: actorUser?.id ?? null, actor, note });
+
+      let rivals: Order[] = [];
+      if (to === "confirmed") {
+        // Other requests for the same item are closed: it is reserved for this buyer. A rival that is part
+        // of a bundle closes with its whole bundle (its delivery fee was priced for the whole trip).
+        rivals = await tx
+          .update(orders)
+          .set({ status: "cancelled", cancelReason: "reserved_by_other", updatedAt: now })
+          .where(and(eq(orders.listingId, o.listingId), eq(orders.status, "new")))
+          .returning();
+        const bundleIds = [...new Set(rivals.map((r) => r.bundleId).filter((b): b is string => !!b))];
+        if (bundleIds.length) {
+          rivals.push(
+            ...(await tx
+              .update(orders)
+              .set({ status: "cancelled", cancelReason: "reserved_by_other", updatedAt: now })
+              .where(and(inArray(orders.bundleId, bundleIds), eq(orders.status, "new")))
+              .returning()),
+          );
+        }
+        for (const r of rivals) await tx.insert(orderEvents).values({ orderId: r.id, status: "cancelled", actor: "seller", note: "reserved_by_other" });
       }
-      if (!opts.quiet) await this.announceConfirmed(order, { notify: false });
-    }
 
-    if ((to === "cancelled" || to === "returned") && wasReserving) {
-      if (!opts.quiet || order.externalId) await this.d.courier.cancelShipment(order).catch((err) => console.error("courier cancel failed", err));
-      // Back on sale unless it expired meanwhile.
-      await this.db
-        .update(listings)
-        .set({ status: "active", updatedAt: now })
-        .where(and(eq(listings.id, o.listingId), eq(listings.status, "reserved"), gt(listings.expiresAt, now)));
-      await this.db
-        .update(listings)
-        .set({ status: "archived", moderationReason: "expired", updatedAt: now })
-        .where(and(eq(listings.id, o.listingId), eq(listings.status, "reserved")));
-    }
+      let restored = false;
+      if ((to === "cancelled" || to === "returned") && wasReserving) {
+        // Back on sale unless it expired meanwhile.
+        restored =
+          (
+            await tx
+              .update(listings)
+              .set({ status: "active", updatedAt: now })
+              .where(and(eq(listings.id, o.listingId), eq(listings.status, "reserved"), gt(listings.expiresAt, now)))
+              .returning({ id: listings.id })
+          ).length > 0;
+        await tx
+          .update(listings)
+          .set({ status: "archived", moderationReason: "expired", updatedAt: now })
+          .where(and(eq(listings.id, o.listingId), eq(listings.status, "reserved")));
+      }
+      if (to === "delivered") {
+        await tx.update(listings).set({ status: "sold", soldVia: "platform", soldAt: now, updatedAt: now }).where(eq(listings.id, o.listingId));
+      }
+      return { order: updated[0]!, rivals, restored };
+    });
 
-    if (to === "delivered") {
-      await this.db
-        .update(listings)
-        .set({ status: "sold", soldVia: "platform", soldAt: now, updatedAt: now })
-        .where(eq(listings.id, o.listingId));
-      await this.d.repo.event(o.buyerUserId, "order_delivered", { orderId: o.id, listingId: o.listingId });
+    // ---- after commit: analytics, messages, courier, operators ----
+    await this.d.repo.event(actorUser?.id ?? null, "order_status", { orderId: o.id, from, to, actor });
+    if (to === "delivered") await this.d.repo.event(o.buyerUserId, "order_delivered", { orderId: o.id, listingId: o.listingId });
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, o.listingId));
+
+    // One message per rival request (a bundle is one request), to its buyer only: the seller caused it.
+    const told = new Set<string>();
+    for (const r of rivals) {
+      const key = r.bundleId ?? r.id;
+      if (told.has(key)) continue;
+      told.add(key);
+      await this.notifyStatus(r, l ?? null, "cancelled", "seller").catch((err) => console.error("rival notification failed", err));
     }
+    if (to === "confirmed" && !opts.quiet) await this.announceConfirmed(order, { notify: false });
+    if ((to === "cancelled" || to === "returned") && wasReserving && (!opts.quiet || order.externalId)) {
+      await this.d.courier.cancelShipment(order).catch((err) => console.error("courier cancel failed", err));
+    }
+    // Complaints collected while the item was reserved still count once it is back on sale.
+    if (restored) await this.d.onListingRestored?.(o.listingId).catch((err) => console.error("complaint recheck failed", err));
 
     if (!opts.quiet) await this.notifyStatus(order, l ?? null, to, actor);
     return order;
@@ -884,73 +948,102 @@ export class OrderService {
       if (to === "delivered" && role === "buyer") {
         text += `\n\n${t(lang, "order.ask_review")}`;
       }
-      buttons.push([{ text: t(lang, "order.open"), url: await this.link(o.id) }]);
+      buttons.push(...(await this.openButton(lang, o.id)));
       await this.dm(u, text, buttons);
     }
   }
 
-  private async bundleOf(o: Order): Promise<OrderDto["bundle"]> {
-    if (!o.bundleId) return [];
-    const rows = await this.db
-      .select({ orderId: orders.id, listingId: orders.listingId, status: orders.status, titleRu: listings.titleRu, titleUz: listings.titleUz })
-      .from(orders)
-      .innerJoin(listings, eq(listings.id, orders.listingId))
-      .where(and(eq(orders.bundleId, o.bundleId), ne(orders.id, o.id)))
-      .orderBy(asc(orders.createdAt));
-    return rows.map((r) => ({ ...r, status: r.status as OrderStatus }));
+  async dto(id: string, viewer: User | null, as?: "operator"): Promise<OrderDto> {
+    const [dto] = await this.dtos([await this.load(id)], viewer, as);
+    return dto!;
   }
 
-  async dto(id: string, viewer: User | null, as?: "operator"): Promise<OrderDto> {
-    const o = await this.load(id);
-    const role: OrderDto["role"] = as ?? (viewer?.id === o.buyerUserId ? "buyer" : viewer?.id === o.sellerUserId ? "seller" : "operator");
-    const [l] = await this.db.select().from(listings).where(eq(listings.id, o.listingId));
-    const [photo] = await this.db
-      .select()
-      .from(listingPhotos)
-      .where(eq(listingPhotos.listingId, o.listingId))
-      .orderBy(asc(listingPhotos.position), asc(listingPhotos.id))
-      .limit(1);
-    const history = await this.db.select().from(orderEvents).where(eq(orderEvents.orderId, o.id)).orderBy(asc(orderEvents.id));
-    const [review] = await this.db.select().from(reviews).where(eq(reviews.orderId, o.id));
-    const status = o.status as OrderStatus;
+  /**
+   * Batched DTOs: a fixed number of queries for any number of orders (listings, first photos, history,
+   * reviews, bundle siblings), in the order given. Lists (my orders, the operators' queue) use this.
+   */
+  async dtos(rows: Order[], viewer: User | null, as?: "operator"): Promise<OrderDto[]> {
+    if (!rows.length) return [];
+    const orderIds = rows.map((o) => o.id);
+    const listingIds = [...new Set(rows.map((o) => o.listingId))];
+    const bundleIds = [...new Set(rows.map((o) => o.bundleId).filter((b): b is string => !!b))];
+    const [listingRows, photoRows, history, reviewRows, siblings] = await Promise.all([
+      this.db.select().from(listings).where(inArray(listings.id, listingIds)),
+      this.db
+        .selectDistinctOn([listingPhotos.listingId])
+        .from(listingPhotos)
+        .where(inArray(listingPhotos.listingId, listingIds))
+        .orderBy(listingPhotos.listingId, asc(listingPhotos.position), asc(listingPhotos.id)),
+      this.db.select().from(orderEvents).where(inArray(orderEvents.orderId, orderIds)).orderBy(asc(orderEvents.id)),
+      this.db.select().from(reviews).where(inArray(reviews.orderId, orderIds)),
+      bundleIds.length
+        ? this.db
+            .select({
+              orderId: orders.id,
+              bundleId: orders.bundleId,
+              listingId: orders.listingId,
+              status: orders.status,
+              titleRu: listings.titleRu,
+              titleUz: listings.titleUz,
+              createdAt: orders.createdAt,
+            })
+            .from(orders)
+            .innerJoin(listings, eq(listings.id, orders.listingId))
+            .where(inArray(orders.bundleId, bundleIds))
+            .orderBy(asc(orders.createdAt))
+        : Promise.resolve([]),
+    ]);
+    const listingOf = new Map(listingRows.map((l) => [l.id, l]));
+    const photoOf = new Map(photoRows.map((p) => [p.listingId, p]));
+    const reviewOf = new Map(reviewRows.map((r) => [r.orderId, r]));
+    const historyOf = new Map<string, typeof history>();
+    for (const h of history) historyOf.set(h.orderId, [...(historyOf.get(h.orderId) ?? []), h]);
 
-    const actions: OrderDto["actions"] = [];
-    if (role === "buyer") {
-      if (canTransition(status, "cancelled", "buyer")) actions.push("cancel");
-      if (status === "delivered" && !review) actions.push("review");
-    }
-    if (role === "seller") {
-      if (status === "new") actions.push("confirm", "decline");
-      else if (canTransition(status, "cancelled", "seller")) actions.push("cancel");
-    }
-
-    return {
-      id: o.id,
-      status,
-      role,
-      mode: o.mode as DeliveryMode,
-      listing: {
-        id: o.listingId,
-        titleRu: l?.titleRu ?? "",
-        titleUz: l?.titleUz ?? "",
-        photoUrl: photo ? this.d.listings.photoUrl(photo.id, photo.storageKey) : null,
-      },
-      district: o.district as District,
-      address: role === "seller" ? null : o.address,
-      // The buyer's free text reaches the seller only without phones and links (deals stay inside Ishonch).
-      comment: o.comment && role === "seller" ? scrubPii(o.comment) : o.comment,
-      quote: o.quote as DeliveryQuote,
-      feePayer: o.feePayer as FeePayer,
-      courier: o.courierName ? { name: o.courierName } : null,
-      cancelReason: o.cancelReason,
-      createdAt: o.createdAt.toISOString(),
-      updatedAt: o.updatedAt.toISOString(),
-      history: history.map((h) => ({ status: h.status as OrderStatus, at: h.createdAt.toISOString(), note: h.note })),
-      review: review ? { id: review.id, rating: review.rating, text: review.text, createdAt: review.createdAt.toISOString() } : null,
-      canReview: actions.includes("review"),
-      actions,
-      inspection: (o.inspection as Inspection | null) ?? null,
-      bundle: await this.bundleOf(o),
-    };
+    return rows.map((o) => {
+      const role: OrderDto["role"] = as ?? (viewer?.id === o.buyerUserId ? "buyer" : viewer?.id === o.sellerUserId ? "seller" : "operator");
+      const l = listingOf.get(o.listingId);
+      const photo = photoOf.get(o.listingId);
+      const review = reviewOf.get(o.id);
+      const status = o.status as OrderStatus;
+      const actions: OrderDto["actions"] = [];
+      if (role === "buyer") {
+        if (canTransition(status, "cancelled", "buyer")) actions.push("cancel");
+        if (status === "delivered" && !review) actions.push("review");
+      }
+      if (role === "seller") {
+        if (status === "new") actions.push("confirm", "decline");
+        else if (canTransition(status, "cancelled", "seller")) actions.push("cancel");
+      }
+      return {
+        id: o.id,
+        status,
+        role,
+        mode: o.mode as DeliveryMode,
+        listing: {
+          id: o.listingId,
+          titleRu: l?.titleRu ?? "",
+          titleUz: l?.titleUz ?? "",
+          photoUrl: photo ? this.d.listings.photoUrl(photo.id, photo.storageKey) : null,
+        },
+        district: o.district as District,
+        address: role === "seller" ? null : o.address,
+        // The buyer's free text reaches the seller only without phones and links (deals stay inside Ishonch).
+        comment: o.comment && role === "seller" ? scrubPii(o.comment) : o.comment,
+        quote: o.quote as DeliveryQuote,
+        feePayer: o.feePayer as FeePayer,
+        courier: o.courierName ? { name: o.courierName } : null,
+        cancelReason: o.cancelReason,
+        createdAt: o.createdAt.toISOString(),
+        updatedAt: o.updatedAt.toISOString(),
+        history: (historyOf.get(o.id) ?? []).map((h) => ({ status: h.status as OrderStatus, at: h.createdAt.toISOString(), note: h.note })),
+        review: review ? { id: review.id, rating: review.rating, text: review.text, createdAt: review.createdAt.toISOString() } : null,
+        canReview: actions.includes("review"),
+        actions,
+        inspection: (o.inspection as Inspection | null) ?? null,
+        bundle: siblings
+          .filter((b) => o.bundleId && b.bundleId === o.bundleId && b.orderId !== o.id)
+          .map((b) => ({ orderId: b.orderId, listingId: b.listingId, status: b.status as OrderStatus, titleRu: b.titleRu, titleUz: b.titleUz })),
+      };
+    });
   }
 }

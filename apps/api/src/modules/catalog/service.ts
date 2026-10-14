@@ -379,16 +379,18 @@ export class CatalogService {
 
       const lang = language as Lang;
       const title = lang === "ru" ? l.titleRu || l.titleUz : l.titleUz || l.titleRu;
-      const url = await this.notifier.miniAppLink(`listing_${listingId}`);
+      const url = await this.notifier.miniAppLink(`listing_${listingId}`).catch(() => null);
       try {
         await this.notifier.send(
           telegramId,
           t(lang, "bot.saved_search_hit", { query: s.title, title, price: l.price ? formatUzs(l.price) : "" }),
-          [[{ text: t(lang, "bot.open_listing"), url }]],
+          url ? [[{ text: t(lang, "bot.open_listing"), url }]] : [],
         );
         sent++;
         notifiedUsers.add(s.userId);
       } catch (err) {
+        // The row claimed this alert; give it back so a retry of the job can deliver it.
+        await this.db.delete(searchNotifications).where(eq(searchNotifications.id, inserted[0]!.id)).catch(() => undefined);
         console.error("saved search alert failed", err);
       }
     }
@@ -473,6 +475,7 @@ export class CatalogService {
     await this.db.insert(conversationMessages).values({ conversationId, senderUserId: sender.id, text: text.slice(0, 1000) });
     await this.db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conversationId));
     if (fromBuyer && n === 0) await this.repo.event(sender.id, "buyer_contacted_seller", { listingId: l.id });
+    if (!fromBuyer) this.listingsSvc.forgetResponseTime(sender.id);
 
     if (!this.notifier) return;
     const lang = recipient.language as Lang;

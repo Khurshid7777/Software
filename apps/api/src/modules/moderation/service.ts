@@ -86,6 +86,9 @@ export class ModerationService {
             ne(listings.id, l.id),
             ne(listings.sellerUserId, l.sellerUserId),
             eq(listings.category, l.category),
+            // `%` (pg_trgm.similarity_threshold = 0.4, see db/client.ts) narrows candidates through the trigram
+            // index; similarity() then applies the real, much stricter threshold.
+            sql`coalesce(nullif(${listings.descriptionRu}, ''), ${listings.descriptionUz}) % ${desc}`,
             sql`similarity(coalesce(nullif(${listings.descriptionRu}, ''), ${listings.descriptionUz}), ${desc}) >= ${TEXT_DUPLICATE_SIMILARITY}`,
           ),
         )

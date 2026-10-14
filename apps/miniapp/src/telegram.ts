@@ -1,6 +1,8 @@
 import {
   addToHomeScreen,
   backButton,
+  closingBehavior,
+  hapticFeedback,
   checkHomeScreenStatus,
   init,
   isTMA,
@@ -11,6 +13,8 @@ import {
   shareStory,
   shareURL,
   retrieveLaunchParams,
+  swipeBehavior,
+  viewport,
   themeParams,
 } from "@telegram-apps/sdk-react";
 
@@ -47,7 +51,27 @@ export function initTelegram(): TelegramEnv {
     if (themeParams.bindCssVars.isAvailable()) themeParams.bindCssVars();
   }
   if (backButton.mount.isAvailable()) backButton.mount();
-  if (miniApp.ready.isAvailable()) miniApp.ready();
+  try {
+    // Full height from the start, safe-area insets as CSS variables, and the page's own scroll instead of
+    // the "swipe down to close" gesture (lists are long; a stray swipe must not close the app).
+    if (viewport.mount.isAvailable()) {
+      void viewport
+        .mount()
+        .then(() => {
+          viewport.bindCssVars.ifAvailable();
+          viewport.expand.ifAvailable();
+        })
+        .catch(() => undefined);
+    }
+    if (swipeBehavior.mount.isAvailable()) {
+      swipeBehavior.mount();
+      swipeBehavior.disableVertical.ifAvailable();
+    }
+    miniApp.setHeaderColor.ifAvailable("secondary_bg_color");
+    miniApp.setBackgroundColor.ifAvailable("secondary_bg_color");
+  } catch {
+    /* old client: defaults are fine */
+  }
 
   const lp = retrieveLaunchParams();
   return {
@@ -112,6 +136,37 @@ export const canShareStory = () => shareStory.isAvailable();
 /** Story with the listing photo and a link back to the listing (the link widget needs Telegram Premium). */
 export function shareToStory(photoUrl: string, text: string, link: string, linkName: string) {
   shareStory.ifAvailable(photoUrl, { text: text.slice(0, 200), widgetLink: { url: link, name: linkName.slice(0, 48) } });
+}
+
+/** Hides Telegram's loading placeholder: called after the first render, not before. */
+export function markReady() {
+  try {
+    if (miniApp.ready.isAvailable()) miniApp.ready();
+  } catch {
+    /* outside Telegram */
+  }
+}
+
+/** Light tactile feedback on key actions (no-op outside Telegram / on old clients). */
+export function haptic(kind: "light" | "medium" | "selection" | "success" | "warning" | "error") {
+  try {
+    if (kind === "selection") hapticFeedback.selectionChanged.ifAvailable();
+    else if (kind === "light" || kind === "medium") hapticFeedback.impactOccurred.ifAvailable(kind);
+    else hapticFeedback.notificationOccurred.ifAvailable(kind);
+  } catch {
+    /* unsupported */
+  }
+}
+
+/** Asks "close anyway?" when the user swipes the app away with unsaved input (a draft, a checkout form). */
+export function guardClosing(on: boolean) {
+  try {
+    if (!closingBehavior.isMounted() && closingBehavior.mount.isAvailable()) closingBehavior.mount();
+    if (on) closingBehavior.enableConfirmation.ifAvailable();
+    else closingBehavior.disableConfirmation.ifAvailable();
+  } catch {
+    /* unsupported */
+  }
 }
 
 export function setBackButton(onClick: (() => void) | null) {

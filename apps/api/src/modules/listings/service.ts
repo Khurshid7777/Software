@@ -51,6 +51,7 @@ import {
   type User,
 } from "../../db/schema.js";
 import { AiLimitExceededError, AiOutputError, type AiService } from "../../ai/aiService.js";
+import sharp from "sharp";
 import { processImage } from "../../storage/images.js";
 import type { Storage } from "../../storage/storage.js";
 import { SttUnavailableError, type SpeechToText } from "../../stt/speechToText.js";
@@ -60,6 +61,10 @@ import { hasContactInfo, type ModerationService } from "../moderation/service.js
 import { analyzeListing, generateListingText } from "./ai.js";
 
 export const MAX_PHOTOS = 10;
+/** A price cut deeper than this (percent) sends a live listing back through moderation. */
+export const BAIT_DROP_PCT = 35;
+/** Sizes of photo copies served with `?w=` (cards, thumbnails, the listing gallery). */
+export const PHOTO_WIDTHS = [240, 480, 960];
 /** Default for the `listing_ai_per_day` setting: AI drafts + text generations per seller per day. */
 export const LISTING_AI_PER_DAY = 30;
 const DAY = 24 * 3600_000;
@@ -171,13 +176,30 @@ export class ListingService {
     return createHmac("sha256", this.d.photoSecret).update(v).digest("base64url").slice(0, 22);
   }
 
-  async readPhoto(photoId: number, sig: string): Promise<Buffer | null> {
+  /**
+   * A photo by its signed URL. `width` (one of PHOTO_WIDTHS) returns a smaller copy for cards and thumbnails:
+   * made once with sharp and kept next to the original, so lists don't download 2000 px originals.
+   */
+  async readPhoto(photoId: number, sig: string, width?: number): Promise<Buffer | null> {
     const [p] = await this.db.select().from(listingPhotos).where(eq(listingPhotos.id, photoId));
     if (!p) return null;
     const expected = Buffer.from(this.sign(`${p.id}:${p.storageKey}`));
     const given = Buffer.from(sig);
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
-    return this.d.storage.get(p.storageKey);
+    if (!width || !PHOTO_WIDTHS.includes(width)) return this.d.storage.get(p.storageKey);
+    const variantKey = `${p.storageKey}@w${width}`;
+    const cached = await this.d.storage.get(variantKey).catch(() => null);
+    if (cached) return cached;
+    const original = await this.d.storage.get(p.storageKey);
+    if (!original) return null;
+    const small = await sharp(original).resize({ width, withoutEnlargement: true }).jpeg({ quality: 78, mozjpeg: true }).toBuffer();
+    await this.d.storage.put(variantKey, small, "image/jpeg").catch(() => undefined);
+    return small;
+  }
+
+  /** The original and its resized copies. */
+  private async deletePhotoFiles(storageKey: string) {
+    await Promise.all([storageKey, ...PHOTO_WIDTHS.map((w) => `${storageKey}@w${w}`)].map((k) => this.d.storage.delete(k).catch(() => undefined)));
   }
 
   private async storePhotos(listingId: string, files: UploadedFile[], startPosition: number) {
@@ -269,11 +291,14 @@ export class ListingService {
     if (!draft.analysis) throw new ListingRejected("bad_state", 409);
 
     const merged = { ...(draft.answers ?? {}), ...answers };
-    await this.reserveAi(user);
+    const reservation = await this.reserveAi(user);
     const sellerWords = [draft.transcript, l.sourceText].filter(Boolean).join("\n");
     const { text } = await this.withAi(() =>
       generateListingText({ analysis: draft.analysis!, answers: merged, sellerWords }, { ai: this.d.ai }),
-    );
+    ).catch(async (err) => {
+      if (err instanceof ListingRejected && err.code === "ai_unavailable") await this.d.repo.refundDaily(reservation);
+      throw err;
+    });
 
     // Answers can change the model key (e.g. storage) → refresh the price suggestion.
     let priceSuggestion = l.priceSuggestion as PriceSuggestion | null;
@@ -322,8 +347,13 @@ export class ListingService {
       .update(listings)
       .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, updatedAt: now })
       .where(eq(listings.id, id));
-    // A live listing whose text or IMEI changed goes through moderation again (it could be swapped for something else).
-    if ((textChanged || imeiChanged) && l.status === "active") await this.remoderate(id);
+    const priceChanged = patch.price != null && l.price != null && patch.price !== l.price;
+    // Open delivery requests were quoted at the old price: they close and the buyers are told to re-order.
+    if (priceChanged && l.status === "active") await this.d.onUnavailable?.(id, "price_changed");
+    // A live listing whose text or IMEI changed, or whose price fell by more than a third (a classic bait:
+    // approved at a fair price, then dropped to lure buyers), goes through moderation again.
+    const baitDrop = priceChanged && patch.price! < l.price! * (1 - BAIT_DROP_PCT / 100);
+    if ((textChanged || imeiChanged || baitDrop) && l.status === "active") await this.remoderate(id);
     if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.price! - patch.price! >= (l.price! * PRICE_DROP_MIN_PCT) / 100) {
       await this.schedule("price_drop_alerts", { listingId: id, price: patch.price });
     }
@@ -378,7 +408,7 @@ export class ListingService {
       .delete(listingPhotos)
       .where(and(eq(listingPhotos.id, photoId), eq(listingPhotos.listingId, id)))
       .returning();
-    if (p) await this.d.storage.delete(p.storageKey);
+    if (p) await this.deletePhotoFiles(p.storageKey);
     return this.dto(id, user.id);
   }
 
@@ -652,8 +682,15 @@ export class ListingService {
   async markSold(user: User, id: string, via: "platform" | "elsewhere") {
     const l = await this.own(user, id);
     // A reserved listing is sold through its delivery order (or the order is cancelled first).
-    if (!["active", "pending", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
-    await this.db.update(listings).set({ status: "sold", soldVia: via, soldAt: new Date(), updatedAt: new Date() }).where(eq(listings.id, id));
+    const from = ["active", "pending", "archived"];
+    if (!from.includes(l.status)) throw new ListingRejected("bad_state", 409);
+    // Compare-and-set: a delivery confirmed at the same moment (bot button) wins, not this tap.
+    const done = await this.db
+      .update(listings)
+      .set({ status: "sold", soldVia: via, soldAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(listings.id, id), inArray(listings.status, from)))
+      .returning({ id: listings.id });
+    if (!done.length) throw new ListingRejected("bad_state", 409);
     await this.d.onUnavailable?.(id, "listing_unavailable");
     await this.d.repo.event(user.id, "listing_sold", { listingId: id, via });
     return this.dto(id, user.id);
@@ -661,8 +698,14 @@ export class ListingService {
 
   async archive(user: User, id: string) {
     const l = await this.own(user, id);
-    if (!["active", "pending", "draft", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
-    await this.db.update(listings).set({ status: "archived", moderationReason: null, updatedAt: new Date() }).where(eq(listings.id, id));
+    const from = ["active", "pending", "draft", "rejected"];
+    if (!from.includes(l.status)) throw new ListingRejected("bad_state", 409);
+    const done = await this.db
+      .update(listings)
+      .set({ status: "archived", moderationReason: null, updatedAt: new Date() })
+      .where(and(eq(listings.id, id), inArray(listings.status, from)))
+      .returning({ id: listings.id });
+    if (!done.length) throw new ListingRejected("bad_state", 409);
     await this.d.onUnavailable?.(id, "listing_unavailable");
     return this.dto(id, user.id);
   }
@@ -816,7 +859,7 @@ export class ListingService {
 
   private async deleteListing(id: string) {
     const photos = await this.db.select().from(listingPhotos).where(eq(listingPhotos.listingId, id));
-    await Promise.all(photos.map((p) => this.d.storage.delete(p.storageKey).catch(() => undefined)));
+    await Promise.all(photos.map((p) => this.deletePhotoFiles(p.storageKey)));
     await this.db.delete(listings).where(eq(listings.id, id));
   }
 
@@ -846,7 +889,36 @@ export class ListingService {
    * Typical reply time (Avito shows "отвечает в течение часа"): median minutes from the buyer's first message
    * to the seller's first answer, over chats of the last 60 days; null with fewer than 3 answered chats.
    */
+  private responseCache = new Map<string, { minutes: number | null; at: number }>();
+
   private async responseMinutes(sellerIds: string[]): Promise<Map<string, number>> {
+    // Cached per seller for 10 minutes: every listing view and catalog page needs it, the value moves slowly.
+    const now = Date.now();
+    const out = new Map<string, number>();
+    const missing: string[] = [];
+    for (const id of sellerIds) {
+      const c = this.responseCache.get(id);
+      if (c && now - c.at < 10 * 60_000) {
+        if (c.minutes != null) out.set(id, c.minutes);
+      } else missing.push(id);
+    }
+    if (!missing.length) return out;
+    const fresh = await this.queryResponseMinutes(missing);
+    if (this.responseCache.size > 5000) this.responseCache.clear();
+    for (const id of missing) {
+      const m = fresh.get(id) ?? null;
+      this.responseCache.set(id, { minutes: m, at: now });
+      if (m != null) out.set(id, m);
+    }
+    return out;
+  }
+
+  /** A seller answered a chat: their typical reply time may have changed. */
+  forgetResponseTime(sellerId: string) {
+    this.responseCache.delete(sellerId);
+  }
+
+  private async queryResponseMinutes(sellerIds: string[]): Promise<Map<string, number>> {
     const rows = (await this.db.execute(sql`
       select c.seller_user_id as seller,
              percentile_cont(0.5) within group (order by extract(epoch from (r.at - b.at)) / 60) as minutes
@@ -895,11 +967,13 @@ export class ListingService {
     if (opts.withSeller && sellerIds.length) {
       const shopRows = await this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds));
       shopOf = new Map(shopRows.map((s) => [s.ownerUserId, s]));
+      // Platform sales = orders actually delivered by an Ishonch courier. The seller's own "sold on Ishonch"
+      // mark is not counted: anyone could set it and get the "high trust" badge without a single sale.
       const sales = await this.db
-        .select({ seller: listings.sellerUserId, n: count() })
-        .from(listings)
-        .where(and(inArray(listings.sellerUserId, sellerIds), eq(listings.soldVia, "platform")))
-        .groupBy(listings.sellerUserId);
+        .select({ seller: orders.sellerUserId, n: count() })
+        .from(orders)
+        .where(and(inArray(orders.sellerUserId, sellerIds), eq(orders.status, "delivered")))
+        .groupBy(orders.sellerUserId);
       salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
       const ratings = await this.db
         .select({ seller: reviews.sellerUserId, avg: avg(reviews.rating), n: count() })

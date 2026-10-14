@@ -59,13 +59,22 @@ export class TrustService {
       .returning();
     if (!inserted.length) return { ok: true, duplicate: true, hidden: false };
     await this.d.repo.event(user.id, "complaint_created", { listingId, reason });
+    return { ok: true, duplicate: false, hidden: await this.holdIfComplained(listingId) };
+  }
 
+  /**
+   * Hides an active listing once enough distinct users have open complaints about it. Also called when a
+   * reserved listing comes back on sale (complaints collected meanwhile must not be lost).
+   */
+  async holdIfComplained(listingId: string): Promise<boolean> {
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.status !== "active") return false;
     const [{ n }] = (await this.db
       .select({ n: countDistinct(complaints.userId) })
       .from(complaints)
       .where(and(eq(complaints.listingId, listingId), isNull(complaints.resolvedAt)))) as [{ n: number }];
     const threshold = await this.d.repo.getSetting("complaints_to_hide", DEFAULT_COMPLAINTS_TO_HIDE);
-    if (n < threshold || l.status !== "active") return { ok: true, duplicate: false, hidden: false };
+    if (n < threshold) return false;
 
     const open = await this.db
       .select({ reason: complaints.reason })
@@ -86,9 +95,8 @@ export class TrustService {
       },
       { from: ["active"] },
     );
-    if (!hidden) return { ok: true, duplicate: false, hidden: false };
-    await this.d.repo.event(null, "listing_hidden_by_complaints", { listingId, users: n });
-    return { ok: true, duplicate: false, hidden: true };
+    if (hidden) await this.d.repo.event(null, "listing_hidden_by_complaints", { listingId, users: n });
+    return hidden;
   }
 
   async listComplaints(onlyOpen = true) {

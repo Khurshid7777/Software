@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { EXPIRY_REMINDER_DAYS, formatUzs, listingPlainText, listingTitle, type ListingDto, type ListingStatus } from "@ishonch/shared/client";
-import { ApiError, apiUrl, type Api } from "../api";
+import { photoUrl, ApiError, type Api } from "../api";
+import { confirmDialog } from "../dialogs";
+import { Empty } from "../components/Empty";
+import { LoadError } from "../components/LoadError";
+import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
 import { useLatest } from "../useLatest";
+import { useOnShow } from "../leave";
 
 // "active" also lists reserved items, "pending" also lists rejected ones (see GET /listings/mine).
 const TABS: ListingStatus[] = ["active", "pending", "draft", "sold", "archived"];
@@ -10,29 +15,36 @@ const DAY = 864e5;
 
 interface Props {
   api: Api;
+  /** Top of the navigation stack: lists refresh when the user comes back (an edit, an order changed). */
+  visible?: boolean;
   onEdit: (l: ListingDto) => void;
   onOpen: (id: string) => void;
+  onSell: () => void;
 }
 
-export function MyListings({ api, onEdit, onOpen }: Props) {
+export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Props) {
   const t = useT();
   const lang = useLang();
   const [tab, setTab] = useState<ListingStatus>("active");
   const [items, setItems] = useState<ListingDto[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [soldFor, setSoldFor] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const begin = useLatest();
   const load = useCallback(() => {
     const isCurrent = begin();
     setItems(null);
+    setFailed(false);
     api
       .myListings(tab)
       .then((list) => isCurrent() && setItems(list))
-      .catch(() => isCurrent() && (setItems([]), setToast(t("common.error"))));
+      .catch(() => isCurrent() && (setItems([]), setFailed(true)));
   }, [api, tab, begin]);
   const [busy, setBusy] = useState(false);
   useEffect(load, [load]);
+  const shown = useRef(false);
+  useOnShow(visible, () => (shown.current ? load() : (shown.current = true)));
 
   const date = (iso: string) => new Date(iso).toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ");
 
@@ -51,6 +63,13 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
     }
   }
 
+  async function archive(id: string) {
+    if (await confirmDialog(t("my.archive_confirm"))) await act(() => api.archive(id));
+  }
+  async function removeDraft(id: string) {
+    if (await confirmDialog(t("my.delete_draft_confirm"))) await act(() => api.deleteDraft(id));
+  }
+
   return (
     <div className="stack">
       <h1>{t("my.title")}</h1>
@@ -61,18 +80,27 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
           </button>
         ))}
       </div>
-      {toast && (
-        <p className="toast" onClick={() => setToast(null)}>
-          {toast}
-        </p>
-      )}
+      {toast && <Toast text={toast} onClose={() => setToast(null)} />}
       {items === null && <p className="hint center">{t("common.loading")}</p>}
-      {items?.length === 0 && <p className="hint center">{t("my.empty")}</p>}
+      {failed && <LoadError onRetry={load} />}
+      {items?.length === 0 && !failed && (
+        <Empty
+          icon="📭"
+          title={t("my.empty")}
+          action={
+            tab === "active" || tab === "draft" ? (
+              <button className="primary" onClick={onSell}>
+                📸 {t("home.sell.title")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
 
       {items?.map((l) => (
-        <article key={l.id} className="card listing-row" data-testid="my-listing">
+        <article key={l.id} className={busy ? "card listing-row busy" : "card listing-row"} data-testid="my-listing">
           <button className="listing-main" onClick={() => (l.status === "draft" ? onEdit(l) : onOpen(l.id))}>
-            {l.photos[0] ? <img src={apiUrl(l.photos[0].url)} alt="" /> : <div className="no-photo">📦</div>}
+            {l.photos[0] ? <img src={photoUrl(l.photos[0].url, 240)} alt="" loading="lazy" /> : <div className="no-photo">📦</div>}
             <span>
               <strong>{listingTitle(l, lang) || "—"}</strong>
               {l.price && <span>{formatUzs(l.price)}</span>}
@@ -101,6 +129,9 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
               <button className="chip" onClick={() => act(() => api.markSold(l.id, "elsewhere")).then(() => setSoldFor(null))}>
                 {t("my.sold_elsewhere")}
               </button>
+              <button className="chip" onClick={() => setSoldFor(null)}>
+                {t("common.cancel")}
+              </button>
             </div>
           ) : (
             <div className="row wrap actions">
@@ -120,7 +151,7 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
                   >
                     📋 OLX / Instagram
                   </button>
-                  <button className="chip" onClick={() => act(() => api.archive(l.id))}>🗄 {t("my.archive")}</button>
+                  <button className="chip" onClick={() => archive(l.id)}>🗄 {t("my.archive")}</button>
                   {l.expiresAt && new Date(l.expiresAt).getTime() - Date.now() < EXPIRY_REMINDER_DAYS * DAY && (
                     <button className="chip" onClick={() => act(() => api.renew(l.id), t("my.renewed"))}>⏰ {t("my.renew")}</button>
                   )}
@@ -132,10 +163,17 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
                   {l.status === "rejected" && (
                     <button className="chip" onClick={() => act(() => api.publish(l.id, []))}>↩️ {t("sell.publish")}</button>
                   )}
-                  <button className="chip" onClick={() => act(() => api.archive(l.id))}>🗄 {t("my.archive")}</button>
+                  <button className="chip" onClick={() => archive(l.id)}>🗄 {t("my.archive")}</button>
                 </>
               )}
-              {l.status === "draft" && <button className="chip" onClick={() => onEdit(l)}>✏️ {t("my.edit")}</button>}
+              {l.status === "draft" && (
+                <>
+                  <button className="chip" onClick={() => onEdit(l)}>✏️ {t("my.edit")}</button>
+                  <button className="chip" onClick={() => removeDraft(l.id)} data-testid="draft-delete">
+                    🗑 {t("my.delete_draft")}
+                  </button>
+                </>
+              )}
               {l.status === "archived" && l.moderation?.reason === "expired" && (
                 <button className="chip" onClick={() => act(() => api.renew(l.id), t("my.renewed"))}>↩️ {t("my.restore")}</button>
               )}

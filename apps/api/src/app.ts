@@ -77,7 +77,13 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     bodyLimit: 1024 * 1024,
     trustProxy: config.TRUST_PROXY,
   });
-  if ((config.RATE_LIMITS ?? (config.NODE_ENV === "test" ? "off" : "on")) === "on") await registerRateLimits(app);
+  if ((config.RATE_LIMITS ?? (config.NODE_ENV === "test" ? "off" : "on")) === "on") {
+    await registerRateLimits(app, {
+      botToken: config.BOT_TOKEN,
+      internalToken: config.INTERNAL_API_TOKEN,
+      maxAgeSec: config.INIT_DATA_MAX_AGE_SEC,
+    });
+  }
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {
     limits: { ...multipartLimits, files: 12, fileSize: Math.max(multipartLimits.fileSize, MAX_UPLOAD_BYTES) },
@@ -174,6 +180,8 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     staff,
     courier: courier ?? createCourierProvider(config.COURIER_PROVIDER),
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
+    // `trust` is created below; the hook only runs later, on an order cancelled or returned.
+    onListingRestored: (id) => trust.holdIfComplained(id),
   });
   const trust = new TrustService({ repo, listings: listingsSvc, onBanned: (id) => ordersSvc.cancelAllFor(id) });
 

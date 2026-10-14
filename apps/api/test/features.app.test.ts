@@ -10,7 +10,8 @@ import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { conversations, listings, orders, reviews } from "../src/db/schema.js";
+import { complaints, conversations, listingPhotos, listings, orders, reviews } from "../src/db/schema.js";
+import sharp from "sharp";
 import type { CourierProvider, ShipmentRequest } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../src/telegram/publisher.js";
@@ -324,5 +325,95 @@ describe.skipIf(!reachable)("reviews reminder, share, checklist, inspection, rep
     const all2 = await db.select().from(orders).where(eq(orders.bundleId, second.id));
     expect(all2.map((o) => o.status)).toEqual(["cancelled", "cancelled"]);
     expect(await listingStatus(a.id)).toBe("active");
+  });
+  // ---------------- hardening (review findings) ----------------
+
+  it("platform sales count delivered orders only: the seller's own 'sold on Ishonch' mark does not raise trust", async () => {
+    const own = await liveListing(SELLER);
+    await app.inject({ method: "POST", url: `/listings/${own.id}/sold`, headers: tma(SELLER), payload: { via: "platform" } });
+    const other = await liveListing(SELLER);
+    expect((await card(BUYER, other.id)).listing.seller!.platformSales).toBe(0);
+    const id = await confirmedOrder(other.id);
+    for (const s of ["courier_assigned", "picked_up", "delivered"]) await opStatus(id, s);
+    const third = await liveListing(SELLER);
+    expect((await card(BUYER, third.id)).listing.seller!.platformSales).toBe(1);
+  });
+
+  it("confirming one buyer closes a rival bundle as a whole, with one message to its buyer", async () => {
+    const a = await liveListing(SELLER);
+    const c = await liveListing(SELLER, { price: 1_000_000 });
+    const bundle = (await order({ listingId: a.id, extraListingIds: [c.id], mode: "cod_seller", district: "yunusobod", address: "Amir Temur 1" })).json() as OrderDto;
+    const rival = (
+      await app.inject({ method: "POST", url: "/orders", headers: tma(SELLER2), payload: { listingId: a.id, mode: "cod_seller", district: "yunusobod", address: "Chilonzor 9" } })
+    ).json() as OrderDto;
+    dms.length = 0;
+    await app.inject({ method: "POST", url: `/orders/${rival.id}/confirm`, headers: internal(SELLER) });
+    const rows = await db.select().from(orders).where(eq(orders.bundleId, bundle.id));
+    expect(rows.map((r) => r.status)).toEqual(["cancelled", "cancelled"]);
+    expect(dmsTo(BUYER)).toHaveLength(1);
+    expect(await listingStatus(c.id)).toBe("active");
+  });
+
+  it("a bundle whose main item is gone closes entirely at confirmation (no delivery-free trip)", async () => {
+    const a = await liveListing(SELLER);
+    const c = await liveListing(SELLER, { price: 1_000_000 });
+    const bundle = (await order({ listingId: a.id, extraListingIds: [c.id], mode: "cod_seller", district: "yunusobod", address: "Amir Temur 1" })).json() as OrderDto;
+    // The main item disappears without the usual hooks (e.g. a race): confirmation must not ship the rest.
+    await db.update(listings).set({ status: "sold" }).where(eq(listings.id, a.id));
+    const res = await app.inject({ method: "POST", url: `/orders/${bundle.id}/confirm`, headers: internal(SELLER) });
+    expect(res.statusCode).toBe(409);
+    const rows = await db.select().from(orders).where(eq(orders.bundleId, bundle.id));
+    expect(rows.every((r) => r.status === "cancelled")).toBe(true);
+    expect(await listingStatus(c.id)).toBe("active");
+    expect(shipments).toHaveLength(0);
+  });
+
+  it("a price change closes open requests (quoted at the old price); a bait-sized cut goes back to moderation", async () => {
+    const l = await liveListing(SELLER);
+    const o = (await order({ listingId: l.id, mode: "cod_seller", district: "yunusobod", address: "Amir Temur 1" })).json() as OrderDto;
+    await app.inject({ method: "PATCH", url: `/listings/${l.id}`, headers: tma(SELLER), payload: { price: 3_800_000 } });
+    expect(await status(o.id)).toBe("cancelled");
+    expect((await db.select().from(orders).where(eq(orders.id, o.id)))[0]!.cancelReason).toBe("price_changed");
+    expect(await listingStatus(l.id)).toBe("active");
+
+    ai.calls.length = 0;
+    await app.inject({ method: "PATCH", url: `/listings/${l.id}`, headers: tma(SELLER), payload: { price: 1_500_000 } });
+    expect(ai.calls.some((c) => c.promptId === "listing_moderate")).toBe(true);
+  });
+
+  it("complaints collected while reserved hide the listing once it is back on sale", async () => {
+    const l = await liveListing(SELLER);
+    const id = await confirmedOrder(l.id);
+    for (const [i, tg] of [BUYER, SELLER2, OPERATOR].entries()) {
+      await db.insert(complaints).values({ listingId: l.id, userId: await userId(tg), reason: i ? "scam" : "wrong_info" });
+    }
+    await opStatus(id, "cancelled");
+    expect(await listingStatus(l.id)).toBe("pending");
+  });
+
+  it("a route without a tariff refuses delivery instead of shipping for free", async () => {
+    const l = await liveListing(SELLER);
+    const saved = await app.services.orders.tariffs();
+    await app.services.orders.replaceTariffs([]);
+    try {
+      const res = await app.inject({ url: `/orders/quote?listingId=${l.id}&district=yunusobod&mode=cod_seller`, headers: tma(BUYER) });
+      expect(res.json().error).toBe("no_tariff");
+    } finally {
+      await app.services.orders.replaceTariffs(saved.map(({ id: _id, ...t }) => t));
+    }
+  });
+
+  it("photos are served at card sizes (resized once, then from storage)", async () => {
+    const l = await liveListing(SELLER);
+    const big = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: { r: 200, g: 50, b: 50 } } }).jpeg().toBuffer();
+    const key = `test/${l.id}.jpg`;
+    await new FsStorage(storageDir).put(key, big, "image/jpeg");
+    const [p] = await db.insert(listingPhotos).values({ listingId: l.id, storageKey: key, position: 0 }).returning();
+    const url = app.services.listings.photoUrl(p!.id, key);
+    const small = await app.inject({ url: `${url}&w=240` });
+    expect(small.statusCode).toBe(200);
+    expect((await sharp(small.rawPayload).metadata()).width).toBe(240);
+    expect((await app.inject({ url: `${url}&w=333` })).rawPayload.length).toBe(big.length); // only the known sizes
+    expect((await app.inject({ url: `${url.replace(/s=[^&]+/, "s=forged")}&w=240` })).statusCode).toBe(404);
   });
 });

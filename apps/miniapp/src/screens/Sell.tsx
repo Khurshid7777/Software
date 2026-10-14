@@ -4,7 +4,9 @@ import { ApiError, compressImage, type Api, type ShopInfo } from "../api";
 import { ListingEditor } from "../components/ListingEditor";
 import { useRecorder } from "../components/useRecorder";
 import { useLang, useT } from "../i18n";
+import { useLeaveGuard } from "../leave";
 import { sharePhoneAndWait } from "../phone";
+import { haptic } from "../telegram";
 
 type Step = "capture" | "analyzing" | "questions" | "generating" | "edit" | "done";
 const MAX_PHOTOS = 10;
@@ -32,11 +34,18 @@ export function Sell({ api, existing, onDone }: Props) {
   const [moderation, setModeration] = useState<ModerationDecision>("approved");
   const [publishing, setPublishing] = useState(false);
   const [waitingPhone, setWaitingPhone] = useState(false);
-  const pendingSave = useRef<Promise<unknown> | null>(null);
+  const pendingSave = useRef<Promise<boolean> | null>(null);
+  const [savedNote, setSavedNote] = useState(false);
   const mounted = useRef(true);
   useEffect(() => () => void (mounted.current = false), []);
   const [copied, setCopied] = useState(false);
   const recorder = useRecorder();
+  const dirty =
+    (step === "capture" && (files.length > 0 || !!text.trim() || !!recorder.audio || recorder.recording)) ||
+    step === "analyzing" ||
+    step === "generating" ||
+    (step === "questions" && Object.values(answers).some((v) => v.trim()));
+  useLeaveGuard(dirty, t("sell.leave_confirm"));
 
   useEffect(() => {
     api
@@ -88,6 +97,7 @@ export function Sell({ api, existing, onDone }: Props) {
       setPosted(res.postedChannels);
       setModeration(res.moderation);
       setStep("done");
+      haptic(res.moderation === "rejected" ? "warning" : "success");
     } catch (e) {
       if (e instanceof ApiError && e.code === "phone_required") setNeedPhone(true);
       else fail(e);
@@ -131,8 +141,16 @@ export function Sell({ api, existing, onDone }: Props) {
         {files.length > 0 && (
           <div className="thumbs">
             {files.map((f, i) => (
-              <button key={`${f.name}-${f.size}-${i}`} className="thumb" onClick={() => setFiles(files.filter((_, j) => j !== i))}>
+              <button
+                key={`${f.name}-${f.size}-${i}`}
+                className="thumb"
+                aria-label={t("sell.photo_remove")}
+                onClick={() => setFiles(files.filter((_, j) => j !== i))}
+              >
                 <FilePreview file={f} />
+                <span className="thumb-x" aria-hidden>
+                  ✕
+                </span>
               </button>
             ))}
           </div>
@@ -223,8 +241,18 @@ export function Sell({ api, existing, onDone }: Props) {
           </div>
         )}
         {error && <p className="error" role="alert">{error}</p>}
+        {savedNote && <p className="hint center">✅ {t("common.saved")}</p>}
         {["active", "pending", "reserved"].includes(listing.status) ? (
-          <button className="primary" onClick={onDone}>
+          <button
+            className="primary"
+            onClick={async () => {
+              // Wait for the field saved on blur; on an error the user stays here to see it.
+              if ((await pendingSave.current) === false) return;
+              setSavedNote(true);
+              haptic("success");
+              setTimeout(onDone, 400);
+            }}
+          >
             {t("shop.save")}
           </button>
         ) : (

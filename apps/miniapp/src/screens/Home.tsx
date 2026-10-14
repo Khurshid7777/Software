@@ -1,39 +1,91 @@
 import { useEffect, useState } from "react";
-import type { Lang } from "@ishonch/shared/client";
-import { useLang, useT } from "../i18n";
-import { canAddToHomeScreen, promptAddToHomeScreen } from "../telegram";
+import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
+import type { Api } from "../api";
+import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
+import { useT } from "../i18n";
+import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
+
+/** Category chips on the storefront (the catch-all ones live in the catalog filters). */
+export const CATEGORY_ICONS: Record<string, string> = {
+  smartphone: "📱",
+  laptop: "💻",
+  tablet: "📲",
+  headphones: "🎧",
+  smartwatch: "⌚️",
+  console: "🎮",
+  tv: "📺",
+  camera: "📷",
+};
+const CATEGORIES = CHECK_CATEGORIES.filter((c) => c in CATEGORY_ICONS);
 
 interface Props {
+  api: Api;
   /** Staff see an entry to the admin panel (operators: delivery orders only). */
   staff?: "admin" | "operator" | null;
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "my" | "shop" | "catalog" | "assistant" | "favorites" | "orders" | "admin") => void;
-  onLanguage: (lang: Lang) => void;
-  onDeleteAccount: () => void;
+  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin") => void;
+  onCatalog: (filters?: CatalogFilters) => void;
+  onListing: (id: string) => void;
 }
 
-export function Home({ staff, remaining, onOpen, onLanguage, onDeleteAccount }: Props) {
+/**
+ * Storefront: search, categories, fresh listings and the three "Ishonch" tools (Tekshir, AI assistant,
+ * favorites). Everything personal lives in the Profile tab.
+ */
+export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Props) {
   const t = useT();
-  const lang = useLang();
+  const [fresh, setFresh] = useState<CatalogItem[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [query, setQuery] = useState("");
   const [homeScreen, setHomeScreen] = useState(false);
+
   useEffect(() => {
-    canAddToHomeScreen().then(setHomeScreen);
-  }, []);
+    let current = true;
+    api
+      .catalog({}, "newest", 0)
+      .then((p) => current && setFresh(p.items.slice(0, 6)))
+      .catch(() => current && (setFresh([]), setFailed(true)));
+    canAddToHomeScreen().then((v) => current && setHomeScreen(v));
+    return () => {
+      current = false;
+    };
+  }, [api]);
+
   return (
-    <div className="stack">
-      <header className="row between">
-        <div>
-          <h1>{t("app.name")}</h1>
-          <p className="hint">{t("app.tagline")}</p>
-        </div>
-        <div className="lang-switch" role="group" aria-label={t("common.language")}>
-          {(["uz", "ru"] as const).map((l) => (
-            <button key={l} className={l === lang ? "active" : ""} onClick={() => onLanguage(l)}>
-              {l.toUpperCase()}
-            </button>
-          ))}
-        </div>
+    <div className="stack" data-testid="home">
+      <header className="stack-tight">
+        <h1>{t("app.name")}</h1>
+        <p className="hint">{t("app.tagline")}</p>
       </header>
+
+      <form
+        className="search-box"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onCatalog(query.trim() ? { q: query.trim() } : undefined);
+        }}
+      >
+        <span aria-hidden>🔍</span>
+        <input
+          type="search"
+          enterKeyHint="search"
+          placeholder={t("catalog.search")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          data-testid="home-search"
+        />
+      </form>
+
+      <div className="category-strip scroll-x" role="list">
+        {CATEGORIES.map((c) => (
+          <button key={c} role="listitem" className="category" onClick={() => onCatalog({ category: c })}>
+            <span className="category-icon" aria-hidden>
+              {CATEGORY_ICONS[c]}
+            </span>
+            <span>{t(`category.${c}`)}</span>
+          </button>
+        ))}
+      </div>
 
       {staff && (
         <button className="tile" onClick={() => onOpen("admin")} data-testid="open-admin">
@@ -45,69 +97,62 @@ export function Home({ staff, remaining, onOpen, onLanguage, onDeleteAccount }: 
         </button>
       )}
 
-      <button className="tile primary-tile" onClick={() => onOpen("check")} data-testid="open-check">
-        <span className="tile-icon">🔎</span>
-        <span>
-          <strong>{t("home.tekshir.title")}</strong>
-          <span className="hint">{t("home.tekshir.desc")}</span>
-          <span className="hint">{t("check.remaining", { n: remaining })}</span>
-        </span>
-      </button>
+      <div className="quick-actions">
+        <button className="quick primary-quick" onClick={() => onOpen("check")} data-testid="open-check">
+          <span className="quick-icon">🔎</span>
+          <strong>Tekshir</strong>
+          <span className="hint">{t("home.quick.check", { n: remaining })}</span>
+        </button>
+        <button className="quick" onClick={() => onOpen("assistant")} data-testid="open-assistant">
+          <span className="quick-icon">🤖</span>
+          <strong>{t("home.quick.assistant")}</strong>
+          <span className="hint">{t("home.quick.assistant_desc")}</span>
+        </button>
+        <button className="quick" onClick={() => onOpen("favorites")} data-testid="open-favorites">
+          <span className="quick-icon">❤️</span>
+          <strong>{t("home.quick.favorites")}</strong>
+          <span className="hint">{t("home.quick.favorites_desc")}</span>
+        </button>
+      </div>
 
-      <button className="tile" onClick={() => onOpen("catalog")} data-testid="open-catalog">
-        <span className="tile-icon">🛍️</span>
-        <span>
-          <strong>{t("home.catalog.title")}</strong>
-          <span className="hint">{t("home.catalog.desc_ready")}</span>
-        </span>
-      </button>
+      <section className="stack-tight">
+        <div className="row between">
+          <h2>{t("home.fresh")}</h2>
+          <button className="link" onClick={() => onCatalog({})} data-testid="open-catalog">
+            {t("home.see_all")} →
+          </button>
+        </div>
+        {fresh === null ? (
+          <div className="mini-grid">
+            {Array.from({ length: 4 }, (_, i) => (
+              <MiniCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : fresh.length ? (
+          <div className="mini-grid">
+            {fresh.map((i) => (
+              <MiniCard key={i.listing.id} item={i} onOpen={() => onListing(i.listing.id)} />
+            ))}
+          </div>
+        ) : (
+          <p className="hint center">{failed ? t("common.error") : t("home.fresh_empty")}</p>
+        )}
+      </section>
 
-      <button className="tile" onClick={() => onOpen("assistant")} data-testid="open-assistant">
-        <span className="tile-icon">🤖</span>
-        <span>
-          <strong>{t("home.assistant.title")}</strong>
-          <span className="hint">{t("home.assistant.desc")}</span>
-        </span>
-      </button>
-
-      <button className="tile" onClick={() => onOpen("favorites")}>
-        <span className="tile-icon">❤️</span>
-        <span>
-          <strong>{t("home.favorites.title")}</strong>
-          <span className="hint">{t("home.favorites.desc")}</span>
-        </span>
-      </button>
-
-      <button className="tile" onClick={() => onOpen("orders")} data-testid="open-orders">
-        <span className="tile-icon">🚚</span>
-        <span>
-          <strong>{t("home.orders.title")}</strong>
-          <span className="hint">{t("home.orders.desc")}</span>
-        </span>
-      </button>
-
-      <button className="tile" onClick={() => onOpen("sell")} data-testid="open-sell">
+      <button
+        className="sell-banner"
+        onClick={() => {
+          haptic("light");
+          onOpen("sell");
+        }}
+        data-testid="open-sell"
+      >
         <span className="tile-icon">📸</span>
         <span>
-          <strong>{t("home.sell.title")}</strong>
-          <span className="hint">{t("home.sell.desc_ready")}</span>
+          <strong>{t("home.sell_banner.title")}</strong>
+          <span className="hint">{t("home.sell_banner.text")}</span>
         </span>
-      </button>
-
-      <button className="tile" onClick={() => onOpen("my")} data-testid="open-my">
-        <span className="tile-icon">📋</span>
-        <span>
-          <strong>{t("home.my.title")}</strong>
-          <span className="hint">{t("home.my.desc")}</span>
-        </span>
-      </button>
-
-      <button className="tile" onClick={() => onOpen("shop")}>
-        <span className="tile-icon">🏪</span>
-        <span>
-          <strong>{t("home.shop.title")}</strong>
-          <span className="hint">{t("home.shop.desc")}</span>
-        </span>
+        <span aria-hidden>→</span>
       </button>
 
       {homeScreen && (
@@ -121,10 +166,6 @@ export function Home({ staff, remaining, onOpen, onLanguage, onDeleteAccount }: 
           📲 {t("home.add_to_home")}
         </button>
       )}
-
-      <button className="link danger" onClick={onDeleteAccount}>
-        {t("home.delete_account")}
-      </button>
     </div>
   );
 }

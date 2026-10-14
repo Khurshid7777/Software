@@ -41,6 +41,10 @@ export class Repo {
       : this.operatorTelegramIds.includes(tg.id)
         ? "operator"
         : undefined;
+    // Every authenticated request lands here: read first and write only for a new user or a role change
+    // (an upsert per request would lock and rewrite the row each time).
+    const [existing] = await this.db.select().from(users).where(eq(users.telegramId, tg.id));
+    if (existing && (role ? existing.role === role : existing.role !== "admin" && existing.role !== "operator")) return existing;
     const [row] = await this.db
       .insert(users)
       .values({ telegramId: tg.id, language: normalizeLang(tg.language_code), ...(role ? { role } : {}) })
