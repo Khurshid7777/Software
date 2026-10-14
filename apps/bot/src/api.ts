@@ -142,6 +142,19 @@ export class ApiClient {
     return this.request(`/listings/${encodeURIComponent(listingId)}/renew`, { method: "POST", user });
   }
 
+  setPendingReply(user: TgUser, conversationId: string) {
+    return this.request("/internal/pending-reply", {
+      method: "POST",
+      user,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversationId }),
+    });
+  }
+
+  takePendingReply(user: TgUser) {
+    return this.request<{ conversationId?: string; expired?: boolean }>("/internal/pending-reply/take", { method: "POST", user });
+  }
+
   getCheck(id: string) {
     return this.request<CheckResult>(`/checks/${encodeURIComponent(id)}`, {});
   }

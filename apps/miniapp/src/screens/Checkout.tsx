@@ -7,7 +7,7 @@ import {
   type DeliveryQuote,
   type District,
   type ListingDto,
-} from "@ishonch/shared";
+} from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
 import { useLang, useT } from "../i18n";
 import { sharePhoneAndWait } from "../phone";

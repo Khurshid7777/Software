@@ -126,6 +126,16 @@ export function catalogRoutes(
       }),
   );
 
+  // Bot state for the "Reply" button (only the bot calls these, as the user who pressed it).
+  app.post<{ Body: { conversationId?: string } }>("/internal/pending-reply", { preHandler: auth.requireInternal }, (req, reply) =>
+    handle(req, reply, async () => {
+      const id = z.string().uuid().safeParse(req.body?.conversationId);
+      if (!id.success) return reply.code(400).send({ error: "bad_request" });
+      return catalog.setPendingReply(req.user!, id.data);
+    }),
+  );
+  app.post("/internal/pending-reply/take", { preHandler: auth.requireInternal }, (req) => catalog.takePendingReply(req.user!));
+
   // ---- AI assistant ----
   app.post<{ Body: { messages?: unknown; lang?: string } }>("/assistant", { preHandler: requireUser }, (req, reply) =>
     handle(req, reply, async () => {

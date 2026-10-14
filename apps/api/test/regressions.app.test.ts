@@ -7,7 +7,7 @@ import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { complaints, listings, orders, users } from "../src/db/schema.js";
+import { botPendingReplies, complaints, conversations, listings, orders, users } from "../src/db/schema.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPost, ChannelPublisher, Notifier } from "../src/telegram/publisher.js";
 import { mockAiByPrompt } from "./helpers.js";
@@ -216,5 +216,24 @@ describe.skipIf(!reachable)("review regressions (integration)", () => {
     const draft = await live(SELLER, { status: "draft" });
     await db.update(users).set({ bannedAt: new Date() }).where(eq(users.id, id));
     expect((await app.inject({ url: `/listings/${draft.id}`, headers: tma(ADMIN) })).statusCode).toBe(404);
+  });
+
+  it("bot reply state: only participants, taken once, expiry reported", async () => {
+    const l = await live(SELLER);
+    const [conv] = await db
+      .insert(conversations)
+      .values({ listingId: l.id, buyerUserId: await userId(BUYER), sellerUserId: l.sellerUserId })
+      .returning();
+    const set = (tg: number) =>
+      app.inject({ method: "POST", url: "/internal/pending-reply", headers: internal(tg), payload: { conversationId: conv!.id } });
+    const take = (tg: number) => app.inject({ method: "POST", url: "/internal/pending-reply/take", headers: internal(tg) });
+    expect((await set(OTHER)).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/internal/pending-reply", headers: tma(SELLER), payload: { conversationId: conv!.id } })).statusCode).toBe(403);
+    expect((await set(SELLER)).statusCode).toBe(200);
+    expect((await take(SELLER)).json()).toEqual({ conversationId: conv!.id });
+    expect((await take(SELLER)).json()).toEqual({});
+    await set(BUYER);
+    await db.update(botPendingReplies).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(botPendingReplies.telegramUserId, BUYER));
+    expect((await take(BUYER)).json()).toEqual({ expired: true });
   });
 });

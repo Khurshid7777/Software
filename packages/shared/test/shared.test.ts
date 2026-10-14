@@ -126,7 +126,7 @@ describe("scoreRisk", () => {
 
 describe("i18n", () => {
   it("ru and uz have the same keys", () => {
-    expect(Object.keys(dictionaries.uz).sort()).toEqual(Object.keys(dictionaries.ru).sort());
+    expect(Object.keys(dictionaries.uz!).sort()).toEqual(Object.keys(dictionaries.ru!).sort());
   });
 
   it("interpolates params", () => {

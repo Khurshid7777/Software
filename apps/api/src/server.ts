@@ -33,6 +33,7 @@ const hourly = () =>
     const r = await listings.runExpiry();
     const staleOrders = await orders.expireStale();
     await queue.cleanup();
+    await app.services.catalog.cleanupPendingReplies();
     if (r.reminded || r.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
   }).catch((err) => app.log.error({ err }, "hourly job failed"));
 setTimeout(hourly, 30_000);

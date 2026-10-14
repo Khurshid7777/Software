@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { formatUzs, listingTitle, type OrderDto } from "@ishonch/shared";
+import { formatUzs, listingTitle, type OrderDto } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { useLang, useT } from "../i18n";
+import { confirmDialog } from "../dialogs";
 import { useLatest } from "../useLatest";
 
 interface Props {
@@ -148,7 +149,7 @@ function OrderCard({
             </button>
           )}
           {o.actions.includes("cancel") && (
-            <button className="chip" onClick={() => window.confirm(t("orders.cancel") + "?") && onAction(o.role === "seller" ? "decline" : "cancel")}>
+            <button className="chip" onClick={async () => (await confirmDialog(t("orders.cancel") + "?")) && onAction(o.role === "seller" ? "decline" : "cancel")}>
               ✖️ {t("orders.cancel")}
             </button>
           )}

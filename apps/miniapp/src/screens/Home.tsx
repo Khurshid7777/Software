@@ -1,4 +1,4 @@
-import type { Lang } from "@ishonch/shared";
+import type { Lang } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
 
 interface Props {

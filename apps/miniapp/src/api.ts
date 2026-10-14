@@ -23,7 +23,7 @@ import type {
   OrderDto,
   ReviewDto,
   SellerRating,
-} from "@ishonch/shared";
+} from "@ishonch/shared/client";
 
 export interface SavedSearch {
   id: number;
@@ -47,6 +47,8 @@ export function filtersToQuery(f: CatalogFilters, sort?: CatalogSort, offset = 0
 }
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
+/** Fired when the API rejects the launch data (expired initData): the app asks to reopen. */
+export const SESSION_EXPIRED_EVENT = "ishonch:session-expired";
 
 export interface Me {
   id: string;
@@ -123,6 +125,7 @@ export function createApi(initData: string | null) {
       headers: { ...(initData ? { authorization: `tma ${initData}` } : {}), ...init.headers },
     });
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401 && initData) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     if (!res.ok) throw new ApiError(res.status, body.error ?? "error", body.message ?? res.statusText, body.params);
     return body as T;
   }
@@ -212,12 +215,10 @@ export function createApi(initData: string | null) {
 
     // ---- staff: admin & operators ----
     adminMetrics: (days: number) => request<AdminMetrics>(`/admin/metrics?days=${days}`),
-    ordersCsv: async (days: number) => {
-      const res = await fetch(`${BASE}/admin/reports/orders.csv?days=${days}`, {
-        headers: initData ? { authorization: `tma ${initData}` } : {},
-      });
-      if (!res.ok) throw new ApiError(res.status, "error", res.statusText);
-      return res.blob();
+    /** Absolute signed link (5 minutes) that Telegram's downloader can fetch without our auth header. */
+    ordersCsvLink: async (days: number) => {
+      const { url } = await request<{ url: string }>("/admin/reports/orders.csv/link", json("POST", { days }));
+      return new URL(`${BASE}${url}`, window.location.href).href;
     },
     sendDigest: () => request<{ sent: number }>("/admin/digest", { method: "POST" }),
     moderationQueue: () => request<QueueItem[]>("/admin/moderation"),

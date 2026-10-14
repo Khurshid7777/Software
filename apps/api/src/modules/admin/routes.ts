@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { z } from "zod";
 import { desc, isNotNull } from "drizzle-orm";
@@ -42,22 +43,52 @@ export function adminRoutes(
   app: FastifyInstance,
   repo: Repo,
   requireAdmin: preHandlerHookHandler,
-  extra: { metrics: MetricsService; settingDefaults: AdminSettings; sendDigest: () => Promise<number> },
+  extra: { metrics: MetricsService; settingDefaults: AdminSettings; sendDigest: () => Promise<number>; linkSecret: string },
 ) {
+  /** Short-lived signed link: Telegram's downloadFile fetches the file itself, without our auth header. */
+  const sign = (days: number, exp: number) =>
+    createHmac("sha256", extra.linkSecret).update(`orders.csv:${days}:${exp}`).digest("base64url").slice(0, 32);
+  const validLink = (q: { days?: string; exp?: string; sig?: string }) => {
+    const exp = Number(q.exp);
+    if (!q.sig || !exp || exp < Date.now() / 1000) return false;
+    const expected = Buffer.from(sign(Number(q.days), exp));
+    const given = Buffer.from(q.sig);
+    return expected.length === given.length && timingSafeEqual(expected, given);
+  };
   const days = (v: unknown) => Math.min(365, Math.max(1, Math.round(Number(v) || 30)));
 
   app.get<{ Querystring: { days?: string } }>("/admin/metrics", { preHandler: requireAdmin }, (req) =>
     extra.metrics.overview(days(req.query.days)),
   );
 
-  app.get<{ Querystring: { days?: string } }>("/admin/reports/orders.csv", { preHandler: requireAdmin }, async (req, reply) => {
+  app.post<{ Body: { days?: number } }>("/admin/reports/orders.csv/link", { preHandler: requireAdmin }, async (req) => {
+    const n = days(req.body?.days);
+    const exp = Math.floor(Date.now() / 1000) + 300;
+    await repo.audit(req.user!, "report.orders_csv", null, { days: n });
+    return { url: `/admin/reports/orders.csv?days=${n}&exp=${exp}&sig=${sign(n, exp)}` };
+  });
+
+  app.get<{ Querystring: { days?: string; exp?: string; sig?: string } }>(
+    "/admin/reports/orders.csv",
+    {
+      // Either an admin's own request, or a valid signed link (5 minutes).
+      preHandler: async (req, reply) => {
+        if (req.query.sig) {
+          if (!validLink(req.query)) return reply.code(403).send({ error: "forbidden" });
+          return;
+        }
+        return (requireAdmin as unknown as (r: typeof req, p: typeof reply) => Promise<void>)(req, reply);
+      },
+    },
+    async (req, reply) => {
     const n = days(req.query.days);
     const csv = await extra.metrics.ordersCsv(n);
     return reply
       .header("content-type", "text/csv; charset=utf-8")
       .header("content-disposition", `attachment; filename="ishonch-orders-${n}d.csv"`)
       .send("\uFEFF" + csv); // BOM: Excel opens UTF-8 Cyrillic correctly
-  });
+    },
+  );
 
   app.post("/admin/digest", { preHandler: requireAdmin }, async () => ({ sent: await extra.sendDigest() }));
 

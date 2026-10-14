@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { TASHKENT_DISTRICTS, formatUzs, type AdminSettings, type CourierTariff, type District } from "@ishonch/shared";
+import { TASHKENT_DISTRICTS, formatUzs, type AdminSettings, type CourierTariff, type District } from "@ishonch/shared/client";
 import { ApiError, type AdminUser, type Api, type PriceRow } from "../../api";
+import { confirmDialog } from "../../dialogs";
 import { districtName } from "./labels";
 
 const errText = (e: unknown) => (e instanceof ApiError ? e.message : "Ошибка");
@@ -67,8 +68,8 @@ export function Users({ api }: { api: Api }) {
                 <button
                   className="secondary danger"
                   disabled={reason.trim().length < 3}
-                  onClick={() =>
-                    window.confirm("Заблокировать? Объявления уйдут в архив, открытые заказы отменятся.") &&
+                  onClick={async () =>
+                    (await confirmDialog("Заблокировать? Объявления уйдут в архив, открытые заказы отменятся.")) &&
                     act(() => api.ban(user.id, reason.trim()), "Заблокирован")
                   }
                 >
@@ -215,7 +216,7 @@ export function References({ api }: { api: Api }) {
                     <button
                       className="link danger"
                       aria-label="Удалить"
-                      onClick={() => window.confirm(`Удалить ${p.modelKey}?`) && api.deletePrice(p.id).then(load)}
+                      onClick={async () => (await confirmDialog(`Удалить ${p.modelKey}?`)) && api.deletePrice(p.id).then(load)}
                     >
                       ✕
                     </button>

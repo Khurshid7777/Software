@@ -7,7 +7,7 @@ import {
   type CatalogFilters,
   type CatalogItem,
   type CatalogSort,
-} from "@ishonch/shared";
+} from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
 import { ItemCard } from "../components/ItemCard";
 import { useT } from "../i18n";
@@ -16,9 +16,10 @@ interface Props {
   api: Api;
   initial?: CatalogFilters;
   onOpen: (id: string) => void;
+  onFiltersChange?: (f: CatalogFilters) => void;
 }
 
-export function Catalog({ api, initial, onOpen }: Props) {
+export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
   const t = useT();
   const [filters, setFilters] = useState<CatalogFilters>(initial ?? {});
   const [draft, setDraft] = useState<CatalogFilters>(initial ?? {});
@@ -51,6 +52,8 @@ export function Catalog({ api, initial, onOpen }: Props) {
     [api, filters, sort],
   );
   useEffect(() => void load(0), [load]);
+  // Remembered in the navigation stack: coming back from a listing restores the same search.
+  useEffect(() => onFiltersChange?.(filters), [filters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced text search.
   useEffect(() => {

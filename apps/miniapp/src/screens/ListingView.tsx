@@ -7,7 +7,7 @@ import {
   type CatalogItem,
   type ComplaintReason,
   type ListingDto,
-} from "@ishonch/shared";
+} from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { useLang, useT } from "../i18n";

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, sql, type SQL } from "drizzle-orm";
 import {
   canonicalQuery,
   canonicalWord,
@@ -21,6 +21,7 @@ import {
 import type { Repo } from "../../db/repo.js";
 import { startOfTashkentDay } from "../../db/repo.js";
 import {
+  botPendingReplies,
   conversationMessages,
   conversations,
   favorites,
@@ -416,6 +417,30 @@ export class CatalogService {
     }
     await this.relay(conv!.id, buyer, body);
     return { ok: true, conversationId: conv!.id };
+  }
+
+  // ---------- bot state: "the next text of this user is a reply" ----------
+  /** The bot's "Reply" button: remembered in the DB (shared by bot instances, survives restarts). */
+  async setPendingReply(user: User, conversationId: string, windowMs = 15 * 60_000) {
+    const [conv] = await this.db.select().from(conversations).where(eq(conversations.id, conversationId));
+    if (!conv || (conv.buyerUserId !== user.id && conv.sellerUserId !== user.id)) throw new CatalogRejected("not_found", 404);
+    const expiresAt = new Date(Date.now() + windowMs);
+    await this.db
+      .insert(botPendingReplies)
+      .values({ telegramUserId: user.telegramId, conversationId, expiresAt })
+      .onConflictDoUpdate({ target: botPendingReplies.telegramUserId, set: { conversationId, expiresAt } });
+    return { ok: true, expiresAt: expiresAt.toISOString() };
+  }
+
+  /** Takes (and clears) the pending reply: the conversation, "expired", or nothing pending. */
+  async takePendingReply(user: User): Promise<{ conversationId?: string; expired?: boolean }> {
+    const [row] = await this.db.delete(botPendingReplies).where(eq(botPendingReplies.telegramUserId, user.telegramId)).returning();
+    if (!row) return {};
+    return row.expiresAt > new Date() ? { conversationId: row.conversationId } : { expired: true };
+  }
+
+  async cleanupPendingReplies() {
+    await this.db.delete(botPendingReplies).where(lt(botPendingReplies.expiresAt, new Date(Date.now() - 24 * 3600_000)));
   }
 
   /** Stores a message and forwards it to the other side with a "Reply" button. Names are never revealed. */

@@ -192,6 +192,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       complaints_to_hide: DEFAULT_COMPLAINTS_TO_HIDE,
       listing_ai_per_day: LISTING_AI_PER_DAY,
     },
+    linkSecret: `${config.PHOTO_URL_SECRET || config.INTERNAL_API_TOKEN}:reports`,
     sendDigest: async () => {
       const link = await adminLink();
       return staff.admins(await metrics.digest(), link ? [[{ text: "Открыть админку", url: link }]] : []);
@@ -219,6 +220,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
 
   app.decorate("services", {
     queue,
+    catalog,
     listings: listingsSvc,
     orders: ordersSvc,
     trust,
@@ -232,6 +234,7 @@ declare module "fastify" {
   interface FastifyInstance {
     services: {
       queue: JobQueue;
+      catalog: CatalogService;
       listings: ListingService;
       orders: OrderService;
       trust: TrustService;

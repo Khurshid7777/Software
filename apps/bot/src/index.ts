@@ -1,3 +1,6 @@
+import { createServer } from "node:http";
+import { run } from "@grammyjs/runner";
+import { webhookCallback } from "grammy";
 import { ApiClient } from "./api.js";
 import { createBot } from "./bot.js";
 
@@ -12,7 +15,13 @@ const api = new ApiClient(
   process.env.INTERNAL_API_TOKEN ?? "dev-internal-token",
 );
 const miniAppUrl = process.env.MINIAPP_URL ?? "https://example.com";
+// Webhook mode when a public URL is set (production behind nginx); long polling otherwise (dev).
+const webhookUrl = process.env.BOT_WEBHOOK_URL ?? "";
+const webhookSecret = process.env.BOT_WEBHOOK_SECRET ?? "";
+const port = Number(process.env.BOT_PORT ?? 8081);
+
 const bot = createBot({ token, miniAppUrl }, api);
+const allowed_updates = ["message", "callback_query", "my_chat_member"] as const;
 
 await bot.init();
 await bot.api.setMyCommands([
@@ -25,13 +34,36 @@ await bot.api.setChatMenuButton({
   menu_button: { type: "web_app", text: "Ishonch", web_app: { url: miniAppUrl } },
 });
 
-// Finish checks already running, then stop polling.
+let stopUpdates: () => Promise<unknown>;
+if (webhookUrl) {
+  if (webhookSecret.length < 16) {
+    console.error("BOT_WEBHOOK_SECRET (16+ characters) is required with BOT_WEBHOOK_URL");
+    process.exit(1);
+  }
+  // Telegram signs each delivery with the secret token; grammY rejects requests without it.
+  const handle = webhookCallback(bot, "http", { secretToken: webhookSecret, timeoutMilliseconds: 9_000 });
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/health") return void res.end("ok");
+    if (req.method === "POST" && req.url === new URL(webhookUrl).pathname) return void handle(req, res);
+    res.statusCode = 404;
+    res.end();
+  });
+  server.listen(port);
+  await bot.api.setWebhook(webhookUrl, { secret_token: webhookSecret, allowed_updates: [...allowed_updates] });
+  stopUpdates = () => new Promise((r) => server.close(r));
+  console.log(`bot @${bot.botInfo.username}: webhook ${webhookUrl} (port ${port})`);
+} else {
+  await bot.api.deleteWebhook();
+  const runner = run(bot, { runner: { fetch: { allowed_updates: [...allowed_updates] } } });
+  stopUpdates = () => runner.stop();
+  console.log(`bot @${bot.botInfo.username}: long polling`);
+}
+
+// Stop receiving updates, finish checks already running, then exit.
 const stop = async () => {
-  await bot.stop();
+  await stopUpdates();
   await bot.idle();
   process.exit(0);
 };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
-console.log(`bot @${bot.botInfo.username} started`);
-await bot.start({ allowed_updates: ["message", "callback_query", "my_chat_member"] });

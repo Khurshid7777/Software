@@ -409,5 +409,7 @@
   "app.crashed": "Nimadir xato ketdi. Ilovani yangilang — ehtimol, yangi versiya chiqdi.",
   "app.reload": "Yangilash",
   "listing.message_limit": "Bu suhbatda xabarlar juda ko'p. Biroz kuting — suhbatdoshga javob berish uchun vaqt kerak.",
-  "order.err.too_many_attempts": "Bu mahsulotga bir kunda juda ko'p so'rov. Ertaga urinib ko'ring yoki sotuvchiga yozing."
+  "order.err.too_many_attempts": "Bu mahsulotga bir kunda juda ko'p so'rov. Ertaga urinib ko'ring yoki sotuvchiga yozing.",
+  "app.session_expired": "Seans eskirdi. Ilovani yoping va botdan qayta oching.",
+  "app.close": "Yopish"
 }

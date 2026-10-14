@@ -6,7 +6,7 @@ import {
   TASHKENT_DISTRICTS,
   formatUzs,
   type ListingDto,
-} from "@ishonch/shared";
+} from "@ishonch/shared/client";
 import { ApiError, apiUrl, compressImage, type Api, type ListingPatch } from "../api";
 import { useLang, useT } from "../i18n";
 

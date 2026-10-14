@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { ListingModeration } from "./schemas.js";
 import { DELIVERY_MODES, TASHKENT_DISTRICTS, type DeliveryMode, type District, type FeePayer } from "./listing.js";
 
 // ---------- delivery orders ----------
@@ -44,14 +44,6 @@ export function operatorNextStatuses(from: OrderStatus): OrderStatus[] {
 
 export const MAX_OPEN_ORDERS_PER_BUYER = 5;
 
-export const CreateOrderSchema = z.object({
-  listingId: z.string().uuid(),
-  mode: z.enum(DELIVERY_MODES),
-  district: z.enum(TASHKENT_DISTRICTS),
-  address: z.string().trim().min(5).max(300),
-  comment: z.string().trim().max(300).optional(),
-});
-export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
 
 // ---------- courier tariffs ----------
 
@@ -153,10 +145,6 @@ export interface OrderDto {
 
 // ---------- reviews ----------
 
-export const ReviewInputSchema = z.object({
-  rating: z.number().int().min(1).max(5),
-  text: z.string().trim().max(500).optional(),
-});
 
 export interface ReviewDto {
   id: number;
@@ -175,10 +163,6 @@ export interface SellerRating {
 export const COMPLAINT_REASONS = ["scam", "prohibited", "wrong_info", "duplicate", "sold", "offensive", "other"] as const;
 export type ComplaintReason = (typeof COMPLAINT_REASONS)[number];
 
-export const ComplaintInputSchema = z.object({
-  reason: z.enum(COMPLAINT_REASONS),
-  text: z.string().trim().max(500).optional(),
-});
 
 /** Distinct users with open complaints needed to hide a listing until an admin reviews it (setting `complaints_to_hide`). */
 export const DEFAULT_COMPLAINTS_TO_HIDE = 3;
@@ -200,18 +184,6 @@ export const MODERATION_REASONS = [
 ] as const;
 export type ModerationReason = (typeof MODERATION_REASONS)[number];
 
-export const ListingModerationSchema = z.object({
-  decision: z.enum(["approved", "needs_review", "rejected"]),
-  reasons: z.array(
-    z.object({
-      code: z.enum(MODERATION_REASONS),
-      note: z.string().describe("short explanation in Russian for the moderator"),
-    }),
-  ),
-  seller_message_ru: z.string().describe("one polite sentence for the seller if not approved, else empty"),
-  seller_message_uz: z.string().describe("the same in Uzbek (Latin), else empty"),
-});
-export type ListingModeration = z.infer<typeof ListingModerationSchema>;
 
 export type ModerationDecision = ListingModeration["decision"];
 
@@ -234,3 +206,4 @@ export const TEXT_DUPLICATE_SIMILARITY = 0.85;
 
 /** Days before expiry when the seller gets a "renew" reminder. */
 export const EXPIRY_REMINDER_DAYS = 3;
+

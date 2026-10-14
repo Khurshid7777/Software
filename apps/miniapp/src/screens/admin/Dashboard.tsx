@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { formatUzs, type AdminMetrics, type FunnelStep } from "@ishonch/shared";
+import { formatUzs, type AdminMetrics, type FunnelStep } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../../api";
+import { saveFile } from "../../dialogs";
 import { STEP_LABEL, FEATURE_LABEL, CANCEL_LABEL, MODE_LABEL } from "./labels";
 
 const PERIODS = [7, 30, 90] as const;
@@ -26,12 +27,8 @@ export function Dashboard({ api }: { api: Api }) {
   }, [api, days]);
 
   async function downloadCsv() {
-    const blob = await api.ordersCsv(days);
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `ishonch-orders-${days}d.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    // Telegram's own downloader on phones (a blob link does nothing in mobile webviews), the browser elsewhere.
+    await saveFile(await api.ordersCsvLink(days), `ishonch-orders-${days}d.csv`);
   }
 
   if (error) return <p className="error">{error}</p>;

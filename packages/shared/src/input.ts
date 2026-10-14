@@ -1,5 +1,5 @@
 import type { CheckCategory, Lang } from "./types.js";
-import { tList } from "./i18n.js";
+import { tList } from "./i18n-core.js";
 
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+|\b(?:olx\.uz|t\.me|instagram\.com|telegram\.me)\/\S*/gi;
 

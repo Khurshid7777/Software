@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, operatorNextStatuses, type OrderStatus } from "@ishonch/shared";
+import { formatUzs, operatorNextStatuses, type OrderStatus } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
+import { confirmDialog } from "../../dialogs";
 import { MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
 function useLoad<T>(load: () => Promise<T>) {
@@ -117,7 +118,7 @@ export function OperatorOrders({ api }: { api: Api }) {
   const [courier, setCourier] = useState<Record<string, string>>({});
 
   async function move(o: OperatorOrder, s: OrderStatus) {
-    if (s === "cancelled" && !window.confirm("Отменить заказ?")) return;
+    if (s === "cancelled" && !(await confirmDialog("Отменить заказ?"))) return;
     try {
       await api.operatorStatus(o.id, s, s === "courier_assigned" && courier[o.id] ? { courierName: courier[o.id] } : {});
       reload();

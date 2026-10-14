@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CheckResult } from "@ishonch/shared";
+import type { CheckResult } from "@ishonch/shared/client";
 import { ApiError, compressImage, type Api } from "../api";
 import { CheckCard } from "../components/CheckCard";
 import { useLang, useT } from "../i18n";

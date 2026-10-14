@@ -10,3 +10,4 @@ export * from "./catalog.js";
 export * from "./search.js";
 export * from "./delivery.js";
 export * from "./admin.js";
+export * from "./schemas.js";

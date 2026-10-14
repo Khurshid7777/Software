@@ -1,5 +1,5 @@
 // Staff UI is Russian-only, like the operators' and moderators' bot cards.
-import { t, type District } from "@ishonch/shared";
+import { t, type District } from "@ishonch/shared/client";
 
 export const districtName = (d: string | null) => (d ? t("ru", `district.${d as District}`) : "—");
 

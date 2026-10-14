@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { listingPlainText, type ListingDto, type ModerationDecision } from "@ishonch/shared";
+import { listingPlainText, type ListingDto, type ModerationDecision } from "@ishonch/shared/client";
 import { ApiError, compressImage, type Api, type ShopInfo } from "../api";
 import { ListingEditor } from "../components/ListingEditor";
 import { useRecorder } from "../components/useRecorder";

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { EXPIRY_REMINDER_DAYS, formatUzs, listingPlainText, listingTitle, type ListingDto, type ListingStatus } from "@ishonch/shared";
+import { EXPIRY_REMINDER_DAYS, formatUzs, listingPlainText, listingTitle, type ListingDto, type ListingStatus } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { useLang, useT } from "../i18n";
 import { useLatest } from "../useLatest";

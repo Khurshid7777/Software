@@ -153,6 +153,13 @@ describe.skipIf(!reachable)("admin: metrics, reports, settings, digest (integrat
     expect(row[5]).toBe("Метрики iPhone 13");
     expect(row[6]).toBe("5000000");
     expect(row.at(-1)).toBe("yes");
+
+    // Signed link for Telegram's downloader: works without auth, only unexpired and untampered.
+    const { url } = (await app.inject({ method: "POST", url: "/admin/reports/orders.csv/link", headers: tma(ADMIN), payload: { days: 7 } })).json();
+    expect((await app.inject({ url })).body).toContain(o.id);
+    expect((await app.inject({ url: url.replace("days=7", "days=30") })).statusCode).toBe(403);
+    expect((await app.inject({ url: url.replace(/exp=\d+/, "exp=1") })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/admin/reports/orders.csv/link", headers: tma(BUYER), payload: {} })).statusCode).toBe(403);
   });
 
   it("settings: defaults, validated updates that take effect, unknown keys refused", async () => {

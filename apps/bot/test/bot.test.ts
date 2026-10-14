@@ -81,6 +81,17 @@ class FakeApi {
     this.calls.push(`relay:${conv}:${text}`);
     return {};
   }
+  pending = new Map<number, { conversationId: string; expired?: boolean }>();
+  async setPendingReply(u: { id: number }, conversationId: string) {
+    this.calls.push(`pending:${u.id}:${conversationId}`);
+    this.pending.set(u.id, { conversationId });
+    return {};
+  }
+  async takePendingReply(u: { id: number }) {
+    const p = this.pending.get(u.id);
+    this.pending.delete(u.id);
+    return p ? (p.expired ? { expired: true } : { conversationId: p.conversationId }) : {};
+  }
   async unlinkChannel(_u: unknown, id: number) {
     this.calls.push(`unlink:${id}`);
     return { title: null };
@@ -377,5 +388,23 @@ describe("review fixes", () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(callback("stale:button"));
     expect(sent.some((s) => s.method === "answerCallbackQuery")).toBe(true);
+  });
+});
+
+describe("Reply button state lives in the API", () => {
+  it("Reply → next text is relayed, not checked; an expired window says so", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`reply:${ORDER}`));
+    expect(api.calls).toContain(`pending:5:${ORDER}`);
+    await bot.handleUpdate(msg("Да, ещё продаю"));
+    await bot.idle();
+    expect(api.calls).toContain(`relay:${ORDER}:Да, ещё продаю`);
+    expect(api.calls.some((c) => c.startsWith("checkText"))).toBe(false);
+
+    api.pending.set(5, { conversationId: ORDER, expired: true });
+    await bot.handleUpdate(msg("поздний ответ"));
+    await bot.idle();
+    expect(String(sent.at(-1)!.payload.text)).toContain("истекло");
+    expect(api.calls.some((c) => c.startsWith("checkText:поздний"))).toBe(false);
   });
 });

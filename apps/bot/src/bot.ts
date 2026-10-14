@@ -1,3 +1,4 @@
+import { sequentialize } from "@grammyjs/runner";
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { Message } from "grammy/types";
 import { normalizeLang, t, type CheckResult, type Lang } from "@ishonch/shared";
@@ -12,8 +13,6 @@ export interface BotConfig {
 }
 
 const MAX_IMAGES = 5;
-/** How long the bot waits for the reply text after "Reply" was pressed. */
-export const REPLY_WINDOW_MS = 15 * 60_000;
 const ALBUM_WAIT_MS = 1200;
 
 function tgUser(ctx: Context): TgUser | null {
@@ -22,6 +21,9 @@ function tgUser(ctx: Context): TgUser | null {
 
 export function createBot(cfg: BotConfig, api: ApiClient) {
   const bot = new Bot(cfg.token);
+
+  // The runner processes updates concurrently; within one chat they stay in order ("Reply", then the text).
+  bot.use(sequentialize((ctx) => ctx.chat?.id.toString() ?? ctx.from?.id.toString()));
 
   // Long AI work (checks take up to a minute) runs in the background: grammY handles updates one by one,
   // so awaiting it would freeze every other user's messages and button presses.
@@ -171,23 +173,20 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   });
 
   // ---- masked buyer ↔ seller chat: "Reply" button → next text message is relayed ----
-  const pendingReplies = new Map<number, { conversationId: string; at: number }>();
-
-  bot.callbackQuery(/^reply:([0-9a-f-]{36})$/, async (ctx) => {
-    const user = tgUser(ctx);
-    if (!user) return;
-    pendingReplies.set(user.id, { conversationId: ctx.match[1]!, at: Date.now() });
-    const lang = await langOf(user);
-    await ctx.answerCallbackQuery();
-    await ctx.reply(t(lang, "bot.write_reply"), { reply_markup: { force_reply: true } });
-  });
+  // The pending state lives in the API's database: any bot instance (and a restarted one) sees it.
+  bot.callbackQuery(/^reply:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.setPendingReply(user, ctx.match[1]!);
+      await ctx.reply(t(lang, "bot.write_reply"), { reply_markup: { force_reply: true } });
+      return "";
+    }),
+  );
 
   async function relayReply(ctx: Context, user: TgUser, text: string): Promise<boolean> {
-    const pending = pendingReplies.get(user.id);
-    if (!pending) return false;
-    pendingReplies.delete(user.id);
+    const pending = await api.takePendingReply(user).catch(() => ({}) as { conversationId?: string; expired?: boolean });
+    if (!pending.conversationId && !pending.expired) return false;
     const lang = await langOf(user);
-    if (Date.now() - pending.at > REPLY_WINDOW_MS) {
+    if (!pending.conversationId) {
       // Not a listing to check (that would spend a daily check): the reply window simply closed.
       await ctx.reply(t(lang, "bot.reply_expired"));
       return true;
