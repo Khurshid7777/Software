@@ -18,8 +18,8 @@ services:
 
   # Photo storage for listings (module D).
   minio:
-    # Pin a tested release tag before going live (":latest" can change under you on rebuild).
-    image: minio/minio:latest
+    # Set MINIO_IMAGE to a tested release tag in .env before going live (":latest" changes on rebuild).
+    image: ${MINIO_IMAGE:-minio/minio:latest}
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -29,7 +29,7 @@ services:
     ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
 
   minio-init:
-    image: minio/mc:latest
+    image: ${MINIO_MC_IMAGE:-minio/mc:latest}
     depends_on: [minio]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ishonch}
@@ -67,6 +67,8 @@ services:
     env_file: .env
     environment:
       API_URL: http://api:3000
+    # Webhook mode (BOT_WEBHOOK_URL set): nginx in `miniapp` forwards /tg-webhook here.
+    expose: ["8081"]
     depends_on:
       api: { condition: service_healthy }
 

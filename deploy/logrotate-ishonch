@@ -1,0 +1,13 @@
+# Host log rotation for the API file log (docker-compose mounts ./logs into the api container).
+# Install: sudo cp deploy/logrotate-ishonch /etc/logrotate.d/ishonch && sudo sed -i "s#/opt/ishonch#$PWD#" /etc/logrotate.d/ishonch
+# copytruncate: pino keeps its file handle open, so the file is copied and truncated in place.
+/opt/ishonch/logs/*.log {
+  daily
+  rotate 14
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+  maxsize 100M
+}
