@@ -114,6 +114,8 @@ export interface ListingServiceDeps {
   codPlatformEnabled: boolean;
   /** A listing left sale (sold, archived, hidden, expired): open "new" delivery requests are closed. */
   onUnavailable?: (listingId: string, reason: string) => Promise<unknown>;
+  /** Background jobs (channel posts, saved-search alerts). Without it they run inside the request. */
+  enqueue?: (kind: string, payload: Record<string, unknown>) => Promise<void>;
   /** Hook for saved-search alerts (module A). Failures never block publication. */
   onPublished?: (listingId: string) => Promise<unknown>;
 }
@@ -412,10 +414,38 @@ export class ListingService {
       .where(and(eq(listings.id, id), inArray(listings.status, from)))
       .returning({ id: listings.id });
     if (!updated.length) throw new ListingRejected("bad_state", 409);
-    const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
-    const posted = seller ? await this.postToChannels(seller, id, channelIds) : [];
-    await this.d.onPublished?.(id).catch((err) => console.error("onPublished failed", err));
-    return posted;
+    // Channel posts and subscriber alerts are slow (Telegram, many subscribers): they leave the request.
+    const own = channelIds.length
+      ? await this.db.select({ id: channels.id }).from(channels).where(and(eq(channels.userId, l.sellerUserId), inArray(channels.id, channelIds)))
+      : [];
+    if (own.length) await this.schedule("channel_posts", { listingId: id, channelIds: own.map((c) => c.id), since: now.toISOString() });
+    await this.schedule("saved_search_alerts", { listingId: id });
+    return own;
+  }
+
+  private async schedule(kind: string, payload: Record<string, unknown>) {
+    if (this.d.enqueue) return this.d.enqueue(kind, payload);
+    await this.runJob(kind, payload).catch((err) => console.error(`${kind} failed`, err));
+  }
+
+  /** Job handlers (also used directly when there is no queue). */
+  async runJob(kind: string, payload: Record<string, unknown>) {
+    if (kind === "saved_search_alerts") return this.d.onPublished?.(String(payload.listingId));
+    if (kind === "channel_posts") {
+      const id = String(payload.listingId);
+      const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
+      if (!l || l.status !== "active") return; // withdrawn meanwhile: nothing to advertise
+      const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
+      if (!seller) return;
+      // On a retry, skip channels that already got this publication's post (no duplicates in the channel).
+      const since = String(payload.since ?? "");
+      const done = new Set(
+        ((l.channelPosts as Array<{ channelId: number; at: string }>) ?? []).filter((p) => p.at >= since).map((p) => p.channelId),
+      );
+      const todo = (payload.channelIds as number[]).filter((c) => !done.has(c));
+      const { failed } = await this.postToChannels(seller, id, todo);
+      if (failed > 0) throw new Error(`${failed} channel post(s) failed`); // the queue retries the rest
+    }
   }
 
   /** needs_review → pending (moderators are asked), rejected → rejected (the seller is told why). */
@@ -476,12 +506,12 @@ export class ListingService {
   }
 
   private async postToChannels(user: User, id: string, channelIds: number[]) {
-    if (!this.d.publisher || channelIds.length === 0) return [];
+    if (!this.d.publisher || channelIds.length === 0) return { posted: [], failed: 0 };
     const own = await this.db
       .select()
       .from(channels)
       .where(and(eq(channels.userId, user.id), inArray(channels.id, channelIds)));
-    if (own.length === 0) return [];
+    if (own.length === 0) return { posted: [], failed: 0 };
 
     const dto = await this.dto(id, user.id);
     const lang = user.language as Lang;
@@ -526,7 +556,7 @@ export class ListingService {
         .set({ channelPosts: sql`${listings.channelPosts} || ${JSON.stringify(posted)}::jsonb` })
         .where(eq(listings.id, id));
     }
-    return posted;
+    return { posted, failed: own.length - posted.length };
   }
 
   // ---------- management ----------

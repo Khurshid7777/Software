@@ -40,7 +40,8 @@ export type OrderError =
   | "already_ordered"
   | "bad_state"
   | "forbidden"
-  | "review_exists";
+  | "review_exists"
+  | "too_many_attempts";
 
 export class OrderRejected extends Error {
   constructor(
@@ -132,6 +133,14 @@ export class OrderService {
       .where(and(eq(orders.buyerUserId, buyer.id), inArray(orders.status, OPEN_ORDER_STATUSES)));
     if (open.some((o) => o.listingId === l.id)) throw new OrderRejected("already_ordered", 409);
     if (open.length >= MAX_OPEN_ORDERS_PER_BUYER) throw new OrderRejected("open_orders_limit", 429);
+    // Order → cancel → order again sends the seller a DM each time: at most 3 requests per item per day.
+    const [{ recent }] = (await this.db
+      .select({ recent: count() })
+      .from(orders)
+      .where(and(eq(orders.buyerUserId, buyer.id), eq(orders.listingId, l.id), gt(orders.createdAt, new Date(Date.now() - 24 * 3600_000))))) as [
+      { recent: number },
+    ];
+    if (recent >= 3) throw new OrderRejected("too_many_attempts", 429);
 
     const { modes: _m, ...quote } = await this.quote(l.id, input.district, input.mode);
     let order: Order;

@@ -7,6 +7,7 @@ export const AdminSettingsSchema = z
     assistant_per_day: z.number().int().min(1).max(200),
     usd_rate: z.number().int().min(1000).max(100_000),
     ai_monthly_limit_usd: z.number().min(1).max(10_000),
+    ai_strong_monthly_limit_usd: z.number().min(0).max(10_000),
     complaints_to_hide: z.number().int().min(1).max(20),
     listing_ai_per_day: z.number().int().min(1).max(500),
   })

@@ -40,11 +40,20 @@ export const PUBLIC_STATUSES = ["active", "reserved", "sold"];
 export const MAX_NEW_CONVERSATIONS_PER_DAY = 20;
 export const MAX_SEARCH_ALERTS_PER_DAY = 3;
 export const MAX_SAVED_SEARCHES = 20;
+/** Messages one participant may send in one conversation per hour (the other side gets a DM for each). */
+export const MAX_MESSAGES_PER_HOUR = 30;
 const DAY = 24 * 3600_000;
 
 export class CatalogRejected extends Error {
   constructor(
-    public code: "not_found" | "own_listing" | "contact_limit" | "seller_unreachable" | "bad_request" | "too_many_searches",
+    public code:
+      | "not_found"
+      | "own_listing"
+      | "contact_limit"
+      | "seller_unreachable"
+      | "bad_request"
+      | "too_many_searches"
+      | "message_limit",
     public status: number,
   ) {
     super(code);
@@ -135,7 +144,7 @@ export class CatalogService {
           )
         : sql`true`;
       c.push(sql`("listings"."search_vector" @@ ${tsQuery(q)}
-        or (word_similarity(${canon}, ${title}) >= 0.4 and ${numbersMatch}))`);
+        or (${canon} <% ${title} and ${numbersMatch}))`);
     }
     return c;
   }
@@ -243,7 +252,7 @@ export class CatalogService {
       .where(
         sql`${listings.status} in ('active', 'sold') and ${listings.price} > 0
             and ${listings.publishedAt} > now() - interval '90 days'
-            and similarity(coalesce(${listings.attributes}->>'modelKey', ''), ${modelKey}) >= 0.4`,
+            and coalesce(${listings.attributes}->>'modelKey', '') % ${modelKey}`,
       )
       .limit(200);
     const prices = rows
@@ -422,10 +431,15 @@ export class CatalogService {
     // Banned users neither receive nor send through the masked chat (old conversations included).
     if (!recipient || !l || recipient.bannedAt) throw new CatalogRejected("not_found", 404);
 
-    const [{ n }] = (await this.db
-      .select({ n: count() })
+    const [{ n, mineLastHour }] = (await this.db
+      .select({
+        n: count(),
+        mineLastHour: sql<number>`count(*) filter (where ${conversationMessages.senderUserId} = ${sender.id}
+          and ${conversationMessages.createdAt} > now() - interval '1 hour')::int`,
+      })
       .from(conversationMessages)
-      .where(eq(conversationMessages.conversationId, conversationId))) as [{ n: number }];
+      .where(eq(conversationMessages.conversationId, conversationId))) as [{ n: number; mineLastHour: number }];
+    if (mineLastHour >= MAX_MESSAGES_PER_HOUR) throw new CatalogRejected("message_limit", 429);
     await this.db.insert(conversationMessages).values({ conversationId, senderUserId: sender.id, text: text.slice(0, 1000) });
     await this.db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conversationId));
     if (fromBuyer && n === 0) await this.repo.event(sender.id, "buyer_contacted_seller", { listingId: l.id });

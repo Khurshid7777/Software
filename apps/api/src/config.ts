@@ -24,6 +24,8 @@ const EnvSchema = z.object({
   AI_MODEL_FAST: z.string().default("claude-haiku-5-5"),
   AI_MODEL_STRONG: z.string().default("claude-opus-5-5"),
   AI_MONTHLY_LIMIT_USD: z.coerce.number().default(50),
+  // Part of the monthly limit the strong model (buyer assistant) may use.
+  AI_STRONG_MONTHLY_LIMIT_USD: z.coerce.number().default(20),
   CHECKS_PER_DAY: z.coerce.number().default(5),
   ASSISTANT_PER_DAY: z.coerce.number().default(10),
   USD_RATE: z.coerce.number().default(12800),
@@ -43,7 +45,15 @@ const EnvSchema = z.object({
     .string()
     .default("true")
     .transform((v) => v !== "false"),
-  INIT_DATA_MAX_AGE_SEC: z.coerce.number().default(24 * 3600),
+  // How long a Mini App launch stays valid; a leaked initData can be replayed only within this window.
+  INIT_DATA_MAX_AGE_SEC: z.coerce.number().default(4 * 3600),
+  // Per-user request limits (off in tests unless set explicitly).
+  RATE_LIMITS: z.enum(["on", "off"]).optional(),
+  // Behind nginx: take the client IP from X-Forwarded-For.
+  TRUST_PROXY: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false"),
   CORS_ORIGIN: z.string().default("*"),
   LOG_FILE: z.string().optional(),
   // Photo storage: "s3" (MinIO) in production, "fs" for local development and tests.

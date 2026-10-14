@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@grammyjs/runner": "^2.0.3",
     "@ishonch/shared": "workspace:*",
     "grammy": "^1.46.0",
     "tsx": "^4.23.15"

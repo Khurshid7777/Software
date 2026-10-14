@@ -248,6 +248,7 @@ const SETTING_LABEL: Record<keyof AdminSettings, string> = {
   assistant_per_day: "Запросов к AI-помощнику в день",
   usd_rate: "Курс USD, сум",
   ai_monthly_limit_usd: "Лимит расходов на AI в месяц, $",
+  ai_strong_monthly_limit_usd: "Из них на AI-помощника (сильная модель), $",
   complaints_to_hide: "Жалоб от разных людей, чтобы скрыть объявление",
   listing_ai_per_day: "AI-черновиков и генераций текста в день на продавца",
 };

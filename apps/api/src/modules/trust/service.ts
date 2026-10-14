@@ -179,6 +179,7 @@ export class TrustService {
       .where(and(eq(complaints.listingId, listingId), isNull(complaints.resolvedAt)));
     await this.d.listings.notifySeller(l, decision === "approve" ? "moderation.approved" : "moderation.rejected", decision === "reject" ? record : null);
     await this.d.repo.event(admin.id, "moderation_decision", { listingId, decision, reason: code });
+    await this.d.repo.audit(admin, `moderation.${decision}`, listingId, { reason: code });
     return { ok: true, status: decision === "approve" ? "active" : "rejected", title: l.titleRu || l.titleUz };
   }
 
@@ -195,6 +196,7 @@ export class TrustService {
       .returning({ id: listings.id });
     await this.d.onBanned?.(userId);
     await this.d.repo.event(admin.id, "user_banned", { userId, listings: hidden.length });
+    await this.d.repo.audit(admin, "user.ban", userId, { reason, listings: hidden.length });
     return { ok: true, hiddenListings: hidden.length };
   }
 
@@ -211,6 +213,7 @@ export class TrustService {
       .set({ moderationReason: null })
       .where(and(eq(listings.sellerUserId, userId), eq(listings.moderationReason, "banned")));
     await this.d.repo.event(admin.id, "user_unbanned", { userId });
+    await this.d.repo.audit(admin, "user.unban", userId);
     return { ok: true };
   }
 

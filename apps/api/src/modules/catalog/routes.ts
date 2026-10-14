@@ -16,6 +16,7 @@ import { ListingRejected } from "../listings/service.js";
 
 const MESSAGES: Record<string, string> = {
   contact_limit: "listing.contact_limit",
+  message_limit: "listing.message_limit",
   not_found: "listing.not_found",
   own_listing: "listing.own",
   seller_unreachable: "bot.reply_failed",

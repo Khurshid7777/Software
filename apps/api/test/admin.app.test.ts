@@ -157,7 +157,7 @@ describe.skipIf(!reachable)("admin: metrics, reports, settings, digest (integrat
 
   it("settings: defaults, validated updates that take effect, unknown keys refused", async () => {
     const s = (await app.inject({ url: "/admin/settings", headers: tma(ADMIN) })).json();
-    expect(Object.keys(s).sort()).toEqual(["ai_monthly_limit_usd", "assistant_per_day", "checks_per_day", "complaints_to_hide", "listing_ai_per_day", "usd_rate"]);
+    expect(Object.keys(s).sort()).toEqual(["ai_monthly_limit_usd", "ai_strong_monthly_limit_usd", "assistant_per_day", "checks_per_day", "complaints_to_hide", "listing_ai_per_day", "usd_rate"]);
 
     const bad = await app.inject({ method: "PUT", url: "/admin/settings", headers: tma(ADMIN), payload: { checks_per_day: 0 } });
     expect(bad.statusCode).toBe(400);

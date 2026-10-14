@@ -221,6 +221,12 @@ export function listingRoutes(
   app.post<{ Params: { id: string }; Body: { verified?: boolean } }>(
     "/admin/shops/:id/verify",
     { preHandler: auth.requireAdmin },
-    async (req, reply) => (await shopsSvc.verify(req.params.id, req.body?.verified !== false)) ?? reply.code(404).send({ error: "not_found" }),
+    async (req, reply) => {
+      const verified = req.body?.verified !== false;
+      const shop = await shopsSvc.verify(req.params.id, verified);
+      if (!shop) return reply.code(404).send({ error: "not_found" });
+      await repo.audit(req.user!, verified ? "shop.verify" : "shop.unverify", req.params.id);
+      return shop;
+    },
   );
 }

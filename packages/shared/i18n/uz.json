@@ -407,5 +407,7 @@
   "sell.mic_unavailable": "Mikrofonga ruxsat yo'q. Uni Telegram sozlamalarida yoqing yoki mahsulotni matn bilan tasvirlang.",
   "phone.timeout": "Raqam hali kelmadi. Kontaktni botga yuborganingizni tekshiring va yana bosing.",
   "app.crashed": "Nimadir xato ketdi. Ilovani yangilang — ehtimol, yangi versiya chiqdi.",
-  "app.reload": "Yangilash"
+  "app.reload": "Yangilash",
+  "listing.message_limit": "Bu suhbatda xabarlar juda ko'p. Biroz kuting — suhbatdoshga javob berish uchun vaqt kerak.",
+  "order.err.too_many_attempts": "Bu mahsulotga bir kunda juda ko'p so'rov. Ertaga urinib ko'ring yoki sotuvchiga yozing."
 }

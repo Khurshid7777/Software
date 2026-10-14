@@ -392,6 +392,62 @@ export const complaints = pgTable(
   ],
 );
 
+/**
+ * Background jobs (saved-search alerts, channel posts): a table queue polled with FOR UPDATE SKIP LOCKED,
+ * so any number of API instances share the work and a crashed worker's job is retried after `lockedUntil`.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastError: text("last_error"),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("jobs_due_idx").on(t.runAt).where(sql`${t.doneAt} is null`)],
+);
+
+/** Running AI spend per calendar month (UTC) and model tier; incremented atomically after each call. */
+export const aiBudget = pgTable(
+  "ai_budget",
+  {
+    month: text("month").notNull(),
+    tier: text("tier").notNull(),
+    spentUsd: numeric("spent_usd", { precision: 12, scale: 6, mode: "number" }).notNull().default(0),
+    calls: integer("calls").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.month, t.tier] })],
+);
+
+/** Who did what in the admin panel and staff chats (moderation, bans, settings, tariffs, prices). */
+export const adminAudit = pgTable(
+  "admin_audit",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorTelegramId: bigint("actor_telegram_id", { mode: "number" }),
+    action: text("action").notNull(),
+    target: text("target"),
+    details: jsonb("details").notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [index("admin_audit_created_idx").on(t.createdAt)],
+);
+
+/** Bot state "the next text of this user is a reply in conversation X" (shared by bot instances, survives restarts). */
+export const botPendingReplies = pgTable("bot_pending_replies", {
+  telegramUserId: bigint("telegram_user_id", { mode: "number" }).primaryKey(),
+  conversationId: uuid("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type Listing = typeof listings.$inferSelect;

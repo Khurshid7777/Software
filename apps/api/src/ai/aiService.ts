@@ -19,9 +19,13 @@ export interface AiServiceDeps {
   client: Pick<Anthropic, "messages">;
   models: { fast: string; strong: string };
   recordUsage: (u: AiUsageRecord) => Promise<void>;
-  /** Spend in the current calendar month, USD. */
-  monthlySpend: () => Promise<number>;
+  /** Running spend this calendar month, USD, per model tier (an atomic counter, not a SUM over the log). */
+  monthlySpend: () => Promise<{ fast: number; strong: number }>;
+  /** Adds a call's cost to the running counter. */
+  addSpend?: (tier: "fast" | "strong", usd: number) => Promise<void>;
   monthlyLimitUsd: () => Promise<number>;
+  /** Cap for the strong model inside the total, so the assistant cannot starve checks and moderation. */
+  strongLimitUsd?: () => Promise<number>;
   logger?: { warn: (obj: object, msg: string) => void };
 }
 
@@ -55,13 +59,19 @@ export class AiService {
   constructor(private deps: AiServiceDeps) {}
 
   async structured<S extends z.ZodType>(call: StructuredCall<S>): Promise<StructuredResult<z.infer<S>>> {
-    const [spent, limit] = await Promise.all([this.deps.monthlySpend(), this.deps.monthlyLimitUsd()]);
+    const prompt = loadPrompt(call.promptId, call.promptVersion);
+    const [byTier, limit, strongLimit] = await Promise.all([
+      this.deps.monthlySpend(),
+      this.deps.monthlyLimitUsd(),
+      this.deps.strongLimitUsd?.() ?? Promise.resolve(Infinity),
+    ]);
+    const spent = byTier.fast + byTier.strong;
     if (spent >= limit) throw new AiLimitExceededError(spent, limit);
+    if (prompt.model === "strong" && byTier.strong >= strongLimit) throw new AiLimitExceededError(byTier.strong, strongLimit);
     if (spent >= limit * 0.8) {
       this.deps.logger?.warn({ spent, limit }, "AI spend is above 80% of the monthly limit");
     }
 
-    const prompt = loadPrompt(call.promptId, call.promptVersion);
     const model = this.deps.models[prompt.model];
     const started = Date.now();
 
@@ -84,6 +94,7 @@ export class AiService {
       requestId: response.id,
     };
     await this.deps.recordUsage(usage);
+    await this.deps.addSpend?.(prompt.model, usage.costUsd);
 
     if (response.stop_reason === "refusal" || response.stop_reason === "max_tokens" || !response.parsed_output) {
       throw new AiOutputError(`No valid output (stop_reason=${response.stop_reason})`);

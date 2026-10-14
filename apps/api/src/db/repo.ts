@@ -11,7 +11,7 @@ import {
   type RiskRules,
 } from "@ishonch/shared";
 import type { Db } from "./client.js";
-import { aiUsage, checks, events, priceReference, settings, users, type User } from "./schema.js";
+import { adminAudit, aiBudget, aiUsage, checks, events, priceReference, settings, users, type User } from "./schema.js";
 import type { AiUsageRecord } from "../ai/aiService.js";
 
 /** Tashkent is UTC+5 with no DST; "today" for limits is a Tashkent calendar day. */
@@ -108,6 +108,24 @@ export class Repo {
     await this.db.insert(aiUsage).values(u);
   }
 
+  /** Running monthly counter (UTC month), by model tier. */
+  async aiBudget(now = new Date()): Promise<{ fast: number; strong: number }> {
+    const rows = await this.db.select().from(aiBudget).where(eq(aiBudget.month, now.toISOString().slice(0, 7)));
+    const out = { fast: 0, strong: 0 };
+    for (const r of rows) if (r.tier === "fast" || r.tier === "strong") out[r.tier] = Number(r.spentUsd);
+    return out;
+  }
+
+  async addAiSpend(tier: "fast" | "strong", usd: number, now = new Date()) {
+    await this.db
+      .insert(aiBudget)
+      .values({ month: now.toISOString().slice(0, 7), tier, spentUsd: usd, calls: 1 })
+      .onConflictDoUpdate({
+        target: [aiBudget.month, aiBudget.tier],
+        set: { spentUsd: sql`${aiBudget.spentUsd} + ${usd}`, calls: sql`${aiBudget.calls} + 1` },
+      });
+  }
+
   async aiSpendSince(since: Date): Promise<number> {
     const [row] = await this.db
       .select({ total: sql<string>`coalesce(sum(${aiUsage.costUsd}), 0)` })
@@ -131,7 +149,7 @@ export class Repo {
         max: priceReference.priceMax,
       })
       .from(priceReference)
-      .where(sql`similarity(${priceReference.modelKey}, ${key}) >= 0.4`)
+      .where(sql`${priceReference.modelKey} % ${key}`)
       .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
       .limit(5);
     const row = rows.find((r) => sameModel(r.modelKey, key));
@@ -213,6 +231,21 @@ export class Repo {
   /** Gives a reservation back (the AI was unavailable — not the user's fault). */
   async refundDaily(reservationId: number | null) {
     if (reservationId != null) await this.db.delete(events).where(eq(events.id, reservationId));
+  }
+
+  // ---- staff audit log ----
+  async audit(actor: Pick<User, "id" | "telegramId"> | null, action: string, target?: string | null, details: Record<string, unknown> = {}) {
+    await this.db.insert(adminAudit).values({
+      actorUserId: actor?.id ?? null,
+      actorTelegramId: actor?.telegramId ?? null,
+      action,
+      target: target ?? null,
+      details,
+    });
+  }
+
+  listAudit(limit = 200) {
+    return this.db.select().from(adminAudit).orderBy(desc(adminAudit.id)).limit(Math.min(limit, 1000));
   }
 
   // ---- analytics ----

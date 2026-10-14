@@ -5,7 +5,7 @@ import Fastify from "fastify";
 import type { Config } from "./config.js";
 import { AiService } from "./ai/aiService.js";
 import { makeAuth } from "./auth/plugin.js";
-import { Repo, startOfMonthUtc } from "./db/repo.js";
+import { Repo } from "./db/repo.js";
 import type { Db } from "./db/client.js";
 import { adminRoutes } from "./modules/admin/routes.js";
 import { checkRoutes, multipartLimits } from "./modules/checks/routes.js";
@@ -29,6 +29,8 @@ import { trustRoutes } from "./modules/trust/routes.js";
 import { TrustService } from "./modules/trust/service.js";
 import { StaffNotifier } from "./telegram/staff.js";
 import { maybeSendDigest } from "./jobs.js";
+import { JobQueue } from "./jobs/queue.js";
+import { registerRateLimits } from "./rateLimit.js";
 import { DEFAULT_COMPLAINTS_TO_HIDE } from "@ishonch/shared";
 
 export interface AppDeps {
@@ -40,6 +42,8 @@ export interface AppDeps {
   stt?: SpeechToText;
   publisher?: (ChannelPublisher & Notifier) | null;
   courier?: CourierProvider;
+  /** true in server.ts: jobs go to the queue and a worker runs them. Tests and dev run them inline. */
+  backgroundJobs?: boolean;
 }
 
 export function createStorage(config: Config): Storage {
@@ -52,7 +56,7 @@ export function createStorage(config: Config): Storage {
     : new FsStorage(config.STORAGE_DIR);
 }
 
-export async function buildApp({ config, db, ai, storage, stt, publisher, courier }: AppDeps) {
+export async function buildApp({ config, db, ai, storage, stt, publisher, courier, backgroundJobs = false }: AppDeps) {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
@@ -70,7 +74,9 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       redact: ["req.headers.authorization", 'req.headers["x-telegram-user"]'],
     },
     bodyLimit: 1024 * 1024,
+    trustProxy: config.TRUST_PROXY,
   });
+  if ((config.RATE_LIMITS ?? (config.NODE_ENV === "test" ? "off" : "on")) === "on") await registerRateLimits(app);
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {
     limits: { ...multipartLimits, files: 12, fileSize: Math.max(multipartLimits.fileSize, MAX_UPLOAD_BYTES) },
@@ -79,7 +85,9 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   app.setErrorHandler((err, req, reply) => {
     const code = (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
     if (code === "22P02" || code === "22003") return reply.code(404).send({ error: "not_found" });
-    if ((err as { statusCode?: number }).statusCode && (err as { statusCode: number }).statusCode < 500) return reply.send(err);
+    const status = (err as { statusCode?: number }).statusCode;
+    // Client errors keep their status (plugins such as rate-limit throw plain objects, not Errors).
+    if (status && status < 500) return reply.code(status).send(err);
     req.log.error({ err }, "unhandled error");
     return reply.code(500).send({ error: "internal" });
   });
@@ -92,8 +100,10 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       client: new Anthropic({ apiKey: config.ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 1 }),
       models: { fast: config.AI_MODEL_FAST, strong: config.AI_MODEL_STRONG },
       recordUsage: (u) => repo.recordAiUsage(u),
-      monthlySpend: () => repo.aiSpendSince(startOfMonthUtc()),
+      monthlySpend: () => repo.aiBudget(),
+      addSpend: (tier, usd) => repo.addAiSpend(tier, usd),
       monthlyLimitUsd: () => repo.getSetting("ai_monthly_limit_usd", config.AI_MONTHLY_LIMIT_USD),
+      strongLimitUsd: () => repo.getSetting("ai_strong_monthly_limit_usd", config.AI_STRONG_MONTHLY_LIMIT_USD),
       logger: app.log,
     });
 
@@ -114,6 +124,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     (key) => catalog.findCatalogPrice(key),
   );
 
+  const queue = new JobQueue(db, { inline: !backgroundJobs, logger: app.log });
   const store = storage ?? createStorage(config);
   const shopsSvc = new ShopService(repo, store);
   const staff = new StaffNotifier(gateway, {
@@ -141,6 +152,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     notifier: gateway,
     staff,
     moderation,
+    enqueue: (kind, payload) => queue.enqueue(kind, payload),
     onPublished: (id) => catalog.notifySavedSearches(id),
     onUnavailable: (id, reason): Promise<number> => ordersSvc.closeNewOrders(id, reason),
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
@@ -176,6 +188,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       assistant_per_day: config.ASSISTANT_PER_DAY,
       usd_rate: config.USD_RATE,
       ai_monthly_limit_usd: config.AI_MONTHLY_LIMIT_USD,
+      ai_strong_monthly_limit_usd: config.AI_STRONG_MONTHLY_LIMIT_USD,
       complaints_to_hide: DEFAULT_COMPLAINTS_TO_HIDE,
       listing_ai_per_day: LISTING_AI_PER_DAY,
     },
@@ -194,7 +207,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     requireUser: auth.requireUser,
     requireOperator: auth.requireRole("operator", "admin"),
     requireAdmin: auth.requireRole("admin"),
-  });
+  }, (actor, action, target, details) => repo.audit(actor, action, target, details));
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
   catalogRoutes(app, catalog, assistant, {
     requireUser: auth.requireUser,
@@ -202,7 +215,10 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     optionalUser: auth.optionalUser,
   });
 
+  for (const kind of ["channel_posts", "saved_search_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+
   app.decorate("services", {
+    queue,
     listings: listingsSvc,
     orders: ordersSvc,
     trust,
@@ -215,6 +231,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
 declare module "fastify" {
   interface FastifyInstance {
     services: {
+      queue: JobQueue;
       listings: ListingService;
       orders: OrderService;
       trust: TrustService;

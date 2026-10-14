@@ -1,16 +1,19 @@
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
+import { LOCKS, singleton } from "./jobs/lock.js";
 
 const config = loadConfig();
 const { db, sql } = createDb(config.DATABASE_URL);
-const app = await buildApp({ config, db });
+const app = await buildApp({ config, db, backgroundJobs: true });
+const { queue, listings, orders, digest } = app.services;
 
-let expiryTimer: NodeJS.Timeout | undefined;
+let hourlyTimer: NodeJS.Timeout | undefined;
 let digestTimer: NodeJS.Timeout | undefined;
 const shutdown = async () => {
-  clearInterval(expiryTimer);
+  clearInterval(hourlyTimer);
   clearInterval(digestTimer);
+  await queue.stop(); // finish the job batch in progress
   await app.close();
   await sql.end();
   process.exit(0);
@@ -20,22 +23,23 @@ process.on("SIGINT", shutdown);
 
 await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
-// Hourly: listing expiry (reminders 3 days ahead, auto-archive after 30 days) and delivery requests unanswered for 48 h.
-// Safe with several instances: rows are claimed by conditional updates.
-const runExpiry = async () => {
-  try {
-    const r = await app.services.listings.runExpiry();
-    const staleOrders = await app.services.orders.expireStale();
-    if (r.reminded || r.archived || staleOrders) app.log.info({ ...r, staleOrders }, "expiry job");
-  } catch (err) {
-    app.log.error({ err }, "expiry job failed");
-  }
-};
-setTimeout(runExpiry, 30_000);
-expiryTimer = setInterval(runExpiry, 3600_000);
+// Background jobs (channel posts, saved-search alerts): every instance works, SKIP LOCKED splits the queue.
+queue.start();
+
+// Hourly, on one instance at a time (advisory lock): listing expiry (reminder 3 days ahead, archive after
+// 30 days), delivery requests unanswered for 48 h, cleanup of finished jobs.
+const hourly = () =>
+  singleton(db, LOCKS.hourly, async () => {
+    const r = await listings.runExpiry();
+    const staleOrders = await orders.expireStale();
+    await queue.cleanup();
+    if (r.reminded || r.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
+  }).catch((err) => app.log.error({ err }, "hourly job failed"));
+setTimeout(hourly, 30_000);
+hourlyTimer = setInterval(hourly, 3600_000);
 
 // Morning digest for admins (DIGEST_HOUR, Tashkent); checked every 10 minutes, sent once a day.
 digestTimer = setInterval(
-  () => app.services.digest().catch((err) => app.log.error({ err }, "digest failed")),
+  () => singleton(db, LOCKS.digest, () => digest()).catch((err) => app.log.error({ err }, "digest failed")),
   10 * 60_000,
 );

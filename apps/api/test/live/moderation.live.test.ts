@@ -22,7 +22,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY)("live AI moderation (costs money
     client: new Anthropic(),
     models: { fast: process.env.AI_MODEL_FAST ?? "claude-haiku-5-5", strong: process.env.AI_MODEL_STRONG ?? "claude-opus-5-5" },
     recordUsage: async (u) => void usage.push(u),
-    monthlySpend: async () => 0,
+    monthlySpend: async () => ({ fast: 0, strong: 0 }),
     monthlyLimitUsd: async () => 50,
   });
 

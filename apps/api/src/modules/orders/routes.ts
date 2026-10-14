@@ -9,6 +9,7 @@ import {
   t,
   type Lang,
 } from "@ishonch/shared";
+import type { User } from "../../db/schema.js";
 import { OrderRejected, type OrderService } from "./service.js";
 
 const MESSAGES: Record<string, string> = {
@@ -21,6 +22,7 @@ const MESSAGES: Record<string, string> = {
   already_ordered: "order.err.already_ordered",
   bad_state: "order.err.bad_state",
   review_exists: "order.err.review_exists",
+  too_many_attempts: "order.err.too_many_attempts",
 };
 
 const TariffSchema = z.object({
@@ -36,6 +38,7 @@ export function orderRoutes(
   app: FastifyInstance,
   svc: OrderService,
   auth: { requireUser: preHandlerHookHandler; requireOperator: preHandlerHookHandler; requireAdmin: preHandlerHookHandler },
+  audit: (actor: User, action: string, target: string | null, details?: Record<string, unknown>) => Promise<void>,
 ) {
   const { requireUser } = auth;
 
@@ -124,7 +127,9 @@ export function orderRoutes(
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       const { status, ...extra } = parsed.data;
-      return svc.operatorSetStatus(req.user!, req.params.id, status, extra);
+      const res = await svc.operatorSetStatus(req.user!, req.params.id, status, extra);
+      await audit(req.user!, `order.${status}`, req.params.id, extra);
+      return res;
     }),
   );
 
@@ -133,6 +138,8 @@ export function orderRoutes(
   app.put("/admin/tariffs", { preHandler: auth.requireAdmin }, async (req, reply) => {
     const parsed = z.array(TariffSchema).max(200).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "bad_request", details: parsed.error.issues });
-    return svc.replaceTariffs(parsed.data);
+    const res = await svc.replaceTariffs(parsed.data);
+    await audit(req.user!, "tariffs.replace", null, { rows: parsed.data.length });
+    return res;
   });
 }

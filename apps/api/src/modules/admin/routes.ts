@@ -61,6 +61,10 @@ export function adminRoutes(
 
   app.post("/admin/digest", { preHandler: requireAdmin }, async () => ({ sent: await extra.sendDigest() }));
 
+  app.get<{ Querystring: { limit?: string } }>("/admin/audit", { preHandler: requireAdmin }, (req) =>
+    repo.listAudit(Number(req.query.limit) || 200),
+  );
+
   app.get("/admin/settings", { preHandler: requireAdmin }, async () => {
     const out: Record<string, unknown> = {};
     for (const k of ADMIN_SETTING_KEYS) out[k] = await repo.getSetting(k, extra.settingDefaults[k]);
@@ -71,7 +75,7 @@ export function adminRoutes(
     const parsed = AdminSettingsSchema.strict().safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "bad_request", details: parsed.error.issues });
     for (const [k, v] of Object.entries(parsed.data)) await repo.setSetting(k, v);
-    await repo.event(req.user!.id, "settings_changed", parsed.data);
+    await repo.audit(req.user!, "settings.update", null, parsed.data);
     const out: Record<string, unknown> = {};
     for (const k of ADMIN_SETTING_KEYS) out[k] = await repo.getSetting(k, extra.settingDefaults[k]);
     return out;
@@ -92,17 +96,20 @@ export function adminRoutes(
     const parsed = z.array(PriceRowSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "bad_request", details: parsed.error.issues });
     await repo.upsertPriceReference(parsed.data);
+    await repo.audit(req.user!, "prices.upsert", null, { count: parsed.data.length });
     return { ok: true, count: parsed.data.length };
   });
 
   app.delete<{ Params: { id: string } }>("/admin/price-reference/:id", { preHandler: requireAdmin }, async (req) => {
     await repo.deletePriceReference(Number(req.params.id));
+    await repo.audit(req.user!, "prices.delete", req.params.id);
     return { ok: true };
   });
 
   app.post("/admin/price-reference/import", { preHandler: requireAdmin }, async (req) => {
     const { rows, errors } = parsePriceCsv(String(req.body ?? ""));
     await repo.upsertPriceReference(rows.map((r) => ({ ...r, source: "csv" })));
+    await repo.audit(req.user!, "prices.import", null, { imported: rows.length, errors: errors.length });
     return { imported: rows.length, errors };
   });
 

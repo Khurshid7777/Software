@@ -43,6 +43,20 @@
       "when": 1792001467634,
       "tag": "0005_perf_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792002075660,
+      "tag": "0006_jobs_budget_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792002300154,
+      "tag": "0007_trgm_model_key",
+      "breakpoints": true
     }
   ]
 }
