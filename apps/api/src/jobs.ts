@@ -14,7 +14,7 @@ export function tashkentClock(now: Date) {
  * with a conditional upsert, so several API instances never send it twice.
  */
 export async function maybeSendDigest(
-  deps: { repo: Repo; metrics: MetricsService; staff: StaffNotifier },
+  deps: { repo: Repo; metrics: MetricsService; staff: StaffNotifier; adminLink?: () => Promise<string | null> },
   hour: number,
   now = new Date(),
 ): Promise<boolean> {
@@ -27,6 +27,7 @@ export async function maybeSendDigest(
     where settings.value <> excluded.value
     returning key`)) as unknown as unknown[];
   if (!claimed.length) return false;
-  await deps.staff.admins(await deps.metrics.digest(now));
+  const link = await deps.adminLink?.().catch(() => null);
+  await deps.staff.admins(await deps.metrics.digest(now), link ? [[{ text: "Открыть админку", url: link }]] : []);
   return true;
 }

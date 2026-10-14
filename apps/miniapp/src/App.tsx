@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { normalizeLang, type CatalogFilters, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared";
 import { t } from "@ishonch/shared/i18n";
 import { createApi, type Me } from "./api";
@@ -28,12 +28,16 @@ type Screen =
   | { name: "assistant" }
   | { name: "favorites" }
   | { name: "checkout"; listing: ListingDto }
-  | { name: "orders"; focusId?: string };
+  | { name: "orders"; focusId?: string }
+  | { name: "admin" };
 
 /** "Find similar at verified sellers" from a check result. */
 export function similarFilters(check: Pick<CheckResult, "title" | "category">): CatalogFilters {
   return { q: check.title, category: check.category === "other" ? undefined : check.category, verifiedOnly: true };
 }
+
+// Staff-only panel: a separate chunk, buyers and sellers never download it.
+const Admin = lazy(() => import("./screens/admin/Admin").then((m) => ({ default: m.Admin })));
 
 /** Start params: `listing_<uuid>` (channel button), `order_<uuid>` (order notifications), `screen_*` (bot buttons). */
 function initialScreen(startParam?: string): Screen {
@@ -42,6 +46,7 @@ function initialScreen(startParam?: string): Screen {
   const o = startParam?.match(/^order_([0-9a-f-]{36})$/i);
   if (o) return { name: "orders", focusId: o[1]! };
   if (startParam === "screen_orders") return { name: "orders" };
+  if (startParam === "screen_admin") return { name: "admin" };
   if (startParam === "screen_sell") return { name: "sell" };
   if (startParam === "screen_my") return { name: "my" };
   if (startParam === "screen_check") return { name: "check" };
@@ -151,6 +156,16 @@ export function App({ env }: { env: TelegramEnv }) {
       case "checkout":
         body = <Checkout api={api} listing={screen.listing} onDone={(id) => setScreen({ name: "orders", focusId: id })} />;
         break;
+      case "admin":
+        body =
+          me.role === "admin" || me.role === "operator" ? (
+            <Suspense fallback={<p className="center hint">{t(lang, "common.loading")}</p>}>
+              <Admin api={api} role={me.role} onOpenListing={(id) => setScreen({ name: "listing", id })} />
+            </Suspense>
+          ) : (
+            <p className="hint center">{t(lang, "common.error")}</p>
+          );
+        break;
       case "orders":
         body = <Orders api={api} focusId={screen.focusId} onOpenListing={(id) => setScreen({ name: "listing", id })} />;
         break;
@@ -179,6 +194,7 @@ export function App({ env }: { env: TelegramEnv }) {
       default:
         body = (
           <Home
+            staff={me.role === "admin" ? "admin" : me.role === "operator" ? "operator" : null}
             remaining={me.checks.remaining}
             onOpen={(name) => setScreen({ name } as Screen)}
             onLanguage={changeLanguage}

@@ -49,9 +49,10 @@ describe("formatCheck", () => {
 
 class FakeApi {
   calls: string[] = [];
+  role = "buyer";
   async me() {
     this.calls.push("me");
-    return { id: "u", language: "ru" as const, role: "buyer", acceptedTerms: true, checks: { perDay: 5, remaining: 5 } };
+    return { id: "u", language: "ru" as const, role: this.role, acceptedTerms: true, checks: { perDay: 5, remaining: 5 } };
   }
   async setLanguage() {
     this.calls.push("setLanguage");
@@ -321,5 +322,18 @@ describe("stage 4 buttons", () => {
     await bot.handleUpdate(groupMsg);
     expect(api.calls.some((c) => c.startsWith("checkText"))).toBe(false);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("/admin", () => {
+  it("opens the staff panel for admins and operators only", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(msg("/admin"));
+    expect(JSON.stringify(sent.at(-1)!.payload)).not.toContain("screen=admin");
+    api.role = "operator";
+    await bot.handleUpdate(msg("/admin"));
+    const reply = sent.at(-1)!;
+    expect(reply.payload.text).toContain("Заказы на доставку");
+    expect(JSON.stringify(reply.payload.reply_markup)).toContain("https://app.example?screen=admin");
   });
 });

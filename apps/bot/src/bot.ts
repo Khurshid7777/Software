@@ -129,6 +129,17 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     });
   });
 
+  // Staff panel (admins, operators). Not in the command menu; the Mini App checks the role.
+  bot.command("admin", async (ctx) => {
+    const user = tgUser(ctx);
+    if (!user) return;
+    const me = await api.me(user).catch(() => null);
+    if (!me || (me.role !== "admin" && me.role !== "operator")) return ctx.reply(t(me?.language ?? "ru", "bot.help"));
+    await ctx.reply(me.role === "admin" ? "🛠 Админка Ishonch" : "🚚 Заказы на доставку", {
+      reply_markup: new InlineKeyboard().webApp("Открыть", `${cfg.miniAppUrl}?screen=admin`),
+    });
+  });
+
   bot.command("help", async (ctx) => {
     const user = tgUser(ctx);
     if (user) await ctx.reply(t(await langOf(user), "bot.help"));

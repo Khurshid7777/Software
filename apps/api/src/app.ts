@@ -149,6 +149,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   userRoutes(app, repo, checks, auth.requireUser);
   checkRoutes(app, checks, auth.requireUser);
   const metrics = new MetricsService(repo);
+  const adminLink = () => (gateway ? gateway.miniAppLink("screen_admin").catch(() => null) : Promise.resolve(null));
   adminRoutes(app, repo, auth.requireRole("admin"), {
     metrics,
     settingDefaults: {
@@ -158,7 +159,10 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       ai_monthly_limit_usd: config.AI_MONTHLY_LIMIT_USD,
       complaints_to_hide: DEFAULT_COMPLAINTS_TO_HIDE,
     },
-    sendDigest: async () => staff.admins(await metrics.digest()),
+    sendDigest: async () => {
+      const link = await adminLink();
+      return staff.admins(await metrics.digest(), link ? [[{ text: "Открыть админку", url: link }]] : []);
+    },
   });
   listingRoutes(app, listingsSvc, shopsSvc, repo, {
     requireUser: auth.requireUser,
@@ -183,7 +187,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     orders: ordersSvc,
     trust,
     metrics,
-    digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff }, config.DIGEST_HOUR, now),
+    digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff, adminLink }, config.DIGEST_HOUR, now),
   });
   return app;
 }

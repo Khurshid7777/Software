@@ -15,7 +15,11 @@ import type {
   Lang,
   ListingDto,
   ListingStatus,
+  AdminMetrics,
+  AdminSettings,
+  CourierTariff,
   ModerationDecision,
+  OrderStatus,
   OrderDto,
   ReviewDto,
   SellerRating,
@@ -75,6 +79,42 @@ export type ListingPatch = Partial<
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
 export const apiUrl = (path: string) => `${BASE}${path}`;
+
+export interface QueueItem {
+  listing: ListingDto;
+  moderation: { decision: string; source: string; reasons: Array<{ code: string; note: string }>; duplicates?: string[] } | null;
+  openComplaints: number;
+}
+export interface ComplaintRow {
+  id: number;
+  listingId: string;
+  reason: string;
+  text: string | null;
+  createdAt: string;
+  listingTitle: string;
+  listingStatus: string;
+  sellerUserId: string;
+}
+export interface AdminUser {
+  id: string;
+  telegramId: number;
+  role: string;
+  createdAt: string;
+  bannedAt: string | null;
+  banReason: string | null;
+  activeListings: number;
+  rating: { avg: number | null; count: number };
+}
+export interface PriceRow {
+  id: number;
+  modelKey: string;
+  priceMin: number;
+  priceMedian: number;
+  priceMax: number;
+  source: string;
+  updatedAt: string;
+}
+export type OperatorOrder = OrderDto & { contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null } };
 
 export function createApi(initData: string | null) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -169,6 +209,40 @@ export function createApi(initData: string | null) {
     orderAction: (id: string, action: "confirm" | "decline" | "cancel") => request<OrderDto>(`/orders/${id}/${action}`, { method: "POST" }),
     review: (id: string, rating: number, text: string) =>
       request<OrderDto>(`/orders/${id}/review`, json("POST", { rating, text: text.trim() || undefined })),
+
+    // ---- staff: admin & operators ----
+    adminMetrics: (days: number) => request<AdminMetrics>(`/admin/metrics?days=${days}`),
+    ordersCsv: async (days: number) => {
+      const res = await fetch(`${BASE}/admin/reports/orders.csv?days=${days}`, {
+        headers: initData ? { authorization: `tma ${initData}` } : {},
+      });
+      if (!res.ok) throw new ApiError(res.status, "error", res.statusText);
+      return res.blob();
+    },
+    sendDigest: () => request<{ sent: number }>("/admin/digest", { method: "POST" }),
+    moderationQueue: () => request<QueueItem[]>("/admin/moderation"),
+    moderate: (id: string, decision: "approve" | "reject") =>
+      request<{ status: string }>(`/admin/listings/${id}/moderate`, json("POST", { decision })),
+    complaints: () => request<ComplaintRow[]>("/admin/complaints"),
+    findUser: (telegramId: string) => request<AdminUser>(`/admin/users?telegramId=${encodeURIComponent(telegramId)}`),
+    bannedUsers: () => request<Array<Pick<AdminUser, "id" | "telegramId" | "bannedAt" | "banReason" | "role">>>("/admin/users/banned"),
+    ban: (id: string, reason: string) => request(`/admin/users/${id}/ban`, json("POST", { reason })),
+    unban: (id: string) => request(`/admin/users/${id}/unban`, { method: "POST" }),
+    prices: () => request<PriceRow[]>("/admin/price-reference"),
+    importPrices: (csv: string) =>
+      request<{ imported: number; errors: string[] }>("/admin/price-reference/import", {
+        method: "POST",
+        headers: { "content-type": "text/csv" },
+        body: csv,
+      }),
+    deletePrice: (id: number) => request(`/admin/price-reference/${id}`, { method: "DELETE" }),
+    tariffs: () => request<CourierTariff[]>("/admin/tariffs"),
+    saveTariffs: (rows: Array<Omit<CourierTariff, "id">>) => request<CourierTariff[]>("/admin/tariffs", json("PUT", rows)),
+    settings: () => request<AdminSettings>("/admin/settings"),
+    saveSettings: (s: Partial<AdminSettings>) => request<AdminSettings>("/admin/settings", json("PUT", s)),
+    operatorOrders: (status?: OrderStatus) => request<OperatorOrder[]>(`/operator/orders${status ? `?status=${status}` : ""}`),
+    operatorStatus: (id: string, status: OrderStatus, extra: { courierName?: string; courierPhone?: string; note?: string } = {}) =>
+      request<{ order: OrderDto }>(`/operator/orders/${id}/status`, json("POST", { status, ...extra })),
 
     assistant: (messages: AssistantMessage[], lang: Lang) => request<AssistantResponse>("/assistant", json("POST", { messages, lang })),
     compare: (ids: string[], lang: Lang, needs?: string) =>
