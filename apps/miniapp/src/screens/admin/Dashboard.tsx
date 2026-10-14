@@ -13,11 +13,16 @@ export function Dashboard({ api }: { api: Api }) {
   const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
+    let current = true;
     setM(null);
+    setError(null);
     api
       .adminMetrics(days)
-      .then(setM)
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Ошибка загрузки"));
+      .then((r) => current && setM(r))
+      .catch((e) => current && setError(e instanceof ApiError ? e.message : "Ошибка загрузки"));
+    return () => {
+      current = false;
+    };
   }, [api, days]);
 
   async function downloadCsv() {
@@ -186,7 +191,12 @@ export function Dashboard({ api }: { api: Api }) {
 
           <button
             className="link"
-            onClick={() => api.sendDigest().then((r) => setNote(r.sent ? "Сводка отправлена в бот" : "Некому отправить: нет ADMIN_TELEGRAM_IDS"))}
+            onClick={() =>
+              api
+                .sendDigest()
+                .then((r) => setNote(r.sent ? "Сводка отправлена в бот" : "Некому отправить: нет ADMIN_TELEGRAM_IDS"))
+                .catch(() => setNote("Не удалось отправить сводку"))
+            }
           >
             📨 Прислать утреннюю сводку сейчас
           </button>

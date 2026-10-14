@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { normalizeLang, type CatalogFilters, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared";
 import { t } from "@ishonch/shared/i18n";
-import { createApi, type Me } from "./api";
+import { ApiError, createApi, type Me } from "./api";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LangContext } from "./i18n";
 import { Assistant } from "./screens/Assistant";
 import { Catalog } from "./screens/Catalog";
@@ -98,8 +99,12 @@ export function App({ env }: { env: TelegramEnv }) {
 
   async function deleteAccount() {
     if (!window.confirm(t(lang, "home.delete_confirm"))) return;
-    await api.deleteAccount();
-    setDeleted(true);
+    try {
+      await api.deleteAccount();
+      setDeleted(true);
+    } catch (e) {
+      window.alert(e instanceof ApiError ? e.message : t(lang, "common.error")); // e.g. open orders first
+    }
   }
 
   let content;
@@ -217,7 +222,11 @@ export function App({ env }: { env: TelegramEnv }) {
 
   return (
     <LangContext.Provider value={lang}>
-      <main className="app">{content}</main>
+      <main className="app">
+        <ErrorBoundary key={screen.name} message={t(lang, "app.crashed")} action={t(lang, "app.reload")}>
+          {content}
+        </ErrorBoundary>
+      </main>
     </LangContext.Provider>
   );
 }

@@ -56,7 +56,17 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
-      ...(config.LOG_FILE ? { file: config.LOG_FILE } : {}),
+      // Always to stdout (docker logs); with LOG_FILE also to a file (rotate it with logrotate on the host).
+      ...(config.LOG_FILE
+        ? {
+            transport: {
+              targets: [
+                { target: "pino/file", options: { destination: 1 } },
+                { target: "pino/file", options: { destination: config.LOG_FILE, mkdir: true } },
+              ],
+            },
+          }
+        : {}),
       redact: ["req.headers.authorization", 'req.headers["x-telegram-user"]'],
     },
     bodyLimit: 1024 * 1024,

@@ -23,6 +23,7 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
   const [toast, setToast] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
   const [complaint, setComplaint] = useState<{ reason: ComplaintReason | null; text: string } | null>(null);
 
   useEffect(() => {
@@ -39,19 +40,23 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
   const date = (iso: string) => new Date(iso).toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ");
 
   async function complain() {
-    if (!complaint?.reason) return;
+    if (!complaint?.reason || sending) return;
+    setSending(true);
     try {
       const res = await api.complain(l.id, complaint.reason, complaint.text);
       setToast(res.duplicate ? t("complaint.already") : t("complaint.sent"));
       setComplaint(null);
     } catch (e) {
       setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setSending(false);
     }
   }
 
   async function send() {
-    if (!message.trim()) return;
+    if (!message.trim() || sending) return;
     if (!(await ensureWriteAccess())) return setToast(t("listing.write_access"));
+    setSending(true);
     try {
       await api.contact(l.id, message);
       setToast(t("listing.sent"));
@@ -59,6 +64,8 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
       setMessage("");
     } catch (e) {
       setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setSending(false);
     }
   }
 
@@ -152,7 +159,7 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
                   data-testid="contact-text"
                 />
                 <p className="hint">{t("listing.contact_hint")}</p>
-                <button className="primary" onClick={send} disabled={!message.trim()} data-testid="contact-send">
+                <button className="primary" onClick={send} disabled={!message.trim() || sending} data-testid="contact-send">
                   {t("listing.send")}
                 </button>
               </div>
@@ -161,9 +168,11 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
                 💬 {t("listing.write")}
               </button>
             )}
-            <button className="primary" onClick={() => onBuy(l)} data-testid="buy-delivery">
-              {t("listing.buy_delivery")}
-            </button>
+            {l.allowedDeliveryModes.length > 0 && (
+              <button className="primary" onClick={() => onBuy(l)} data-testid="buy-delivery">
+                {t("listing.buy_delivery")}
+              </button>
+            )}
           </>
         )
       )}
@@ -186,7 +195,7 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
               value={complaint.text}
               onChange={(e) => setComplaint({ ...complaint, text: e.target.value })}
             />
-            <button className="secondary" disabled={!complaint.reason} onClick={complain} data-testid="complaint-send">
+            <button className="secondary" disabled={!complaint.reason || sending} onClick={complain} data-testid="complaint-send">
               {t("complaint.send")}
             </button>
           </section>

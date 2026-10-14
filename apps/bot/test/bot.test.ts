@@ -147,6 +147,7 @@ describe("bot handlers", () => {
   it("/start shows the Mini App button and language choice", async () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(msg("/start"));
+    await bot.idle();
     const reply = sent.find((s) => s.method === "sendMessage")!;
     expect(reply.payload.text).toMatch(/Ishonch/);
     const kb = JSON.stringify(reply.payload.reply_markup);
@@ -157,6 +158,7 @@ describe("bot handlers", () => {
   it("text listing -> processing message edited into the check card with share button", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(msg("iPhone 13 за 3,5 млн, предоплата"));
+    await bot.idle();
     expect(api.calls).toContain("checkText:iPhone 13 за 3,5 млн, предоплата");
     const edit = sent.find((s) => s.method === "editMessageText")!;
     expect(edit.payload.parse_mode).toBe("HTML");
@@ -167,6 +169,7 @@ describe("bot handlers", () => {
   it("link-only message gets the API's explanation", async () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(msg("https://olx.uz/d/abc"));
+    await bot.idle();
     const edit = sent.find((s) => s.method === "editMessageText")!;
     expect(edit.payload.text).toBe("Пришлите скриншот");
   });
@@ -174,6 +177,7 @@ describe("bot handlers", () => {
   it("/start check_<id> renders a shared check", async () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(msg(`/start check_${check.id}`));
+    await bot.idle();
     const reply = sent.find((s) => s.method === "sendMessage")!;
     expect(String(reply.payload.text)).toContain("iPhone 13");
   });
@@ -198,6 +202,7 @@ describe("seller handlers", () => {
   it("links a channel when the bot becomes an admin with posting rights", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(chatMember("administrator"));
+    await bot.idle();
     expect(api.calls).toContain("link:5:-100555:Shop channel");
     expect(sent.find((s) => s.method === "sendMessage")!.payload.text).toContain("привязан");
   });
@@ -205,6 +210,7 @@ describe("seller handlers", () => {
   it("asks for posting rights instead of linking", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(chatMember("administrator", false));
+    await bot.idle();
     expect(api.calls.some((c) => c.startsWith("link"))).toBe(false);
     expect(String(sent.find((s) => s.method === "sendMessage")!.payload.text)).toContain("право публиковать");
   });
@@ -212,6 +218,7 @@ describe("seller handlers", () => {
   it("unlinks when the bot is removed", async () => {
     const { api, bot } = setup();
     await bot.handleUpdate(chatMember("left"));
+    await bot.idle();
     expect(api.calls).toContain("unlink:-100555");
   });
 
@@ -222,8 +229,10 @@ describe("seller handlers", () => {
       message: { message_id: 2, date: 0, chat: { id: 5, type: "private", first_name: "A" }, from, contact: { phone_number: "998901234567", first_name: "A", user_id: userId } },
     });
     await bot.handleUpdate(contact(999));
+    await bot.idle();
     expect(api.calls.some((c) => c.startsWith("setPhone"))).toBe(false);
     await bot.handleUpdate(contact(5));
+    await bot.idle();
     expect(api.calls).toContain("setPhone:998901234567");
     expect(String(sent.at(-1)!.payload.text)).toContain("Номер сохранён");
   });
@@ -249,14 +258,17 @@ describe("masked chat relay", () => {
   it("Reply button → next text goes to the conversation, not to a listing check", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(press(`reply:${conv}`));
+    await bot.idle();
     expect(String(sent.find((s) => s.method === "sendMessage")!.payload.text)).toContain("Напишите ответ");
     await bot.handleUpdate(msg("Да, ещё продаю"));
+    await bot.idle();
     expect(api.calls).toContain(`relay:${conv}:Да, ещё продаю`);
     expect(api.calls.some((c) => c.startsWith("checkText"))).toBe(false);
     expect(sent.at(-1)!.payload.text).toBe("✅ Отправлено");
 
     // The following message is a normal listing check again.
     await bot.handleUpdate(msg("iPhone 13 за 3 млн"));
+    await bot.idle();
     expect(api.calls).toContain("checkText:iPhone 13 за 3 млн");
   });
 });
@@ -277,6 +289,7 @@ describe("stage 4 buttons", () => {
   it("seller confirms an order from the DM; buttons are removed", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(callback(`order:confirm:${ORDER}`));
+    await bot.idle();
     expect(api.calls).toContain(`order:5:confirm:${ORDER}`);
     expect(sent.some((s) => s.method === "editMessageReplyMarkup")).toBe(true);
     const answer = sent.find((s) => s.method === "answerCallbackQuery")!;
@@ -286,6 +299,7 @@ describe("stage 4 buttons", () => {
   it("API refusals are shown as an alert", async () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(callback("order:decline:00000000-0000-0000-0000-000000000000"));
+    await bot.idle();
     const answer = sent.find((s) => s.method === "answerCallbackQuery")!;
     expect(answer.payload).toMatchObject({ text: "Это действие уже недоступно для заказа", show_alert: true });
   });
@@ -293,6 +307,7 @@ describe("stage 4 buttons", () => {
   it("operator button in a group moves the order and re-renders the card", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(callback(`op:courier_assigned:${ORDER}`, { id: -100900, type: "supergroup" }));
+    await bot.idle();
     expect(api.calls).toContain(`op:5:courier_assigned:${ORDER}`);
     const edit = sent.find((s) => s.method === "editMessageText")!;
     expect(edit.payload.text).toContain("courier_assigned");
@@ -302,6 +317,7 @@ describe("stage 4 buttons", () => {
   it("moderator approves from the moderators' chat", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(callback(`mod:approve:${ORDER}`, { id: -100901, type: "supergroup" }));
+    await bot.idle();
     expect(api.calls).toContain(`mod:5:approve:${ORDER}`);
     expect(String(sent.find((s) => s.method === "editMessageText")!.payload.text)).toContain("✅ Одобрено");
   });
@@ -309,6 +325,7 @@ describe("stage 4 buttons", () => {
   it("renew button extends the listing", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(callback(`renew:${ORDER}`));
+    await bot.idle();
     expect(api.calls).toContain(`renew:5:${ORDER}`);
     expect(sent.find((s) => s.method === "answerCallbackQuery")!.payload.text).toContain("30");
   });
@@ -320,6 +337,7 @@ describe("stage 4 buttons", () => {
       message: { message_id: 1, date: 0, chat: { id: -100900, type: "supergroup", title: "Operators" }, from, text: "iPhone 13 за 3 млн" },
     };
     await bot.handleUpdate(groupMsg);
+    await bot.idle();
     expect(api.calls.some((c) => c.startsWith("checkText"))).toBe(false);
     expect(sent).toHaveLength(0);
   });
@@ -329,11 +347,35 @@ describe("/admin", () => {
   it("opens the staff panel for admins and operators only", async () => {
     const { api, bot, sent } = setup();
     await bot.handleUpdate(msg("/admin"));
+    await bot.idle();
     expect(JSON.stringify(sent.at(-1)!.payload)).not.toContain("screen=admin");
     api.role = "operator";
     await bot.handleUpdate(msg("/admin"));
+    await bot.idle();
     const reply = sent.at(-1)!;
     expect(reply.payload.text).toContain("Заказы на доставку");
     expect(JSON.stringify(reply.payload.reply_markup)).toContain("https://app.example?screen=admin");
+  });
+});
+
+describe("review fixes", () => {
+  it("a slow check does not block other users (runs in the background)", async () => {
+    const { api, bot } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const orig = api.checkText.bind(api);
+    api.checkText = async (...args: Parameters<typeof orig>) => (await gate, orig(...args));
+    await bot.handleUpdate(msg("iPhone 13 за 3,5 млн"));
+    await bot.handleUpdate(msg("/help")); // handled while the check is still waiting
+    expect(api.calls).toContain("me");
+    release();
+    await bot.idle();
+    expect(api.calls).toContain("checkText:iPhone 13 за 3,5 млн");
+  });
+
+  it("unknown buttons stop the spinner", async () => {
+    const { bot, sent } = setup();
+    await bot.handleUpdate(callback("stale:button"));
+    expect(sent.some((s) => s.method === "answerCallbackQuery")).toBe(true);
   });
 });

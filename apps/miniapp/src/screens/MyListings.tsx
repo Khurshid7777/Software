@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { EXPIRY_REMINDER_DAYS, formatUzs, listingPlainText, listingTitle, type ListingDto, type ListingStatus } from "@ishonch/shared";
 import { ApiError, apiUrl, type Api } from "../api";
 import { useLang, useT } from "../i18n";
+import { useLatest } from "../useLatest";
 
 // "active" also lists reserved items, "pending" also lists rejected ones (see GET /listings/mine).
 const TABS: ListingStatus[] = ["active", "pending", "draft", "sold", "archived"];
@@ -21,15 +22,23 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [soldFor, setSoldFor] = useState<string | null>(null);
 
+  const begin = useLatest();
   const load = useCallback(() => {
+    const isCurrent = begin();
     setItems(null);
-    api.myListings(tab).then(setItems).catch(() => setItems([]));
-  }, [api, tab]);
+    api
+      .myListings(tab)
+      .then((list) => isCurrent() && setItems(list))
+      .catch(() => isCurrent() && (setItems([]), setToast(t("common.error"))));
+  }, [api, tab, begin]);
+  const [busy, setBusy] = useState(false);
   useEffect(load, [load]);
 
   const date = (iso: string) => new Date(iso).toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ");
 
   async function act(fn: () => Promise<unknown>, ok?: string) {
+    if (busy) return;
+    setBusy(true);
     try {
       await fn();
       if (ok) setToast(ok);
@@ -37,6 +46,8 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
     } catch (e) {
       if (e instanceof ApiError && e.code === "bump_too_soon") setToast(t("my.bump_at", { date: date(String(e.params.date)) }));
       else setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -100,7 +111,12 @@ export function MyListings({ api, onEdit, onOpen }: Props) {
                   <button className="chip" onClick={() => onEdit(l)}>✏️ {t("my.edit")}</button>
                   <button
                     className="chip"
-                    onClick={() => navigator.clipboard.writeText(listingPlainText(l, lang)).then(() => setToast(t("sell.copied")))}
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(listingPlainText(l, lang))
+                        .then(() => setToast(t("sell.copied")))
+                        .catch(() => setToast(t("common.error")))
+                    }
                   >
                     📋 OLX / Instagram
                   </button>

@@ -18,6 +18,7 @@ services:
 
   # Photo storage for listings (module D).
   minio:
+    # Pin a tested release tag before going live (":latest" can change under you on rebuild).
     image: minio/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -41,6 +42,7 @@ services:
   api:
     build: { context: ., target: api }
     restart: unless-stopped
+    init: true # forwards SIGTERM to node: in-flight requests and the expiry job finish cleanly
     env_file: .env
     environment:
       DATABASE_URL: postgres://ishonch:${POSTGRES_PASSWORD:-ishonch}@postgres:5432/ishonch
@@ -52,19 +54,34 @@ services:
       postgres: { condition: service_healthy }
       minio: { condition: service_started }
     ports: ["127.0.0.1:3000:3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 10s
+      retries: 6
+      start_period: 30s
 
   bot:
     build: { context: ., target: bot }
     restart: unless-stopped
+    init: true
     env_file: .env
     environment:
       API_URL: http://api:3000
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
 
   miniapp:
-    build: { context: ., dockerfile: apps/miniapp/Dockerfile }
+    build:
+      context: .
+      dockerfile: apps/miniapp/Dockerfile
+      # Links on the consent screen (texts prepared by a lawyer), baked into the bundle at build time.
+      args:
+        VITE_OFFER_URL: ${VITE_OFFER_URL:-}
+        VITE_PRIVACY_URL: ${VITE_PRIVACY_URL:-}
+        VITE_PROHIBITED_URL: ${VITE_PROHIBITED_URL:-}
     restart: unless-stopped
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
     ports: ["${MINIAPP_PORT:-8080}:80"]
 
 volumes:

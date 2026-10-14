@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -10,7 +10,8 @@ import {
 } from "@ishonch/shared";
 import { ApiError, type Api } from "../api";
 import { useLang, useT } from "../i18n";
-import { askPhone, ensureWriteAccess } from "../telegram";
+import { sharePhoneAndWait } from "../phone";
+import { ensureWriteAccess } from "../telegram";
 
 interface Props {
   api: Api;
@@ -34,20 +35,30 @@ export function Checkout({ api, listing, onDone }: Props) {
 
   useEffect(() => {
     if (!district) return;
+    let current = true; // a slower answer for a previous district/mode must not overwrite this one
     setQuote(null);
+    setError(null);
     api
       .quote(listing.id, district, mode)
-      .then(setQuote)
-      .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")));
+      .then((q) => current && setQuote(q))
+      .catch((e) => current && setError(e instanceof ApiError ? e.message : t("common.error")));
+    return () => {
+      current = false;
+    };
   }, [api, listing.id, district, mode]);
 
+  const mounted = useRef(true);
+  useEffect(() => () => void (mounted.current = false), []);
+  const [waitingPhone, setWaitingPhone] = useState(false);
+  const [writeDenied, setWriteDenied] = useState(false);
+
   async function submit() {
-    if (!district || address.trim().length < 5) return;
+    if (busy || !district || !quote || address.trim().length < 5) return;
     setError(null);
     setBusy(true);
     try {
       // Status updates arrive from the bot; ask once so Telegram lets it write to the buyer.
-      await ensureWriteAccess();
+      if (!(await ensureWriteAccess())) setWriteDenied(true);
       const order = await api.createOrder({ listingId: listing.id, mode, district, address: address.trim(), comment: comment.trim() || undefined });
       onDone(order.id);
     } catch (e) {
@@ -59,15 +70,16 @@ export function Checkout({ api, listing, onDone }: Props) {
   }
 
   async function sharePhone() {
-    if (!(await askPhone().catch(() => false))) return;
-    // The contact reaches the API through the bot; wait for it, then retry.
-    for (let i = 0; i < 15; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      if ((await api.me()).hasPhone) {
-        setNeedPhone(false);
-        return submit();
-      }
+    if (waitingPhone) return;
+    setWaitingPhone(true);
+    const r = await sharePhoneAndWait(api, () => mounted.current);
+    if (!mounted.current) return; // left the screen: never place an order the user abandoned
+    setWaitingPhone(false);
+    if (r === "ok") {
+      setNeedPhone(false);
+      return submit();
     }
+    if (r === "timeout") setError(t("phone.timeout"));
   }
 
   const sellerPart = quote && quote.sellerFee > 0;
@@ -147,11 +159,12 @@ export function Checkout({ api, listing, onDone }: Props) {
       {needPhone && (
         <div className="card stack">
           <p>{t("order.err.phone_required")}</p>
-          <button className="secondary" onClick={sharePhone}>
+          <button className="secondary" onClick={sharePhone} disabled={waitingPhone}>
             📱 {t("sell.share_phone")}
           </button>
         </div>
       )}
+      {writeDenied && <p className="hint">{t("listing.write_access")}</p>}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -159,7 +172,7 @@ export function Checkout({ api, listing, onDone }: Props) {
       )}
       <button
         className="primary"
-        disabled={busy || !district || address.trim().length < 5}
+        disabled={busy || !district || !quote || address.trim().length < 5}
         onClick={submit}
         data-testid="checkout-submit"
       >

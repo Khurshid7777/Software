@@ -16,7 +16,8 @@ ENV NODE_ENV=production
 FROM base AS api
 WORKDIR /app/apps/api
 EXPOSE 3000
-CMD ["sh", "-c", "npx tsx src/db/migrate.ts && npx tsx src/db/seed.ts && npx tsx src/server.ts"]
+# exec: the server becomes PID 1's child process directly and receives SIGTERM (graceful shutdown).
+CMD ["sh", "-c", "npx tsx src/db/migrate.ts && npx tsx src/db/seed.ts && exec npx tsx src/server.ts"]
 
 FROM base AS bot
 WORKDIR /app/apps/bot

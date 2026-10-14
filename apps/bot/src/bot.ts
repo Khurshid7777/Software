@@ -23,6 +23,14 @@ function tgUser(ctx: Context): TgUser | null {
 export function createBot(cfg: BotConfig, api: ApiClient) {
   const bot = new Bot(cfg.token);
 
+  // Long AI work (checks take up to a minute) runs in the background: grammY handles updates one by one,
+  // so awaiting it would freeze every other user's messages and button presses.
+  const inflight = new Set<Promise<unknown>>();
+  function background(task: Promise<unknown>) {
+    const p = task.catch((err) => console.error("background task failed", err)).finally(() => inflight.delete(p));
+    inflight.add(p);
+  }
+
   // Staff groups (operators, moderators) only use inline buttons; never treat group chatter as listings to check.
   bot.use(async (ctx, next) => {
     if (ctx.chat && ctx.chat.type !== "private" && ctx.chat.type !== "channel" && !ctx.callbackQuery) return;
@@ -40,7 +48,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   function resultKeyboard(lang: Lang, check: CheckResult) {
     const kb = new InlineKeyboard().webApp(
       t(lang, "bot.find_similar"),
-      `${cfg.miniAppUrl}?startapp=similar_${check.id}#/catalog`,
+      `${cfg.miniAppUrl}?startapp=similar_${check.id}`,
     );
     const username = cfg.username ?? (bot.isInited() ? bot.botInfo.username : undefined);
     if (username) {
@@ -154,8 +162,9 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   bot.callbackQuery(/^lang:(uz|ru)$/, async (ctx) => {
     const user = tgUser(ctx);
     const lang = ctx.match[1] as Lang;
-    if (user) await api.setLanguage(user, lang);
-    await ctx.answerCallbackQuery({ text: t(lang, "bot.language_set") });
+    const saved = user ? await api.setLanguage(user, lang).then(() => true, () => false) : false;
+    await ctx.answerCallbackQuery({ text: t(lang, saved ? "bot.language_set" : "common.error") });
+    if (!saved) return;
     await ctx.reply(t(lang, "bot.help"), {
       reply_markup: new InlineKeyboard().webApp(t(lang, "bot.open_app"), cfg.miniAppUrl),
     });
@@ -177,8 +186,12 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const pending = pendingReplies.get(user.id);
     if (!pending) return false;
     pendingReplies.delete(user.id);
-    if (Date.now() - pending.at > REPLY_WINDOW_MS) return false;
     const lang = await langOf(user);
+    if (Date.now() - pending.at > REPLY_WINDOW_MS) {
+      // Not a listing to check (that would spend a daily check): the reply window simply closed.
+      await ctx.reply(t(lang, "bot.reply_expired"));
+      return true;
+    }
     try {
       await api.sendConversationMessage(user, pending.conversationId, text);
       await ctx.reply(t(lang, "bot.reply_sent"));
@@ -264,7 +277,8 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
 
     if (member.status === "administrator") {
       if (!member.can_post_messages) return notify(t(lang, "bot.channel_need_post_rights", { title }));
-      await api.linkChannel(user, upd.chat.id, title);
+      const linked = await api.linkChannel(user, upd.chat.id, title).then(() => true, () => false);
+      if (!linked) return notify(t(lang, "common.error"));
       return notify(t(lang, "bot.channel_linked", { title }));
     }
     if (member.status === "left" || member.status === "kicked" || member.status === "member") {
@@ -281,7 +295,8 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const lang = await langOf(user);
     const c = ctx.message.contact;
     if (c.user_id !== ctx.from.id) return ctx.reply(t(lang, "bot.phone_not_own"));
-    await api.setPhone(user, c.phone_number);
+    const saved = await api.setPhone(user, c.phone_number).then(() => true, () => false);
+    if (!saved) return ctx.reply(t(lang, "common.error"));
     await ctx.reply(t(lang, "bot.phone_saved"), {
       reply_markup: new InlineKeyboard().webApp(t(lang, "bot.open_app"), `${cfg.miniAppUrl}?screen=sell`),
     });
@@ -302,7 +317,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   bot.on(["message:photo", "message:document"], async (ctx) => {
     if (!imageFileId(ctx.message)) return;
     const groupId = ctx.message.media_group_id;
-    if (!groupId) return checkImages(ctx, [ctx.message]);
+    if (!groupId) return background(checkImages(ctx, [ctx.message]));
 
     const key = `${ctx.chat.id}:${groupId}`;
     const existing = albums.get(key);
@@ -313,7 +328,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const entry = existing ?? { ctx, messages: [ctx.message], timer: undefined as unknown as NodeJS.Timeout };
     entry.timer = setTimeout(() => {
       albums.delete(key);
-      void checkImages(entry.ctx, entry.messages);
+      background(checkImages(entry.ctx, entry.messages));
     }, ALBUM_WAIT_MS);
     albums.set(key, entry);
   });
@@ -322,7 +337,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const user = tgUser(ctx);
     if (!user || ctx.message.text.startsWith("/")) return;
     if (await relayReply(ctx, user, ctx.message.text)) return;
-    await runCheck(ctx, user, (lang) => api.checkText(user, ctx.message.text, lang));
+    background(runCheck(ctx, user, (lang) => api.checkText(user, ctx.message.text, lang)));
   });
 
   bot.on("message", async (ctx) => {
@@ -330,6 +345,10 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     if (user) await ctx.reply(t(await langOf(user), "bot.unsupported"));
   });
 
+  // Old buttons (after a deploy) or unknown data: stop the spinner instead of leaving it forever.
+  bot.on("callback_query:data", (ctx) => ctx.answerCallbackQuery().catch(() => undefined));
+
   bot.catch((err) => console.error("bot error", err.error));
-  return bot;
+  /** Resolves when background checks have finished (tests and graceful shutdown). */
+  return Object.assign(bot, { idle: () => Promise.all([...inflight]) });
 }

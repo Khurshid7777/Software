@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatUzs, operatorNextStatuses, type OrderStatus } from "@ishonch/shared";
 import { ApiError, apiUrl, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
@@ -6,11 +6,14 @@ import { MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from
 function useLoad<T>(load: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);
   const reload = useCallback(() => {
+    const id = ++seq.current;
     setData(null);
+    setError(null); // a failed action must not hide the list for good
     load()
-      .then(setData)
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Ошибка загрузки"));
+      .then((d) => id === seq.current && setData(d))
+      .catch((e) => id === seq.current && setError(e instanceof ApiError ? e.message : "Ошибка загрузки"));
   }, [load]);
   useEffect(reload, [reload]);
   return { data, error, reload, setError };

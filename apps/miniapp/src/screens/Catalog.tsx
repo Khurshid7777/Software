@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CATALOG_SORTS,
   CHECK_CATEGORIES,
@@ -29,11 +29,23 @@ export function Catalog({ api, initial, onOpen }: Props) {
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Only the latest request may update the list: a slow page for old filters must not land on new results.
+  const seq = useRef(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const load = useCallback(
     async (offset = 0) => {
+      const id = ++seq.current;
       if (offset === 0) setItems(null);
-      const page = await api.catalog(filters, sort, offset).catch(() => ({ items: [], nextOffset: null }));
-      setItems((prev) => (offset === 0 ? page.items : [...(prev ?? []), ...page.items]));
+      else setLoadingMore(true);
+      const page = await api.catalog(filters, sort, offset).catch(() => null);
+      if (id !== seq.current) return;
+      setLoadingMore(false);
+      if (!page) {
+        if (offset === 0) setItems([]);
+        setToast(t("common.error"));
+        return;
+      }
+      setItems((prev) => (offset === 0 ? page.items : [...(prev ?? []), ...page.items.filter((i) => !prev?.some((p) => p.listing.id === i.listing.id))]));
       setNext(page.nextOffset);
     },
     [api, filters, sort],
@@ -183,7 +195,7 @@ export function Catalog({ api, initial, onOpen }: Props) {
         <ItemCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
       ))}
       {next !== null && (
-        <button className="secondary" onClick={() => load(next)}>
+        <button className="secondary" disabled={loadingMore} onClick={() => load(next)}>
           {t("catalog.load_more")}
         </button>
       )}

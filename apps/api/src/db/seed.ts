@@ -54,7 +54,9 @@ for (const c of CATEGORY_SEED) {
   catIds.set(c.slug, row!.id);
 }
 
-for (const [cat, modelKey, min, med, max] of PRICE_SEED) {
+// Only into an empty table: rows an admin deleted or edited are not brought back on every API start.
+const [{ refs }] = (await db.execute(dsql`select count(*)::int as refs from price_reference`)) as unknown as [{ refs: number }];
+for (const [cat, modelKey, min, med, max] of refs > 0 ? [] : PRICE_SEED) {
   await db
     .insert(priceReference)
     .values({

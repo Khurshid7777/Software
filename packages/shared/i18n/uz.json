@@ -402,5 +402,10 @@
   "order.cancel_reason.listing_unavailable": "Mahsulot endi sotilmayapti.",
   "order.cancel_reason.seller_timeout": "Sotuvchi 48 soat ichida so'rovga javob bermadi.",
   "sell.ai_quota": "Bugungi AI-qoralamalar limiti tugadi ({n}). Ertaga urinib ko'ring yoki e'lonni qo'lda to'ldiring.",
-  "home.delete_open_orders": "Avval ochiq buyurtmalarni yakunlang yoki bekor qiling — shundan keyin akkauntni o'chirish mumkin."
+  "home.delete_open_orders": "Avval ochiq buyurtmalarni yakunlang yoki bekor qiling — shundan keyin akkauntni o'chirish mumkin.",
+  "bot.reply_expired": "Javob berish vaqti tugadi. Xabar ostidagi «Javob berish» tugmasini yana bosing.",
+  "sell.mic_unavailable": "Mikrofonga ruxsat yo'q. Uni Telegram sozlamalarida yoqing yoki mahsulotni matn bilan tasvirlang.",
+  "phone.timeout": "Raqam hali kelmadi. Kontaktni botga yuborganingizni tekshiring va yana bosing.",
+  "app.crashed": "Nimadir xato ketdi. Ilovani yangilang — ehtimol, yangi versiya chiqdi.",
+  "app.reload": "Yangilash"
 }

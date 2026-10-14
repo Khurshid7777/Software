@@ -14,10 +14,12 @@ interface Props {
   api: Api;
   listing: ListingDto;
   onChange: (l: ListingDto) => void;
+  /** Lets the parent wait for an in-flight save (e.g. Publish tapped right after editing a field). */
+  onSaving?: (p: Promise<unknown>) => void;
 }
 
 /** Edit form shared by the sell wizard and "My listings → Edit". Saves on blur / change. */
-export function ListingEditor({ api, listing, onChange }: Props) {
+export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
   const t = useT();
   const lang = useLang();
   const [draft, setDraft] = useState<ListingPatch>({});
@@ -25,14 +27,23 @@ export function ListingEditor({ api, listing, onChange }: Props) {
   const [busy, setBusy] = useState(false);
   const v = { ...listing, ...draft };
 
-  async function save(patch: ListingPatch) {
+  function save(patch: ListingPatch) {
     setError(null);
-    try {
-      onChange(await api.updateListing(listing.id, patch));
-      setDraft({});
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("common.error"));
-    }
+    const p = (async () => {
+      try {
+        onChange(await api.updateListing(listing.id, patch));
+        // Drop only what was saved: text typed meanwhile in another field stays.
+        setDraft((d) => {
+          const rest = { ...d };
+          for (const k of Object.keys(patch) as Array<keyof ListingPatch>) if (rest[k] === patch[k]) delete rest[k];
+          return rest;
+        });
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : t("common.error"));
+      }
+    })();
+    onSaving?.(p);
+    return p;
   }
   const field = <K extends keyof ListingPatch>(key: K) => ({
     value: (v[key] ?? "") as string,
@@ -62,7 +73,12 @@ export function ListingEditor({ api, listing, onChange }: Props) {
             key={p.id}
             className="thumb"
             aria-label="remove photo"
-            onClick={async () => onChange(await api.deletePhoto(listing.id, p.id))}
+            onClick={() =>
+              api
+                .deletePhoto(listing.id, p.id)
+                .then(onChange)
+                .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")))
+            }
           >
             <img src={apiUrl(p.url)} alt="" />
           </button>

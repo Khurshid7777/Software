@@ -25,7 +25,13 @@ await bot.api.setChatMenuButton({
   menu_button: { type: "web_app", text: "Ishonch", web_app: { url: miniAppUrl } },
 });
 
-process.once("SIGINT", () => bot.stop());
-process.once("SIGTERM", () => bot.stop());
+// Finish checks already running, then stop polling.
+const stop = async () => {
+  await bot.stop();
+  await bot.idle();
+  process.exit(0);
+};
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
 console.log(`bot @${bot.botInfo.username} started`);
-await bot.start({ drop_pending_updates: true, allowed_updates: ["message", "callback_query", "my_chat_member"] });
+await bot.start({ allowed_updates: ["message", "callback_query", "my_chat_member"] });

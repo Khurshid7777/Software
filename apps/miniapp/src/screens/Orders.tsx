@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatUzs, listingTitle, type OrderDto } from "@ishonch/shared";
 import { ApiError, apiUrl, type Api } from "../api";
 import { useLang, useT } from "../i18n";
+import { useLatest } from "../useLatest";
 
 interface Props {
   api: Api;
@@ -21,19 +22,29 @@ export function Orders({ api, focusId, onOpenListing }: Props) {
     if (focusId) api.order(focusId).then((o) => o.role === "seller" && setRole("seller")).catch(() => undefined);
   }, [api, focusId]);
 
+  const begin = useLatest();
   const load = useCallback(() => {
+    const isCurrent = begin();
     setItems(null);
-    api.myOrders(role).then(setItems).catch(() => setItems([]));
-  }, [api, role]);
+    api
+      .myOrders(role)
+      .then((list) => isCurrent() && setItems(list))
+      .catch(() => isCurrent() && (setItems([]), setToast(t("common.error"))));
+  }, [api, role, begin]);
   useEffect(load, [load]);
 
+  const [busy, setBusy] = useState(false);
   async function act(fn: () => Promise<unknown>, ok?: string) {
+    if (busy) return; // one action at a time: no double confirm / double review
+    setBusy(true);
     try {
       await fn();
       if (ok) setToast(ok);
       load();
     } catch (e) {
       setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -110,7 +121,7 @@ function OrderCard({
           : t("orders.buyer_pays", { sum: formatUzs(o.mode === "delivery_only" ? q.buyerFee : q.buyerTotal) })}
       </p>
       {o.status === "cancelled" && o.cancelReason && (
-        <p className="hint">{t(`order.cancel_reason.${o.cancelReason}` as "order.cancel_reason.banned")}</p>
+        <p className="hint">{cancelReasonText(t, o.cancelReason)}</p>
       )}
 
       <details>
@@ -163,4 +174,11 @@ function OrderCard({
       {o.review && <p className="hint">{t("orders.your_review", { stars: "⭐".repeat(o.review.rating) })}</p>}
     </article>
   );
+}
+
+/** Known reasons are translated; an operator's free-text note is shown as is. */
+function cancelReasonText(t: ReturnType<typeof useT>, reason: string) {
+  const key = `order.cancel_reason.${reason}` as Parameters<typeof t>[0];
+  const text = t(key);
+  return text === key ? reason : text;
 }
