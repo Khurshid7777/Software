@@ -7,7 +7,8 @@ import type { MarketRange } from "./price/verdict.js";
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
-export const LISTING_STATUSES = ["draft", "pending", "active", "sold", "archived", "rejected"] as const;
+/** reserved = a delivery order was confirmed; pending = waiting for a moderator (AI doubt or complaints). */
+export const LISTING_STATUSES = ["draft", "pending", "active", "reserved", "sold", "archived", "rejected"] as const;
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
 
 export const DELIVERY_MODES = ["delivery_only", "cod_seller", "cod_platform"] as const;
@@ -106,6 +107,7 @@ export interface ListingSeller {
   id: string;
   registeredAt: string;
   platformSales: number;
+  rating: { avg: number | null; count: number };
   shop: { id: string; name: string; verified: boolean; marketLocation: string | null } | null;
 }
 
@@ -136,6 +138,8 @@ export interface ListingDto {
   canBumpAt: string | null;
   expiresAt: string | null;
   soldVia: "platform" | "elsewhere" | null;
+  /** Owner only: why the listing is pending / rejected / archived by the system. */
+  moderation: { reason: string | null; message: string | null } | null;
   seller?: ListingSeller;
 }
 

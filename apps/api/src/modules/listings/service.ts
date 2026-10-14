@@ -1,10 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
   CONDITIONS,
   DELIVERY_MODES,
+  EXPIRY_REMINDER_DAYS,
   FEE_PAYERS,
   LISTING_TTL_DAYS,
   MVP_DELIVERY_MODES,
@@ -23,15 +24,18 @@ import {
   type ListingAnalysis,
   type ListingDto,
   type ListingStatus,
+  type ModerationRecord,
   type PriceSuggestion,
 } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { channels, listingPhotos, listings, shops, users, type Listing, type User } from "../../db/schema.js";
+import { channels, listingPhotos, listings, reviews, shops, users, type Listing, type User } from "../../db/schema.js";
 import { AiLimitExceededError, AiOutputError, type AiService } from "../../ai/aiService.js";
 import { processImage } from "../../storage/images.js";
 import type { Storage } from "../../storage/storage.js";
 import { SttUnavailableError, type SpeechToText } from "../../stt/speechToText.js";
-import { buildCaption, type ChannelPublisher } from "../../telegram/publisher.js";
+import { buildCaption, type ChannelPublisher, type Notifier } from "../../telegram/publisher.js";
+import type { StaffNotifier } from "../../telegram/staff.js";
+import { hasContactInfo, type ModerationService } from "../moderation/service.js";
 import { analyzeListing, generateListingText } from "./ai.js";
 
 export const MAX_PHOTOS = 10;
@@ -50,7 +54,9 @@ export type ListingError =
   | "fill_required"
   | "limit_reached"
   | "bump_too_soon"
-  | "bad_image";
+  | "bad_image"
+  | "contact_info"
+  | "duplicate";
 
 export class ListingRejected extends Error {
   constructor(
@@ -94,6 +100,11 @@ export interface ListingServiceDeps {
   storage: Storage;
   stt: SpeechToText;
   publisher: ChannelPublisher | null;
+  /** Direct messages to sellers (moderation results, expiry reminders). */
+  notifier?: Notifier | null;
+  staff?: StaffNotifier;
+  /** Duplicate search + AI pre-moderation; null = publish without moderation. */
+  moderation?: ModerationService | null;
   photoSecret: string;
   usdRate: number;
   /** Feature flag: `cod_platform` stays off until there is a legal entity and a courier contract. */
@@ -247,19 +258,30 @@ export class ListingService {
 
   async update(user: User, id: string, patch: ListingPatch) {
     const l = await this.own(user, id);
-    if (!["draft", "active", "pending"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    if (!["draft", "active", "pending", "rejected", "reserved"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     const modes = patch.allowedDeliveryModes?.filter((m) => this.d.codPlatformEnabled || MVP_DELIVERY_MODES.includes(m));
     if (modes && modes.length === 0) throw new ListingRejected("fill_required", 400);
+    const textChanged = (["titleRu", "titleUz", "descriptionRu", "descriptionUz"] as const).some(
+      (k) => patch[k] !== undefined && patch[k] !== l[k],
+    );
+    if (textChanged && l.status !== "draft" && hasContactInfo({ ...l, ...patch })) throw new ListingRejected("contact_info", 400);
     await this.db
       .update(listings)
       .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), updatedAt: new Date() })
       .where(eq(listings.id, id));
+    // A live listing whose text changed goes through moderation again (it could be swapped for something else).
+    if (textChanged && l.status === "active" && this.d.moderation) {
+      const [fresh] = await this.db.select().from(listings).where(eq(listings.id, id));
+      const record = await this.d.moderation.review(fresh!);
+      if (record.decision !== "approved") await this.holdForModeration(fresh!, record);
+      else await this.db.update(listings).set({ moderation: record }).where(eq(listings.id, id));
+    }
     return this.dto(id, user.id);
   }
 
   async addPhotos(user: User, id: string, files: UploadedFile[]) {
     const l = await this.own(user, id);
-    if (!["draft", "active", "pending"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    if (!["draft", "active", "pending", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     const [{ n }] = (await this.db
       .select({ n: count() })
       .from(listingPhotos)
@@ -280,9 +302,13 @@ export class ListingService {
   }
 
   // ---------- publication ----------
+  /**
+   * Draft / archived / rejected → moderation → active (or pending for a moderator, or rejected).
+   * Order: required fields → contact info in text → own duplicates → limit → duplicates of others + AI review.
+   */
   async publish(user: User, id: string, channelIds: number[] = []) {
     const l = await this.own(user, id);
-    if (!["draft", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    if (!["draft", "archived", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     if (!user.phone) throw new ListingRejected("phone_required", 409);
     if (!l.titleRu || !l.titleUz || !l.descriptionRu || !l.descriptionUz || !l.price) {
       throw new ListingRejected("fill_required", 400);
@@ -292,28 +318,96 @@ export class ListingService {
       .from(listingPhotos)
       .where(eq(listingPhotos.listingId, id))) as [{ photos: number }];
     if (photos === 0) throw new ListingRejected("need_photo", 400);
-    await this.assertUnderLimit(user);
+    if (hasContactInfo(l)) throw new ListingRejected("contact_info", 400);
 
     const shop = await this.shopOf(user.id);
+    const duplicates = this.d.moderation ? await this.d.moderation.findDuplicates(l) : null;
+    // The same photos in another live listing of this seller: bump that one instead (shops may sell identical stock).
+    if (duplicates?.own.length && !shop) throw new ListingRejected("duplicate", 409, { id: duplicates.own[0]! });
+    await this.assertUnderLimit(user);
+
+    const record: ModerationRecord = this.d.moderation
+      ? await this.d.moderation.review(l, duplicates!)
+      : { decision: "approved", source: "rules", reasons: [], at: new Date().toISOString() };
+    await this.db.update(listings).set({ shopId: shop?.id ?? null }).where(eq(listings.id, id));
+    if (user.role === "buyer") await this.db.update(users).set({ role: "seller" }).where(eq(users.id, user.id));
+
+    if (record.decision !== "approved") {
+      await this.holdForModeration({ ...l, shopId: shop?.id ?? null }, { ...record, pendingChannelIds: channelIds }, { notifySeller: false });
+      await this.d.repo.event(user.id, "listing_moderation", { listingId: id, decision: record.decision, source: record.source });
+      return { listing: await this.dto(id, user.id), postedChannels: 0, failedChannels: 0, moderation: record.decision };
+    }
+    const posted = await this.activate(id, channelIds, record);
+    await this.d.repo.event(user.id, "listing_published", { listingId: id, channels: posted.length });
+    return {
+      listing: await this.dto(id, user.id),
+      postedChannels: posted.length,
+      failedChannels: channelIds.length - posted.length,
+      moderation: record.decision,
+    };
+  }
+
+  /** Makes a listing live: 30 days from now, channel posts, saved-search alerts. Used by publish and admin approval. */
+  async activate(id: string, channelIds: number[], record: ModerationRecord) {
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
+    if (!l) throw new ListingRejected("not_found", 404);
     const now = new Date();
-    // AI moderation (stage 4) will switch this to "pending" for questionable listings.
     await this.db
       .update(listings)
       .set({
         status: "active",
-        shopId: shop?.id ?? null,
+        moderation: record,
+        moderationReason: null,
         publishedAt: l.publishedAt ?? now,
         bumpedAt: now,
         expiresAt: new Date(now.getTime() + LISTING_TTL_DAYS * DAY),
+        expiryRemindedAt: null,
         updatedAt: now,
       })
       .where(eq(listings.id, id));
-    if (user.role === "buyer") await this.db.update(users).set({ role: "seller" }).where(eq(users.id, user.id));
-
-    const posted = await this.postToChannels(user, id, channelIds);
+    const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
+    const posted = seller ? await this.postToChannels(seller, id, channelIds) : [];
     await this.d.onPublished?.(id).catch((err) => console.error("onPublished failed", err));
-    await this.d.repo.event(user.id, "listing_published", { listingId: id, channels: posted.length });
-    return { listing: await this.dto(id, user.id), postedChannels: posted.length, failedChannels: channelIds.length - posted.length };
+    return posted;
+  }
+
+  /** needs_review → pending (moderators are asked), rejected → rejected (the seller is told why). */
+  async holdForModeration(l: Listing, record: ModerationRecord, opts: { notifySeller?: boolean } = {}) {
+    const status = record.decision === "rejected" ? "rejected" : "pending";
+    const reason = record.reasons[0]?.code ?? "other";
+    await this.db
+      .update(listings)
+      .set({ status, moderation: record, moderationReason: reason, updatedAt: new Date() })
+      .where(eq(listings.id, l.id));
+    if (status === "pending") {
+      const notes = record.reasons.map((r) => `• ${r.code}: ${r.note}`).join("\n");
+      const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      await this.d.staff?.moderators(
+        t("ru", "staff.moderation_pending", { title: l.titleRu || l.titleUz, price: l.price ? formatUzs(l.price) : "—", notes }),
+        [
+          [
+            { text: "✅ Одобрить", callbackData: `mod:approve:${l.id}` },
+            { text: "⛔️ Отклонить", callbackData: `mod:reject:${l.id}` },
+          ],
+          ...(url ? [[{ text: "Открыть", url }]] : []),
+        ],
+      );
+    }
+    if (opts.notifySeller !== false) await this.notifySeller(l, status === "pending" ? "moderation.hidden" : "moderation.rejected", record);
+  }
+
+  /** Seller DM about a moderation outcome; the AI's own advice is appended when present. */
+  async notifySeller(l: Listing, key: "moderation.hidden" | "moderation.rejected" | "moderation.approved", record?: ModerationRecord | null) {
+    if (!this.d.notifier) return;
+    const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
+    if (!seller) return;
+    const lang = seller.language as Lang;
+    const advice = record?.sellerMessage?.[lang];
+    const text = t(lang, key, { title: listingTitle(l, lang) }) + (advice ? `\n\n${advice}` : "");
+    const url = this.d.publisher ? await this.d.publisher.miniAppLink("screen_my").catch(() => null) : null;
+    await this.d.notifier
+      .send(seller.telegramId, text, url ? [[{ text: t(lang, "home.my.title"), url }]] : [])
+      .catch((err) => console.error("seller notification failed", err));
   }
 
   private async assertUnderLimit(user: User) {
@@ -321,7 +415,9 @@ export class ListingService {
     const [{ n }] = (await this.db
       .select({ n: count() })
       .from(listings)
-      .where(and(eq(listings.sellerUserId, user.id), inArray(listings.status, ["active", "pending"])))) as [{ n: number }];
+      .where(and(eq(listings.sellerUserId, user.id), inArray(listings.status, ["active", "pending", "reserved"])))) as [
+      { n: number },
+    ];
     if (n >= PRIVATE_SELLER_ACTIVE_LIMIT) throw new ListingRejected("limit_reached", 409, { n: PRIVATE_SELLER_ACTIVE_LIMIT });
   }
 
@@ -382,6 +478,7 @@ export class ListingService {
   // ---------- management ----------
   async markSold(user: User, id: string, via: "platform" | "elsewhere") {
     const l = await this.own(user, id);
+    // A reserved listing is sold through its delivery order (or the order is cancelled first).
     if (!["active", "pending", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     await this.db.update(listings).set({ status: "sold", soldVia: via, soldAt: new Date(), updatedAt: new Date() }).where(eq(listings.id, id));
     await this.d.repo.event(user.id, "listing_sold", { listingId: id, via });
@@ -390,8 +487,8 @@ export class ListingService {
 
   async archive(user: User, id: string) {
     const l = await this.own(user, id);
-    if (!["active", "pending", "draft"].includes(l.status)) throw new ListingRejected("bad_state", 409);
-    await this.db.update(listings).set({ status: "archived", updatedAt: new Date() }).where(eq(listings.id, id));
+    if (!["active", "pending", "draft", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    await this.db.update(listings).set({ status: "archived", moderationReason: null, updatedAt: new Date() }).where(eq(listings.id, id));
     return this.dto(id, user.id);
   }
 
@@ -404,11 +501,86 @@ export class ListingService {
     return this.dto(id, user.id);
   }
 
+  /** Extends an active listing (or one archived on expiry) by another 30 days. */
+  async renew(user: User, id: string) {
+    const l = await this.own(user, id);
+    const expired = l.status === "archived" && l.moderationReason === "expired";
+    if (l.status !== "active" && !expired) throw new ListingRejected("bad_state", 409);
+    if (expired) await this.assertUnderLimit(user);
+    const now = new Date();
+    await this.db
+      .update(listings)
+      .set({
+        status: "active",
+        moderationReason: null,
+        expiresAt: new Date(now.getTime() + LISTING_TTL_DAYS * DAY),
+        expiryRemindedAt: null,
+        ...(expired ? { bumpedAt: now } : {}),
+        updatedAt: now,
+      })
+      .where(eq(listings.id, id));
+    await this.d.repo.event(user.id, "listing_renewed", { listingId: id, expired });
+    return this.dto(id, user.id);
+  }
+
+  /**
+   * Hourly job: reminds sellers 3 days before expiry (button "Renew") and archives expired listings.
+   * Returns counts for logs/tests.
+   */
+  async runExpiry(now = new Date()) {
+    const soon = new Date(now.getTime() + EXPIRY_REMINDER_DAYS * DAY);
+    const toRemind = await this.db
+      .select()
+      .from(listings)
+      .where(and(eq(listings.status, "active"), lte(listings.expiresAt, soon), gt(listings.expiresAt, now), isNull(listings.expiryRemindedAt)))
+      .limit(500);
+    let reminded = 0;
+    for (const l of toRemind) {
+      // Claim first so a second API instance does not send the same reminder.
+      const claimed = await this.db
+        .update(listings)
+        .set({ expiryRemindedAt: now })
+        .where(and(eq(listings.id, l.id), isNull(listings.expiryRemindedAt)))
+        .returning({ id: listings.id });
+      if (!claimed.length) continue;
+      if (await this.dmSeller(l, "expiry.reminder", [{ key: "expiry.renew", callbackData: `renew:${l.id}` }])) reminded++;
+    }
+
+    const expired = await this.db
+      .update(listings)
+      .set({ status: "archived", moderationReason: "expired", updatedAt: now })
+      .where(and(eq(listings.status, "active"), lte(listings.expiresAt, now)))
+      .returning();
+    for (const l of expired) await this.dmSeller(l, "expiry.archived", [{ key: "expiry.renew", callbackData: `renew:${l.id}` }]);
+    return { reminded, archived: expired.length };
+  }
+
+  private async dmSeller(l: Listing, key: "expiry.reminder" | "expiry.archived", buttons: Array<{ key: "expiry.renew"; callbackData: string }>) {
+    if (!this.d.notifier) return false;
+    const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
+    if (!seller || seller.bannedAt) return false;
+    const lang = seller.language as Lang;
+    const date = l.expiresAt ? l.expiresAt.toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ", { timeZone: "Asia/Tashkent" }) : "";
+    try {
+      await this.d.notifier.send(
+        seller.telegramId,
+        t(lang, key, { title: listingTitle(l, lang), date }),
+        [buttons.map((b) => ({ text: t(lang, b.key), callbackData: b.callbackData }))],
+      );
+      return true;
+    } catch (err) {
+      console.error("expiry notification failed", err);
+      return false;
+    }
+  }
+
+  /** Tabs: "active" also shows reserved listings, "pending" also shows rejected ones. */
   async mine(user: User, status?: ListingStatus) {
+    const statuses = status === "active" ? ["active", "reserved"] : status === "pending" ? ["pending", "rejected"] : status ? [status] : null;
     const rows = await this.db
       .select({ id: listings.id })
       .from(listings)
-      .where(and(eq(listings.sellerUserId, user.id), status ? eq(listings.status, status) : undefined))
+      .where(and(eq(listings.sellerUserId, user.id), statuses ? inArray(listings.status, statuses) : undefined))
       .orderBy(desc(listings.updatedAt));
     return Promise.all(rows.map((r) => this.dto(r.id, user.id)));
   }
@@ -418,7 +590,7 @@ export class ListingService {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
     if (!l) throw new ListingRejected("not_found", 404);
     const isOwner = viewer?.id === l.sellerUserId;
-    if (!isOwner && !["active", "sold"].includes(l.status)) throw new ListingRejected("not_found", 404);
+    if (!isOwner && !["active", "reserved", "sold"].includes(l.status)) throw new ListingRejected("not_found", 404);
     if (!isOwner && l.status === "active") {
       await this.db.update(listings).set({ views: sql`${listings.views} + 1` }).where(eq(listings.id, id));
     }
@@ -460,6 +632,19 @@ export class ListingService {
     return s ?? null;
   }
 
+  async sellerRating(sellerId: string) {
+    const [r] = await this.db
+      .select({ avg: avg(reviews.rating), n: count() })
+      .from(reviews)
+      .where(eq(reviews.sellerUserId, sellerId));
+    return { avg: r?.n ? Math.round(Number(r.avg) * 10) / 10 : null, count: r?.n ?? 0 };
+  }
+
+  private async langOf(userId: string): Promise<Lang | null> {
+    const [u] = await this.db.select({ language: users.language }).from(users).where(eq(users.id, userId));
+    return (u?.language as Lang | undefined) ?? null;
+  }
+
   async dto(id: string, viewerId: string | null, opts: { withSeller?: boolean } = {}): Promise<ListingDto> {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
     if (!l) throw new ListingRejected("not_found", 404);
@@ -498,7 +683,13 @@ export class ListingService {
       canBumpAt: l.bumpedAt ? new Date(l.bumpedAt.getTime() + BUMP_INTERVAL_DAYS * DAY).toISOString() : null,
       expiresAt: l.expiresAt?.toISOString() ?? null,
       soldVia: (l.soldVia as ListingDto["soldVia"]) ?? null,
+      moderation: null,
     };
+    if (isOwner && l.moderationReason) {
+      const record = l.moderation as ModerationRecord | null;
+      const lang = (await this.langOf(l.sellerUserId)) ?? "ru";
+      dto.moderation = { reason: l.moderationReason, message: record?.sellerMessage?.[lang] ?? null };
+    }
 
     if (opts.withSeller) {
       const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
@@ -511,6 +702,7 @@ export class ListingService {
         id: l.sellerUserId,
         registeredAt: seller!.createdAt.toISOString(),
         platformSales: sales,
+        rating: await this.sellerRating(l.sellerUserId),
         shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
       };
     }

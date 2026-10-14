@@ -19,6 +19,8 @@ const I18N_KEY: Record<string, string> = {
   need_photo: "sell.need_photo",
   limit_reached: "sell.limit_reached",
   not_found: "listing.not_found",
+  contact_info: "sell.contact_info",
+  duplicate: "sell.duplicate",
 };
 
 async function readMultipart(req: FastifyRequest) {
@@ -132,6 +134,10 @@ export function listingRoutes(
 
   app.post<{ Params: { id: string } }>("/listings/:id/bump", { preHandler: requireUser }, (req, reply) =>
     handle(req, reply, () => svc.bump(req.user!, req.params.id)),
+  );
+
+  app.post<{ Params: { id: string } }>("/listings/:id/renew", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, () => svc.renew(req.user!, req.params.id)),
   );
 
   app.get<{ Querystring: { status?: string } }>("/listings/mine", { preHandler: requireUser }, async (req) => {

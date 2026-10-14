@@ -23,6 +23,12 @@ function tgUser(ctx: Context): TgUser | null {
 export function createBot(cfg: BotConfig, api: ApiClient) {
   const bot = new Bot(cfg.token);
 
+  // Staff groups (operators, moderators) only use inline buttons; never treat group chatter as listings to check.
+  bot.use(async (ctx, next) => {
+    if (ctx.chat && ctx.chat.type !== "private" && ctx.chat.type !== "channel" && !ctx.callbackQuery) return;
+    await next();
+  });
+
   async function langOf(user: TgUser): Promise<Lang> {
     try {
       return (await api.me(user)).language;
@@ -170,6 +176,70 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     }
     return true;
   }
+
+  // ---- stage 4: delivery orders, operators, moderators, renewals ----
+  async function buttonAction(ctx: Context, run: (user: TgUser, lang: Lang) => Promise<string>) {
+    const user = tgUser(ctx);
+    if (!user) return;
+    const lang = await langOf(user);
+    try {
+      const text = await run(user, lang);
+      await ctx.answerCallbackQuery({ text });
+    } catch (err) {
+      await ctx.answerCallbackQuery({
+        text: err instanceof ApiError ? err.message.slice(0, 190) : t(lang, "common.error"),
+        show_alert: true,
+      });
+    }
+  }
+
+  // Seller: confirm / decline a buyer's delivery request.
+  bot.callbackQuery(/^order:(confirm|decline):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      const action = ctx.match[1] as "confirm" | "decline";
+      const order = await api.orderAction(user, ctx.match[2]!, action);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, `order.status.${order.status}` as Parameters<typeof t>[1]);
+    }),
+  );
+
+  // Operators' chat: move the order to the next status; the card is re-rendered by the API.
+  bot.callbackQuery(/^op:([a-z_]+):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user) => {
+      const res = await api.operatorStatus(user, ctx.match[2]!, ctx.match[1]!);
+      const keyboard = new InlineKeyboard();
+      for (const row of res.card.buttons) {
+        for (const b of row) {
+          if ("url" in b) keyboard.url(b.text, b.url);
+          else keyboard.text(b.text, b.callbackData);
+        }
+        keyboard.row();
+      }
+      await ctx.editMessageText(res.card.text, { reply_markup: keyboard }).catch(() => undefined);
+      return t("ru", `order.status.${res.order.status}` as Parameters<typeof t>[1]);
+    }),
+  );
+
+  // Moderators' chat: approve / reject a pending listing.
+  bot.callbackQuery(/^mod:(approve|reject):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user) => {
+      const res = await api.moderate(user, ctx.match[2]!, ctx.match[1] as "approve" | "reject");
+      const verdict = res.status === "active" ? "✅ Одобрено" : "⛔️ Отклонено";
+      const by = ctx.from?.username ? ` (@${ctx.from.username})` : "";
+      const original = ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : res.title;
+      await ctx.editMessageText(`${original}\n\n${verdict}${by}`).catch(() => undefined);
+      return verdict;
+    }),
+  );
+
+  // Seller: renew a listing from the expiry reminder.
+  bot.callbackQuery(/^renew:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.renewListing(user, ctx.match[1]!);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, "expiry.renewed");
+    }),
+  );
 
   // ---- module D: seller's channel (bot added/removed as channel admin) ----
   bot.on("my_chat_member", async (ctx) => {

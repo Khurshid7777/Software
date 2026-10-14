@@ -31,11 +31,16 @@ export class Repo {
   constructor(
     readonly db: Db,
     private adminTelegramIds: number[] = [],
+    private operatorTelegramIds: number[] = [],
   ) {}
 
   // ---- users ----
   async upsertTelegramUser(tg: { id: number; language_code?: string }): Promise<User> {
-    const role: Role | undefined = this.adminTelegramIds.includes(tg.id) ? "admin" : undefined;
+    const role: Role | undefined = this.adminTelegramIds.includes(tg.id)
+      ? "admin"
+      : this.operatorTelegramIds.includes(tg.id)
+        ? "operator"
+        : undefined;
     const [row] = await this.db
       .insert(users)
       .values({ telegramId: tg.id, language: normalizeLang(tg.language_code), ...(role ? { role } : {}) })

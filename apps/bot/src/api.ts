@@ -13,6 +13,8 @@ export interface Me {
   checks: { perDay: number; remaining: number };
 }
 
+export type CardButton = { text: string; url: string } | { text: string; callbackData: string };
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -113,6 +115,31 @@ export class ApiClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text }),
     });
+  }
+
+  // ---- stage 4: inline buttons (the API checks who may do what) ----
+  orderAction(user: TgUser, orderId: string, action: "confirm" | "decline") {
+    return this.request<{ status: string }>(`/orders/${encodeURIComponent(orderId)}/${action}`, { method: "POST", user });
+  }
+
+  operatorStatus(user: TgUser, orderId: string, status: string) {
+    return this.request<{ order: { status: string }; card: { text: string; buttons: CardButton[][] } }>(
+      `/operator/orders/${encodeURIComponent(orderId)}/status`,
+      { method: "POST", user, headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) },
+    );
+  }
+
+  moderate(user: TgUser, listingId: string, decision: "approve" | "reject") {
+    return this.request<{ status: string; title: string }>(`/admin/listings/${encodeURIComponent(listingId)}/moderate`, {
+      method: "POST",
+      user,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+  }
+
+  renewListing(user: TgUser, listingId: string) {
+    return this.request(`/listings/${encodeURIComponent(listingId)}/renew`, { method: "POST", user });
   }
 
   getCheck(id: string) {

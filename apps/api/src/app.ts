@@ -20,6 +20,13 @@ import { BotApiPublisher, type ChannelPublisher, type Notifier } from "./telegra
 import { AssistantService } from "./modules/catalog/assistant.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { CatalogService } from "./modules/catalog/service.js";
+import { ModerationService } from "./modules/moderation/service.js";
+import { createCourierProvider, type CourierProvider } from "./modules/orders/courier.js";
+import { orderRoutes } from "./modules/orders/routes.js";
+import { OrderService } from "./modules/orders/service.js";
+import { trustRoutes } from "./modules/trust/routes.js";
+import { TrustService } from "./modules/trust/service.js";
+import { StaffNotifier } from "./telegram/staff.js";
 
 export interface AppDeps {
   config: Config;
@@ -29,6 +36,7 @@ export interface AppDeps {
   storage?: Storage;
   stt?: SpeechToText;
   publisher?: (ChannelPublisher & Notifier) | null;
+  courier?: CourierProvider;
 }
 
 export function createStorage(config: Config): Storage {
@@ -41,7 +49,7 @@ export function createStorage(config: Config): Storage {
     : new FsStorage(config.STORAGE_DIR);
 }
 
-export async function buildApp({ config, db, ai, storage, stt, publisher }: AppDeps) {
+export async function buildApp({ config, db, ai, storage, stt, publisher, courier }: AppDeps) {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
@@ -56,7 +64,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher }: AppD
   });
   app.addContentTypeParser("text/csv", { parseAs: "string" }, (_req, body, done) => done(null, body));
 
-  const repo = new Repo(db, config.ADMIN_TELEGRAM_IDS);
+  const repo = new Repo(db, config.ADMIN_TELEGRAM_IDS, config.OPERATOR_TELEGRAM_IDS);
   const aiService =
     ai ??
     new AiService({
@@ -87,6 +95,17 @@ export async function buildApp({ config, db, ai, storage, stt, publisher }: AppD
 
   const store = storage ?? createStorage(config);
   const shopsSvc = new ShopService(repo, store);
+  const staff = new StaffNotifier(gateway, {
+    operators: { chatId: config.OPERATOR_CHAT_ID, userIds: [...config.OPERATOR_TELEGRAM_IDS, ...config.ADMIN_TELEGRAM_IDS] },
+    moderators: { chatId: config.MODERATION_CHAT_ID, userIds: config.ADMIN_TELEGRAM_IDS },
+  });
+  const moderation = new ModerationService({
+    repo,
+    ai: config.AI_MODERATION ? aiService : null,
+    storage: store,
+    findMarket: async (key) => (await repo.findReferencePrice(key)) ?? (await catalog.findCatalogPrice(key)),
+    logger: app.log,
+  });
   const listingsSvc = new ListingService({
     repo,
     ai: aiService,
@@ -97,6 +116,9 @@ export async function buildApp({ config, db, ai, storage, stt, publisher }: AppD
         ? new HttpWhisperSpeechToText({ url: config.STT_URL, apiKey: config.STT_API_KEY, model: config.STT_MODEL })
         : new DisabledSpeechToText()),
     publisher: gateway,
+    notifier: gateway,
+    staff,
+    moderation,
     onPublished: (id) => catalog.notifySavedSearches(id),
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
     usdRate: config.USD_RATE,
@@ -109,6 +131,16 @@ export async function buildApp({ config, db, ai, storage, stt, publisher }: AppD
     usdRate: config.USD_RATE,
   });
 
+  const ordersSvc = new OrderService({
+    repo,
+    listings: listingsSvc,
+    notifier: gateway,
+    staff,
+    courier: courier ?? createCourierProvider(config.COURIER_PROVIDER),
+    codPlatformEnabled: config.COD_PLATFORM_ENABLED,
+  });
+  const trust = new TrustService({ repo, listings: listingsSvc, onBanned: (id) => ordersSvc.cancelAllFor(id) });
+
   app.get("/health", async () => ({ ok: true }));
   userRoutes(app, repo, checks, auth.requireUser);
   checkRoutes(app, checks, auth.requireUser);
@@ -119,11 +151,24 @@ export async function buildApp({ config, db, ai, storage, stt, publisher }: AppD
     optionalUser: auth.optionalUser,
     requireAdmin: auth.requireRole("admin"),
   });
+  orderRoutes(app, ordersSvc, {
+    requireUser: auth.requireUser,
+    requireOperator: auth.requireRole("operator", "admin"),
+    requireAdmin: auth.requireRole("admin"),
+  });
+  trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
   catalogRoutes(app, catalog, assistant, {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
     optionalUser: auth.optionalUser,
   });
 
+  app.decorate("services", { listings: listingsSvc, orders: ordersSvc, trust });
   return app;
+}
+
+declare module "fastify" {
+  interface FastifyInstance {
+    services: { listings: ListingService; orders: OrderService; trust: TrustService };
+  }
 }

@@ -84,6 +84,26 @@ class FakeApi {
     this.calls.push(`unlink:${id}`);
     return { title: null };
   }
+  async orderAction(u: { id: number }, id: string, action: string) {
+    this.calls.push(`order:${u.id}:${action}:${id}`);
+    if (id.startsWith("00000000")) throw new ApiError(409, "bad_state", "Это действие уже недоступно для заказа");
+    return { status: action === "confirm" ? "confirmed" : "cancelled" };
+  }
+  async operatorStatus(u: { id: number }, id: string, status: string) {
+    this.calls.push(`op:${u.id}:${status}:${id}`);
+    return {
+      order: { status },
+      card: { text: `📦 Заказ — ${status}`, buttons: [[{ text: "📦 Курьер забрал", callbackData: `op:picked_up:${id}` }]] },
+    };
+  }
+  async moderate(u: { id: number }, id: string, decision: string) {
+    this.calls.push(`mod:${u.id}:${decision}:${id}`);
+    return { status: decision === "approve" ? "active" : "rejected", title: "iPhone" };
+  }
+  async renewListing(u: { id: number }, id: string) {
+    this.calls.push(`renew:${u.id}:${id}`);
+    return {};
+  }
 }
 
 function setup() {
@@ -237,5 +257,69 @@ describe("masked chat relay", () => {
     // The following message is a normal listing check again.
     await bot.handleUpdate(msg("iPhone 13 за 3 млн"));
     expect(api.calls).toContain("checkText:iPhone 13 за 3 млн");
+  });
+});
+
+const ORDER = "22222222-2222-2222-2222-222222222222";
+const callback = (data: string, chat: { id: number; type: string } = { id: 5, type: "private" }): Update => ({
+  update_id: 9,
+  callback_query: {
+    id: "cb1",
+    from,
+    chat_instance: "x",
+    data,
+    message: { message_id: 7, date: 0, chat, text: "📦 Заказ — confirmed" } as never,
+  },
+});
+
+describe("stage 4 buttons", () => {
+  it("seller confirms an order from the DM; buttons are removed", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`order:confirm:${ORDER}`));
+    expect(api.calls).toContain(`order:5:confirm:${ORDER}`);
+    expect(sent.some((s) => s.method === "editMessageReplyMarkup")).toBe(true);
+    const answer = sent.find((s) => s.method === "answerCallbackQuery")!;
+    expect(answer.payload.text).toContain("Подтверждён");
+  });
+
+  it("API refusals are shown as an alert", async () => {
+    const { bot, sent } = setup();
+    await bot.handleUpdate(callback("order:decline:00000000-0000-0000-0000-000000000000"));
+    const answer = sent.find((s) => s.method === "answerCallbackQuery")!;
+    expect(answer.payload).toMatchObject({ text: "Это действие уже недоступно для заказа", show_alert: true });
+  });
+
+  it("operator button in a group moves the order and re-renders the card", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`op:courier_assigned:${ORDER}`, { id: -100900, type: "supergroup" }));
+    expect(api.calls).toContain(`op:5:courier_assigned:${ORDER}`);
+    const edit = sent.find((s) => s.method === "editMessageText")!;
+    expect(edit.payload.text).toContain("courier_assigned");
+    expect(JSON.stringify(edit.payload.reply_markup)).toContain(`op:picked_up:${ORDER}`);
+  });
+
+  it("moderator approves from the moderators' chat", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`mod:approve:${ORDER}`, { id: -100901, type: "supergroup" }));
+    expect(api.calls).toContain(`mod:5:approve:${ORDER}`);
+    expect(String(sent.find((s) => s.method === "editMessageText")!.payload.text)).toContain("✅ Одобрено");
+  });
+
+  it("renew button extends the listing", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`renew:${ORDER}`));
+    expect(api.calls).toContain(`renew:5:${ORDER}`);
+    expect(sent.find((s) => s.method === "answerCallbackQuery")!.payload.text).toContain("30");
+  });
+
+  it("ignores ordinary messages in staff groups (no accidental checks)", async () => {
+    const { api, bot, sent } = setup();
+    const groupMsg: Update = {
+      update_id: 10,
+      message: { message_id: 1, date: 0, chat: { id: -100900, type: "supergroup", title: "Operators" }, from, text: "iPhone 13 за 3 млн" },
+    };
+    await bot.handleUpdate(groupMsg);
+    expect(api.calls.some((c) => c.startsWith("checkText"))).toBe(false);
+    expect(sent).toHaveLength(0);
   });
 });

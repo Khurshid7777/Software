@@ -25,6 +25,19 @@ const EnvSchema = z.object({
   ASSISTANT_PER_DAY: z.coerce.number().default(10),
   USD_RATE: z.coerce.number().default(12800),
   ADMIN_TELEGRAM_IDS: csvNumbers,
+  // Delivery operators (role "operator"): change order statuses via bot buttons.
+  OPERATOR_TELEGRAM_IDS: csvNumbers,
+  // Telegram group for operators (confirmed orders with addresses and phones). Empty: DM each operator.
+  OPERATOR_CHAT_ID: z.coerce.number().optional(),
+  // Telegram group for moderators (pending listings, complaints). Empty: DM each admin.
+  MODERATION_CHAT_ID: z.coerce.number().optional(),
+  // Courier integration. Only "manual" exists: operators arrange couriers themselves.
+  COURIER_PROVIDER: z.enum(["manual"]).default("manual"),
+  // AI pre-moderation of listings at publication. "false": rules and duplicate checks only.
+  AI_MODERATION: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false"),
   INIT_DATA_MAX_AGE_SEC: z.coerce.number().default(24 * 3600),
   CORS_ORIGIN: z.string().default("*"),
   LOG_FILE: z.string().optional(),

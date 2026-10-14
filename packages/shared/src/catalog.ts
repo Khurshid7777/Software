@@ -20,8 +20,14 @@ export type CatalogFilters = z.infer<typeof CatalogFiltersSchema>;
 
 export type TrustLevel = "high" | "medium" | "low";
 
-/** Deterministic seller trust (never decided by the AI). */
-export function sellerTrust(s: { verifiedShop: boolean; platformSales: number; accountAgeDays: number }): TrustLevel {
+/** Deterministic seller trust (never decided by the AI). Poor reviews (≥3, average < 3) always mean "low". */
+export function sellerTrust(s: {
+  verifiedShop: boolean;
+  platformSales: number;
+  accountAgeDays: number;
+  rating?: { avg: number | null; count: number };
+}): TrustLevel {
+  if (s.rating && s.rating.count >= 3 && s.rating.avg !== null && s.rating.avg < 3) return "low";
   if (s.verifiedShop || s.platformSales >= 3) return "high";
   if (s.platformSales >= 1 || s.accountAgeDays >= 30) return "medium";
   return "low";
