@@ -59,3 +59,41 @@ export function normalizeImei(raw: string) {
 
 /** Categories where the IMEI field is offered. */
 export const IMEI_CATEGORIES = ["smartphone", "tablet"] as const;
+
+// ---------- condition checklist (phones / tablets) ----------
+export const BIOMETRICS_STATES = ["ok", "broken", "none"] as const;
+export const REPAIR_KINDS = ["none", "screen", "battery", "back", "other"] as const;
+export const KIT_ITEMS = ["box", "charger", "receipt", "warranty"] as const;
+
+/** Structured condition instead of free text (Back Market / Swappa style); every field is optional. */
+export interface ConditionChecklist {
+  /** Battery health from Settings → Battery, %. */
+  batteryPct?: number;
+  biometrics?: (typeof BIOMETRICS_STATES)[number];
+  repairs?: Array<(typeof REPAIR_KINDS)[number]>;
+  kit?: Array<(typeof KIT_ITEMS)[number]>;
+}
+
+// ---------- «Проверено Ishonch»: courier's inspection at pickup ----------
+export const INSPECTION_CHECKS = ["matches_description", "screen", "camera", "biometrics", "imei_match", "battery"] as const;
+export type InspectionCheck = (typeof INSPECTION_CHECKS)[number];
+
+/** true = passed, false = failed; a check that does not apply is left out. */
+export interface Inspection {
+  checks: Partial<Record<InspectionCheck, boolean>>;
+  passed: boolean;
+  note: string | null;
+  at: string;
+}
+
+/** The badge stays on the listing this long after a passed inspection (the item may come back on sale). */
+export const VERIFIED_BADGE_DAYS = 30;
+
+// ---------- reviews ----------
+/** One reminder this long after delivery if the buyer has not reviewed yet. */
+export const REVIEW_REMINDER_HOURS = 24;
+export const REVIEW_REMINDER_MAX_DAYS = 7;
+
+// ---------- bundles ----------
+/** Extra items of the same seller in one delivery. */
+export const MAX_BUNDLE_EXTRA = 4;

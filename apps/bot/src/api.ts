@@ -122,6 +122,17 @@ export class ApiClient {
     return this.request<{ status: string }>(`/orders/${encodeURIComponent(orderId)}/${action}`, { method: "POST", user });
   }
 
+  suggestReplies(user: TgUser, conversationId: string) {
+    return this.request<{ items: string[] }>(`/internal/conversations/${encodeURIComponent(conversationId)}/suggestions`, { method: "POST", user });
+  }
+
+  sendSuggestion(user: TgUser, conversationId: string, index: number) {
+    return this.request<{ ok: boolean; text: string }>(
+      `/internal/conversations/${encodeURIComponent(conversationId)}/suggestions/${index}/send`,
+      { method: "POST", user },
+    );
+  }
+
   offerAction(user: TgUser, offerId: string, action: "accept" | "decline") {
     return this.request<{ status: string }>(`/offers/${encodeURIComponent(offerId)}/${action}`, { method: "POST", user });
   }
@@ -129,7 +140,7 @@ export class ApiClient {
   operatorStatus(user: TgUser, orderId: string, status: string) {
     return this.request<{ order: { status: string }; card: { text: string; buttons: CardButton[][] } }>(
       `/operator/orders/${encodeURIComponent(orderId)}/status`,
-      { method: "POST", user, headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) },
+      { method: "POST", user, headers: { "content-type": "application/json" }, body: JSON.stringify({ status, wholeBundle: true }) },
     );
   }
 

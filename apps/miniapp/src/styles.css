@@ -202,3 +202,5 @@ tbody th { color: var(--hint); font-weight: 500; white-space: nowrap; }
 .plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tariff-row { padding-bottom: 8px; border-bottom: 1px solid color-mix(in srgb, var(--hint) 20%, transparent); }
 .tariff-row .row > * { flex: 1; min-width: 0; }
+.insp-row { gap: 8px; }
+.insp-row .chips { flex-wrap: nowrap; flex-shrink: 0; }

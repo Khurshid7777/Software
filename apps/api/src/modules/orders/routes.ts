@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   CreateOrderSchema,
   DELIVERY_MODES,
+  InspectionInputSchema,
+  MAX_BUNDLE_EXTRA,
   OfferInputSchema,
   ORDER_STATUSES,
   ReviewInputSchema,
@@ -28,6 +30,7 @@ const MESSAGES: Record<string, string> = {
   offer_not_lower: "offer.err.not_lower",
   offer_pending: "offer.err.pending",
   too_many_offers: "offer.err.too_many",
+  bundle_invalid: "order.err.bundle_invalid",
 };
 
 const TariffSchema = z.object({
@@ -60,16 +63,33 @@ export function orderRoutes(
     }
   }
 
-  app.get<{ Querystring: { listingId?: string; district?: string; mode?: string } }>(
+  app.get<{ Querystring: { listingId?: string } }>("/orders/bundle-candidates", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const id = z.string().uuid().safeParse(req.query.listingId);
+      if (!id.success) return reply.code(400).send({ error: "bad_request" });
+      return svc.bundleCandidates(req.user!, id.data);
+    }),
+  );
+
+  app.get<{ Querystring: { listingId?: string; district?: string; mode?: string; extra?: string } }>(
     "/orders/quote",
     { preHandler: requireUser },
     (req, reply) =>
       handle(req, reply, async () => {
         const q = z
-          .object({ listingId: z.string().uuid(), district: z.enum(TASHKENT_DISTRICTS), mode: z.enum(DELIVERY_MODES) })
+          .object({
+            listingId: z.string().uuid(),
+            district: z.enum(TASHKENT_DISTRICTS),
+            mode: z.enum(DELIVERY_MODES),
+            extra: z
+              .string()
+              .optional()
+              .transform((s) => (s ? s.split(",") : []))
+              .pipe(z.array(z.string().uuid()).max(MAX_BUNDLE_EXTRA)),
+          })
           .safeParse(req.query);
         if (!q.success) return reply.code(400).send({ error: "bad_request" });
-        return svc.quote(q.data.listingId, q.data.district, q.data.mode, req.user!.id);
+        return svc.quote(q.data.listingId, q.data.district, q.data.mode, req.user!.id, q.data.extra);
       }),
   );
 
@@ -149,12 +169,23 @@ export function orderRoutes(
           note: z.string().trim().max(300).optional(),
           courierName: z.string().trim().max(100).optional(),
           courierPhone: z.string().trim().max(30).optional(),
+          wholeBundle: z.boolean().optional(),
         })
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       const { status, ...extra } = parsed.data;
       const res = await svc.operatorSetStatus(req.user!, req.params.id, status, extra);
       await audit(req.user!, `order.${status}`, req.params.id, extra);
+      return res;
+    }),
+  );
+
+  app.post<{ Params: { id: string } }>("/operator/orders/:id/inspection", { preHandler: auth.requireOperator }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = InspectionInputSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+      const res = await svc.inspect(req.user!, req.params.id, parsed.data);
+      await audit(req.user!, "order.inspection", req.params.id, { passed: res.inspection?.passed ?? null });
       return res;
     }),
   );

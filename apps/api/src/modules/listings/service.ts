@@ -4,12 +4,14 @@ import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
   CONDITIONS,
+  ConditionChecklistSchema,
   DELIVERY_MODES,
   EXPIRY_REMINDER_DAYS,
   FEE_PAYERS,
   LISTING_TTL_DAYS,
   MVP_DELIVERY_MODES,
   PRICE_DROP_BADGE_DAYS,
+  VERIFIED_BADGE_DAYS,
   PRICE_DROP_MIN_PCT,
   PRIVATE_SELLER_ACTIVE_LIMIT,
   TASHKENT_DISTRICTS,
@@ -21,8 +23,10 @@ import {
   suggestPrice,
   t,
   type Condition,
+  type ConditionChecklist,
   type DeliveryMode,
   type District,
+  type Inspection,
   type FeePayer,
   type Lang,
   type ListingAnalysis,
@@ -39,6 +43,7 @@ import {
   favorites,
   listingPhotos,
   listings,
+  orders,
   reviews,
   shops,
   users,
@@ -109,9 +114,18 @@ export const ListingPatchSchema = z
       .transform(normalizeImei)
       .refine(isValidImei, "invalid IMEI")
       .nullable(),
+    checklist: ConditionChecklistSchema,
   })
   .partial();
 export type ListingPatch = z.infer<typeof ListingPatchSchema>;
+
+/** "Battery 87%" answered to the AI's question pre-fills the checklist unless the seller set it. */
+function withBatteryAnswer(checklist: ConditionChecklist, answers: Record<string, string>): ConditionChecklist {
+  if (checklist.batteryPct != null) return checklist;
+  const raw = Object.entries(answers).find(([k]) => /battery|batar|аккум/i.test(k))?.[1];
+  const pct = Number(raw?.match(/\d{2,3}/)?.[0]);
+  return pct >= 50 && pct <= 100 ? { ...checklist, batteryPct: pct } : checklist;
+}
 
 export interface UploadedFile {
   data: Buffer;
@@ -280,6 +294,7 @@ export class ListingService {
         descriptionUz: text.description_uz,
         aiDraft: { ...draft, answers: merged },
         priceSuggestion,
+        checklist: withBatteryAnswer(l.checklist as ConditionChecklist, merged),
         // Keep a price the seller typed; otherwise follow the (possibly refreshed) suggestion.
         price: l.price == null || l.price === oldMarket ? (priceSuggestion?.market ?? l.price) : l.price,
         updatedAt: new Date(),
@@ -298,7 +313,7 @@ export class ListingService {
     );
     const imeiChanged = patch.imei !== undefined && patch.imei !== l.imei;
     // A reserved item is being delivered: what the buyer ordered must not change under them.
-    if (l.status === "reserved" && (textChanged || imeiChanged || patch.price !== undefined)) throw new ListingRejected("bad_state", 409);
+    if (l.status === "reserved" && (textChanged || imeiChanged || patch.price !== undefined || patch.checklist !== undefined)) throw new ListingRejected("bad_state", 409);
     if (patch.price === null && l.status !== "draft") throw new ListingRejected("fill_required", 400);
     if (textChanged && l.status !== "draft" && hasContactInfo({ ...l, ...patch })) throw new ListingRejected("contact_info", 400);
     const now = new Date();
@@ -767,6 +782,14 @@ export class ListingService {
     return this.dto(id, viewer?.id ?? null, { withSeller: true });
   }
 
+  /** Deep link into the Mini App for "share to chat / story"; only for listings buyers can open. */
+  async shareLink(id: string): Promise<{ url: string | null }> {
+    const [l] = await this.db.select({ status: listings.status }).from(listings).where(eq(listings.id, id));
+    if (!l || !["active", "reserved"].includes(l.status)) throw new ListingRejected("not_found", 404);
+    const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${id}`).catch(() => null) : null;
+    return { url };
+  }
+
   async deleteDraft(user: User, id: string) {
     const l = await this.own(user, id);
     if (l.status !== "draft") throw new ListingRejected("bad_state", 409);
@@ -868,6 +891,7 @@ export class ListingService {
     let salesOf = new Map<string, number>();
     let ratingOf = new Map<string, { avg: number | null; count: number }>();
     let responseOf = new Map<string, number>();
+    let inspectionsOf = new Map<string, { passed: number; failed: number }>();
     if (opts.withSeller && sellerIds.length) {
       const shopRows = await this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds));
       shopOf = new Map(shopRows.map((s) => [s.ownerUserId, s]));
@@ -884,6 +908,16 @@ export class ListingService {
         .groupBy(reviews.sellerUserId);
       ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
       responseOf = await this.responseMinutes(sellerIds);
+      const insp = await this.db
+        .select({
+          seller: orders.sellerUserId,
+          passed: sql<number>`count(*) filter (where (${orders.inspection}->>'passed')::boolean)::int`,
+          failed: sql<number>`count(*) filter (where not (${orders.inspection}->>'passed')::boolean)::int`,
+        })
+        .from(orders)
+        .where(and(inArray(orders.sellerUserId, sellerIds), sql`${orders.inspection} is not null`))
+        .groupBy(orders.sellerUserId);
+      inspectionsOf = new Map(insp.map((r) => [r.seller, { passed: r.passed, failed: r.failed }]));
     }
 
     const out: ListingDto[] = [];
@@ -915,6 +949,9 @@ export class ListingService {
         currency: "UZS",
         ...(isOwner ? { imei: l.imei } : {}),
         imeiTail: l.imei ? l.imei.slice(-4) : null,
+        checklist: (l.checklist as ConditionChecklist) ?? {},
+        verified:
+          l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,
         // Modes switched off by the feature flag are never offered to buyers.
         allowedDeliveryModes: (l.allowedDeliveryModes as DeliveryMode[]).filter(
@@ -949,6 +986,7 @@ export class ListingService {
           rating: ratingOf.get(l.sellerUserId) ?? { avg: null, count: 0 },
           shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
           responseMinutes: responseOf.get(l.sellerUserId) ?? null,
+          inspections: inspectionsOf.get(l.sellerUserId) ?? { passed: 0, failed: 0 },
         };
       }
       out.push(dto);

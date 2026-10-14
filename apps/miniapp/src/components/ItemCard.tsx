@@ -49,6 +49,7 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props
             </span>
           )}
           <MarketBadge item={item} />
+          {l.verified && <span className="badge">✅ {t("verified.badge")}</span>}
           <span className="hint">
             {l.district ? `📍 ${t(`district.${l.district}`)} · ` : ""}
             {l.condition ? t(`condition.${l.condition}`) : ""}

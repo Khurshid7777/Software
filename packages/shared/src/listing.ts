@@ -3,6 +3,7 @@ import { CHECK_CATEGORIES, type CheckCategory, type Lang } from "./types.js";
 import { formatUzs } from "./price/parsePrice.js";
 import { t } from "./i18n-core.js";
 import type { MarketRange } from "./price/verdict.js";
+import type { ConditionChecklist, Inspection } from "./market.js";
 
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
 export type Condition = (typeof CONDITIONS)[number];
@@ -76,6 +77,8 @@ export interface ListingSeller {
   shop: { id: string; name: string; verified: boolean; marketLocation: string | null } | null;
   /** Median minutes to the first reply in chats (last 60 days, at least 3 chats), else null. */
   responseMinutes: number | null;
+  /** Courier inspections of this seller's items: passed / failed. */
+  inspections: { passed: number; failed: number };
 }
 
 /** Listing as returned by the API. */
@@ -97,6 +100,10 @@ export interface ListingDto {
   imei?: string | null;
   /** Last 4 IMEI digits for buyers to compare with *#06# at handover; null when not given. */
   imeiTail: string | null;
+  /** Phones/tablets: structured condition. */
+  checklist: ConditionChecklist;
+  /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
+  verified: Inspection | null;
   district: District | null;
   allowedDeliveryModes: DeliveryMode[];
   feePayer: FeePayer;

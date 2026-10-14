@@ -1,6 +1,7 @@
 import type {
   AssistantMessage,
   AssistantResponse,
+  BundleQuote,
   CatalogFilters,
   CatalogItem,
   CatalogPage,
@@ -12,6 +13,7 @@ import type {
   DeliveryMode,
   DeliveryQuote,
   District,
+  InspectionCheck,
   Lang,
   ListingDto,
   ListingStatus,
@@ -77,7 +79,7 @@ export interface ShopInfo {
 }
 
 export type ListingPatch = Partial<
-  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei">
+  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei" | "checklist">
 >;
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
@@ -195,6 +197,7 @@ export function createApi(initData: string | null) {
     // ---- catalog & buyer tools ----
     catalog: (f: CatalogFilters, sort: CatalogSort, offset = 0) => request<CatalogPage>(`/catalog?${filtersToQuery(f, sort, offset)}`),
     catalogItem: (id: string) => request<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
+    shareLink: (listingId: string) => request<{ url: string | null }>(`/listings/${listingId}/share`),
     myOffer: (listingId: string) => request<{ offer: OfferDto | null }>(`/listings/${listingId}/offers/mine`),
     makeOffer: (listingId: string, amount: number) => request<OfferDto>(`/listings/${listingId}/offers`, json("POST", { amount })),
     setFavorite: (id: string, on: boolean) => request(`/favorites/${id}`, { method: on ? "POST" : "DELETE" }),
@@ -208,10 +211,11 @@ export function createApi(initData: string | null) {
     sellerReviews: (sellerId: string) => request<{ rating: SellerRating; reviews: ReviewDto[] }>(`/sellers/${sellerId}/reviews`),
 
     // ---- delivery ----
-    quote: (listingId: string, district: District, mode: DeliveryMode) =>
-      request<DeliveryQuote & { modes: DeliveryMode[] }>(
-        `/orders/quote?${new URLSearchParams({ listingId, district, mode }).toString()}`,
+    quote: (listingId: string, district: District, mode: DeliveryMode, extra: string[] = []) =>
+      request<DeliveryQuote & { modes: DeliveryMode[]; bundle: BundleQuote | null }>(
+        `/orders/quote?${new URLSearchParams({ listingId, district, mode, ...(extra.length ? { extra: extra.join(",") } : {}) }).toString()}`,
       ),
+    bundleCandidates: (listingId: string) => request<ListingDto[]>(`/orders/bundle-candidates?listingId=${listingId}`),
     createOrder: (input: CreateOrderInput) => request<OrderDto>("/orders", json("POST", input)),
     myOrders: (role: "buyer" | "seller") => request<OrderDto[]>(`/orders/mine?role=${role}`),
     order: (id: string) => request<OrderDto>(`/orders/${encodeURIComponent(id)}`),
@@ -252,6 +256,8 @@ export function createApi(initData: string | null) {
     settings: () => request<AdminSettings>("/admin/settings"),
     saveSettings: (s: Partial<AdminSettings>) => request<AdminSettings>("/admin/settings", json("PUT", s)),
     operatorOrders: (status?: OrderStatus) => request<OperatorOrder[]>(`/operator/orders${status ? `?status=${status}` : ""}`),
+    inspect: (id: string, checks: Partial<Record<InspectionCheck, boolean>>, note?: string) =>
+      request<OrderDto>(`/operator/orders/${id}/inspection`, json("POST", { checks, note })),
     operatorStatus: (id: string, status: OrderStatus, extra: { courierName?: string; courierPhone?: string; note?: string } = {}) =>
       request<{ order: OrderDto }>(`/operator/orders/${id}/status`, json("POST", { status, ...extra })),
 

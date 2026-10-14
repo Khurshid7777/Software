@@ -158,6 +158,11 @@ export const listings = pgTable(
     priceDroppedAt: timestamp("price_dropped_at", { withTimezone: true }),
     /** Phones: 15-digit IMEI (Luhn-checked). Only the owner and operators see it; buyers see the last 4 digits. */
     imei: text("imei"),
+    /** Phones/tablets: structured condition (battery %, biometrics, repairs, kit), see ConditionChecklist. */
+    checklist: jsonb("checklist").notNull().default({}),
+    /** «Проверено Ishonch»: the courier's inspection passed (badge while recent), see Inspection. */
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    verification: jsonb("verification"),
     currency: text("currency").notNull().default("UZS"),
     district: text("district"),
     allowedDeliveryModes: text("allowed_delivery_modes").array().notNull().default(sql`ARRAY['delivery_only','cod_seller']::text[]`),
@@ -272,6 +277,8 @@ export const conversations = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last AI reply suggestions for the seller: { items: string[], at } (sent by index from bot buttons). */
+    suggestions: jsonb("suggestions"),
   },
   (t) => [
     index("conversations_buyer_idx").on(t.buyerUserId, t.listingId),
@@ -365,6 +372,11 @@ export const orders = pgTable(
     courierPhone: text("courier_phone"),
     cancelReason: text("cancel_reason"),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    /** Several items of one seller in one delivery: every order of the bundle carries the first order's id. */
+    bundleId: uuid("bundle_id"),
+    /** Courier's inspection at pickup (checklist), see Inspection. */
+    inspection: jsonb("inspection"),
+    reviewRemindedAt: timestamp("review_reminded_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -373,6 +385,7 @@ export const orders = pgTable(
     index("orders_seller_idx").on(t.sellerUserId, t.createdAt),
     index("orders_listing_status_idx").on(t.listingId, t.status),
     index("orders_status_idx").on(t.status, t.updatedAt),
+    index("orders_bundle_idx").on(t.bundleId).where(sql`${t.bundleId} is not null`),
   ],
 );
 

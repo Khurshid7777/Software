@@ -15,8 +15,11 @@ export function sellerTrust(s: {
   platformSales: number;
   accountAgeDays: number;
   rating?: { avg: number | null; count: number };
+  inspections?: { passed: number; failed: number };
 }): TrustLevel {
   if (s.rating && s.rating.count >= 3 && s.rating.avg !== null && s.rating.avg < 3) return "low";
+  // Items that repeatedly failed the courier's inspection outweigh everything else.
+  if (s.inspections && s.inspections.failed >= 2 && s.inspections.failed > s.inspections.passed) return "low";
   if (s.verifiedShop || s.platformSales >= 3) return "high";
   if (s.platformSales >= 1 || s.accountAgeDays >= 30) return "medium";
   return "low";

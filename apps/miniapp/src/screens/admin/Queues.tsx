@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, operatorNextStatuses, type OrderStatus } from "@ishonch/shared/client";
+import { INSPECTION_CHECKS, formatUzs, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
-import { MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
+import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
 function useLoad<T>(load: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
@@ -108,6 +108,62 @@ export function Complaints({ api, onOpen }: { api: Api; onOpen: (id: string) => 
   );
 }
 
+/**
+ * Courier's checklist at pickup: each line is "ok" / "problem" / not checked. Any problem = not passed
+ * (the listing loses the badge, the seller's record shows it).
+ */
+function InspectionForm({ hasImei, onSubmit }: { hasImei: boolean; onSubmit: (c: Partial<Record<InspectionCheck, boolean>>, note?: string) => Promise<unknown> }) {
+  const [open, setOpen] = useState(false);
+  const [checks, setChecks] = useState<Partial<Record<InspectionCheck, boolean>>>({});
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!open)
+    return (
+      <button className="chip" onClick={() => setOpen(true)} data-testid="op-inspect">
+        🔍 Осмотр при получении
+      </button>
+    );
+  const items = INSPECTION_CHECKS.filter((c) => c !== "imei_match" || hasImei);
+  return (
+    <div className="card stack" data-testid="op-inspection-form">
+      {items.map((c) => (
+        <div key={c} className="row between insp-row">
+          <span>{INSPECTION_LABEL[c]}</span>
+          <span className="chips">
+            {([true, false] as const).map((v) => (
+              <button
+                key={String(v)}
+                className={checks[c] === v ? "chip active" : "chip"}
+                onClick={() => setChecks((s) => {
+                  const next = { ...s };
+                  if (next[c] === v) delete next[c];
+                  else next[c] = v;
+                  return next;
+                })}
+                data-testid={`insp-${c}-${v ? "ok" : "bad"}`}
+              >
+                {v ? "✓ ок" : "✗ нет"}
+              </button>
+            ))}
+          </span>
+        </div>
+      ))}
+      <input placeholder="Замечание (необязательно)" maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
+      <button
+        className="secondary"
+        disabled={busy || Object.keys(checks).length === 0}
+        onClick={async () => {
+          setBusy(true);
+          await onSubmit(checks, note.trim() || undefined).finally(() => setBusy(false));
+        }}
+        data-testid="insp-save"
+      >
+        Сохранить осмотр
+      </button>
+    </div>
+  );
+}
+
 const ORDER_FILTERS: Array<OrderStatus | "open"> = ["open", "new", "confirmed", "courier_assigned", "picked_up", "delivered", "returned"];
 
 /** Operators: open orders with contacts and the next status buttons (same rules as the bot buttons). */
@@ -150,6 +206,9 @@ export function OperatorOrders({ api }: { api: Api }) {
               {stale && <span className="badge">⏳ &gt;24 ч</span>}
             </div>
             <span>{o.listing.titleRu || o.listing.titleUz}</span>
+            {o.bundle.length > 0 && (
+              <span className="hint">🧺 Сборный заказ, одна поездка: + {o.bundle.map((b) => b.titleRu || b.titleUz).join(", ")}</span>
+            )}
             <span className="hint">
               {MODE_LABEL[o.mode]} · {o.mode === "delivery_only" ? "наличные не собирать" : `собрать ${formatUzs(q.buyerTotal)}`}
             </span>
@@ -160,6 +219,19 @@ export function OperatorOrders({ api }: { api: Api }) {
               Покупатель {o.contacts.buyerPhone ?? "—"} · продавец {o.contacts.sellerPhone ?? "—"}
             </span>
             {o.imei && <span className="hint">🔐 IMEI {o.imei} — сверить с *#06# при получении</span>}
+            {o.inspection ? (
+              <span className="hint" data-testid="op-inspection-result">
+                🔍 Осмотр {o.inspection.passed ? "✅ пройден" : "⚠️ замечания"}:{" "}
+                {Object.entries(o.inspection.checks)
+                  .map(([k, v]) => `${INSPECTION_LABEL[k as InspectionCheck]} ${v ? "✓" : "✗"}`)
+                  .join(", ")}
+                {o.inspection.note && ` — ${o.inspection.note}`}
+              </span>
+            ) : (
+              ["confirmed", "courier_assigned", "picked_up"].includes(o.status) && (
+                <InspectionForm hasImei={!!o.imei} onSubmit={(checks, note) => api.inspect(o.id, checks, note).then(reload, (e) => setError(e instanceof ApiError ? e.message : "Ошибка"))} />
+              )
+            )}
             {o.courier?.name && <span className="hint">Курьер: {o.courier.name}</span>}
             {next.includes("courier_assigned") && (
               <input

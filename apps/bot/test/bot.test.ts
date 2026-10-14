@@ -101,6 +101,14 @@ class FakeApi {
     if (id.startsWith("00000000")) throw new ApiError(409, "bad_state", "Это действие уже недоступно для заказа");
     return { status: action === "confirm" ? "confirmed" : "cancelled" };
   }
+  async suggestReplies(u: { id: number }, id: string) {
+    this.calls.push(`sugg:${u.id}:${id}`);
+    return { items: ["Да, в продаже.", "Можно доставку с осмотром.", "Цена окончательная."] };
+  }
+  async sendSuggestion(u: { id: number }, id: string, index: number) {
+    this.calls.push(`sr:${u.id}:${id}:${index}`);
+    return { ok: true, text: "Можно доставку с осмотром." };
+  }
   async offerAction(u: { id: number }, id: string, action: string) {
     this.calls.push(`offer:${u.id}:${action}:${id}`);
     return { status: action === "accept" ? "accepted" : "declined" };
@@ -309,6 +317,23 @@ describe("stage 4 buttons", () => {
     expect(sent.some((s) => s.method === "editMessageReplyMarkup")).toBe(true);
     const answer = sent.find((s) => s.method === "answerCallbackQuery")!;
     expect(answer.payload.text).toContain("Подтверждён");
+  });
+
+  it("reply drafts: the seller sees three numbered options and sends one with a tap", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`sugg:${ORDER}`));
+    await bot.idle();
+    expect(api.calls).toContain(`sugg:5:${ORDER}`);
+    const msg = sent.find((s) => s.method === "sendMessage")!;
+    expect(msg.payload.text).toContain("2. Можно доставку с осмотром.");
+    const kb = JSON.stringify(msg.payload.reply_markup);
+    expect(kb).toContain(`sr:${ORDER}:2`);
+    expect(kb).toContain(`reply:${ORDER}`);
+
+    await bot.handleUpdate(callback(`sr:${ORDER}:1`));
+    await bot.idle();
+    expect(api.calls).toContain(`sr:5:${ORDER}:1`);
+    expect(sent.some((s) => s.method === "editMessageText" && String(s.payload.text).includes("Можно доставку"))).toBe(true);
   });
 
   it("seller answers a price offer from the DM; buttons are removed", async () => {

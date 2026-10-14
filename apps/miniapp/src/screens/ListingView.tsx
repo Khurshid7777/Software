@@ -12,9 +12,10 @@ import {
   type OfferDto,
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
+import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { useLang, useT } from "../i18n";
-import { ensureWriteAccess } from "../telegram";
+import { canShareStory, ensureWriteAccess, shareLink, shareToStory } from "../telegram";
 
 /** Public listing card (catalog, assistant, and the "Buy with delivery" button in seller channels). */
 export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; meId: string; onBuy: (l: ListingDto) => void }) {
@@ -75,6 +76,19 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
       setToast(e instanceof ApiError ? e.message : t("common.error"));
     } finally {
       setSending(false);
+    }
+  }
+
+  async function share(to: "chat" | "story") {
+    try {
+      const { url } = await api.shareLink(l.id);
+      if (!url) return setToast(t("common.error"));
+      const text = `${listingTitle(l, lang)}${l.price ? ` — ${formatUzs(l.price)}` : ""}`;
+      if (to === "chat") return shareLink(url, text);
+      const photo = l.photos[0];
+      if (photo) shareToStory(new URL(apiUrl(photo.url), window.location.href).href, text, url, t("share.story_link"));
+    } catch {
+      setToast(t("common.error"));
     }
   }
 
@@ -140,8 +154,26 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
         {l.condition && t(`condition.${l.condition}`)}
         {l.district && ` · 📍 ${t(`district.${l.district}`)}`}
       </p>
+      {l.verified && (
+        <p className="hint-card" data-testid="verified-badge">
+          ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
+        </p>
+      )}
+      <ChecklistView value={l.checklist} />
       {l.imeiTail && <p className="hint-card" data-testid="imei-hint">🔐 {t("listing.imei", { tail: l.imeiTail })}</p>}
       <p className="description">{listingDescription(l, lang)}</p>
+      {["active", "reserved"].includes(l.status) && (
+        <div className="row wrap">
+          <button className="chip" onClick={() => share("chat")} data-testid="share-chat">
+            📤 {t("share.chat")}
+          </button>
+          {canShareStory() && l.photos.length > 0 && (
+            <button className="chip" onClick={() => share("story")} data-testid="share-story">
+              📸 {t("share.story")}
+            </button>
+          )}
+        </div>
+      )}
 
       {l.seller && (
         <section className="card stack">
@@ -160,6 +192,9 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
           )}
           <p className="hint">{t("listing.seller_since", { date: date(l.seller.registeredAt) })}</p>
           <p className="hint">{t("listing.sales", { n: l.seller.platformSales })}</p>
+          {l.seller.inspections.passed > 0 && (
+            <p className="hint">✅ {t("verified.seller", { n: l.seller.inspections.passed })}</p>
+          )}
           {l.seller.responseMinutes != null && (
             <p className="hint" data-testid="response-time">
               ⚡️{" "}

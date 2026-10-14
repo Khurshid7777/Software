@@ -27,12 +27,13 @@ await app.listen({ port: config.PORT, host: "0.0.0.0" });
 queue.start();
 
 // Hourly, on one instance at a time (advisory lock): listing expiry (reminder 3 days ahead, archive after
-// 30 days), delivery requests unanswered for 48 h, expired price offers, cleanup of finished jobs.
+// 30 days), delivery requests unanswered for 48 h, expired price offers, review reminders, cleanup of finished jobs.
 const hourly = () =>
   singleton(db, LOCKS.hourly, async () => {
     const r = await listings.runExpiry();
     const staleOrders = await orders.expireStale();
     await orders.expireOffers();
+    await orders.remindReviews();
     await queue.cleanup();
     await app.services.catalog.cleanupPendingReplies();
     if (r.reminded || r.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");

@@ -174,6 +174,7 @@ export class ModerationService {
         description_ru: l.descriptionRu,
         description_uz: l.descriptionUz,
         condition: l.condition,
+        condition_checklist: l.checklist,
         price_uzs: l.price,
         market_range_uzs: market,
         has_photo: !!first,

@@ -64,6 +64,13 @@
       "when": 1792005168137,
       "tag": "0008_market_features",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792006317021,
+      "tag": "0009_trust_features",
+      "breakpoints": true
     }
   ]
 }

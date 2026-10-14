@@ -114,6 +114,17 @@ function OrderCard({
         </span>
       </button>
 
+      {o.bundle.length > 0 && (
+        <p className="hint" data-testid="order-bundle">
+          🧺 {t("orders.bundle_with", { titles: o.bundle.map((b) => listingTitle(b, lang)).join(", ") })}
+        </p>
+      )}
+      {o.inspection && (
+        <p className="hint" data-testid="order-inspection">
+          {o.inspection.passed ? `✅ ${t("verified.badge")}` : `⚠️ ${t("orders.inspection_issues")}`}
+          {o.inspection.note && ` — ${o.inspection.note}`}
+        </p>
+      )}
       {o.address && <p className="hint">{t("orders.address", { address: o.address })}</p>}
       {o.courier?.name && <p className="hint">{t("order.courier", { name: o.courier.name })}</p>}
       <p>

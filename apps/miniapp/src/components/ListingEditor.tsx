@@ -11,6 +11,7 @@ import {
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, compressImage, type Api, type ListingPatch } from "../api";
 import { useLang, useT } from "../i18n";
+import { ChecklistEditor } from "./Checklist";
 
 interface Props {
   api: Api;
@@ -175,6 +176,9 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           />
           <span className="hint">{t("sell.imei_hint")}</span>
         </label>
+      )}
+      {(IMEI_CATEGORIES as readonly string[]).includes(listing.category) && (
+        <ChecklistEditor value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
       )}
 
       <label className="field">
