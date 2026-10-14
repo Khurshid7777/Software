@@ -7,10 +7,23 @@ import type {
   CatalogSort,
   CheckResult,
   CompareResponse,
+  ComplaintReason,
+  CreateOrderInput,
+  DeliveryMode,
+  DeliveryQuote,
+  District,
   Lang,
   ListingDto,
   ListingStatus,
-} from "@ishonch/shared";
+  AdminMetrics,
+  AdminSettings,
+  CourierTariff,
+  ModerationDecision,
+  OrderStatus,
+  OrderDto,
+  ReviewDto,
+  SellerRating,
+} from "@ishonch/shared/client";
 
 export interface SavedSearch {
   id: number;
@@ -34,6 +47,8 @@ export function filtersToQuery(f: CatalogFilters, sort?: CatalogSort, offset = 0
 }
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
+/** Fired when the API rejects the launch data (expired initData): the app asks to reopen. */
+export const SESSION_EXPIRED_EVENT = "ishonch:session-expired";
 
 export interface Me {
   id: string;
@@ -67,6 +82,42 @@ export type ListingPatch = Partial<
 /** Absolute URL for API-relative paths such as signed photo URLs. */
 export const apiUrl = (path: string) => `${BASE}${path}`;
 
+export interface QueueItem {
+  listing: ListingDto;
+  moderation: { decision: string; source: string; reasons: Array<{ code: string; note: string }>; duplicates?: string[] } | null;
+  openComplaints: number;
+}
+export interface ComplaintRow {
+  id: number;
+  listingId: string;
+  reason: string;
+  text: string | null;
+  createdAt: string;
+  listingTitle: string;
+  listingStatus: string;
+  sellerUserId: string;
+}
+export interface AdminUser {
+  id: string;
+  telegramId: number;
+  role: string;
+  createdAt: string;
+  bannedAt: string | null;
+  banReason: string | null;
+  activeListings: number;
+  rating: { avg: number | null; count: number };
+}
+export interface PriceRow {
+  id: number;
+  modelKey: string;
+  priceMin: number;
+  priceMedian: number;
+  priceMax: number;
+  source: string;
+  updatedAt: string;
+}
+export type OperatorOrder = OrderDto & { contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null } };
+
 export function createApi(initData: string | null) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await fetch(`${BASE}${path}`, {
@@ -74,6 +125,7 @@ export function createApi(initData: string | null) {
       headers: { ...(initData ? { authorization: `tma ${initData}` } : {}), ...init.headers },
     });
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401 && initData) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     if (!res.ok) throw new ApiError(res.status, body.error ?? "error", body.message ?? res.statusText, body.params);
     return body as T;
   }
@@ -115,7 +167,7 @@ export function createApi(initData: string | null) {
     },
     deletePhoto: (id: string, photoId: number) => request<ListingDto>(`/listings/${id}/photos/${photoId}`, { method: "DELETE" }),
     publish: (id: string, channelIds: number[]) =>
-      request<{ listing: ListingDto; postedChannels: number; failedChannels: number }>(
+      request<{ listing: ListingDto; postedChannels: number; failedChannels: number; moderation: ModerationDecision }>(
         `/listings/${id}/publish`,
         json("POST", { channelIds }),
       ),
@@ -124,6 +176,7 @@ export function createApi(initData: string | null) {
     markSold: (id: string, via: "platform" | "elsewhere") => request<ListingDto>(`/listings/${id}/sold`, json("POST", { via })),
     archive: (id: string) => request<ListingDto>(`/listings/${id}/archive`, { method: "POST" }),
     bump: (id: string) => request<ListingDto>(`/listings/${id}/bump`, { method: "POST" }),
+    renew: (id: string) => request<ListingDto>(`/listings/${id}/renew`, { method: "POST" }),
     deleteDraft: (id: string) => request(`/listings/${id}`, { method: "DELETE" }),
     shop: () => request<ShopInfo>("/shops/mine"),
     saveShop: (name: string, marketLocation: string) =>
@@ -144,6 +197,58 @@ export function createApi(initData: string | null) {
     saveSearch: (f: CatalogFilters) => request<SavedSearch>("/searches", json("POST", f)),
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
     contact: (id: string, text: string) => request<{ ok: true }>(`/listings/${id}/contact`, json("POST", { text })),
+    complain: (id: string, reason: ComplaintReason, text: string) =>
+      request<{ ok: true; duplicate: boolean; hidden: boolean }>(`/listings/${id}/complaints`, json("POST", { reason, text: text || undefined })),
+    sellerReviews: (sellerId: string) => request<{ rating: SellerRating; reviews: ReviewDto[] }>(`/sellers/${sellerId}/reviews`),
+
+    // ---- delivery ----
+    quote: (listingId: string, district: District, mode: DeliveryMode) =>
+      request<DeliveryQuote & { modes: DeliveryMode[] }>(
+        `/orders/quote?${new URLSearchParams({ listingId, district, mode }).toString()}`,
+      ),
+    createOrder: (input: CreateOrderInput) => request<OrderDto>("/orders", json("POST", input)),
+    myOrders: (role: "buyer" | "seller") => request<OrderDto[]>(`/orders/mine?role=${role}`),
+    order: (id: string) => request<OrderDto>(`/orders/${encodeURIComponent(id)}`),
+    orderAction: (id: string, action: "confirm" | "decline" | "cancel") => request<OrderDto>(`/orders/${id}/${action}`, { method: "POST" }),
+    review: (id: string, rating: number, text: string) =>
+      request<OrderDto>(`/orders/${id}/review`, json("POST", { rating, text: text.trim() || undefined })),
+
+    // ---- staff: admin & operators ----
+    adminMetrics: (days: number) => request<AdminMetrics>(`/admin/metrics?days=${days}`),
+    /** Absolute signed link (5 minutes) that Telegram's downloader can fetch without our auth header. */
+    ordersCsvLink: async (days: number) => {
+      const { url } = await request<{ url: string }>("/admin/reports/orders.csv/link", json("POST", { days }));
+      return new URL(`${BASE}${url}`, window.location.href).href;
+    },
+    audit: () =>
+      request<Array<{ id: number; actorTelegramId: number | null; action: string; target: string | null; details: Record<string, unknown>; createdAt: string }>>(
+        "/admin/audit",
+      ),
+    sendDigest: () => request<{ sent: number }>("/admin/digest", { method: "POST" }),
+    moderationQueue: () => request<QueueItem[]>("/admin/moderation"),
+    moderate: (id: string, decision: "approve" | "reject") =>
+      request<{ status: string }>(`/admin/listings/${id}/moderate`, json("POST", { decision })),
+    complaints: () => request<ComplaintRow[]>("/admin/complaints"),
+    findUser: (telegramId: string) => request<AdminUser>(`/admin/users?telegramId=${encodeURIComponent(telegramId)}`),
+    bannedUsers: () => request<Array<Pick<AdminUser, "id" | "telegramId" | "bannedAt" | "banReason" | "role">>>("/admin/users/banned"),
+    ban: (id: string, reason: string) => request(`/admin/users/${id}/ban`, json("POST", { reason })),
+    unban: (id: string) => request(`/admin/users/${id}/unban`, { method: "POST" }),
+    prices: () => request<PriceRow[]>("/admin/price-reference"),
+    importPrices: (csv: string) =>
+      request<{ imported: number; errors: string[] }>("/admin/price-reference/import", {
+        method: "POST",
+        headers: { "content-type": "text/csv" },
+        body: csv,
+      }),
+    deletePrice: (id: number) => request(`/admin/price-reference/${id}`, { method: "DELETE" }),
+    tariffs: () => request<CourierTariff[]>("/admin/tariffs"),
+    saveTariffs: (rows: Array<Omit<CourierTariff, "id">>) => request<CourierTariff[]>("/admin/tariffs", json("PUT", rows)),
+    settings: () => request<AdminSettings>("/admin/settings"),
+    saveSettings: (s: Partial<AdminSettings>) => request<AdminSettings>("/admin/settings", json("PUT", s)),
+    operatorOrders: (status?: OrderStatus) => request<OperatorOrder[]>(`/operator/orders${status ? `?status=${status}` : ""}`),
+    operatorStatus: (id: string, status: OrderStatus, extra: { courierName?: string; courierPhone?: string; note?: string } = {}) =>
+      request<{ order: OrderDto }>(`/operator/orders/${id}/status`, json("POST", { status, ...extra })),
+
     assistant: (messages: AssistantMessage[], lang: Lang) => request<AssistantResponse>("/assistant", json("POST", { messages, lang })),
     compare: (ids: string[], lang: Lang, needs?: string) =>
       request<CompareResponse>("/assistant/compare", json("POST", { ids, lang, needs })),

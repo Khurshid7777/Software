@@ -13,7 +13,8 @@
     "dev:miniapp": "pnpm --filter @ishonch/miniapp dev",
     "db:generate": "pnpm --filter @ishonch/api db:generate",
     "db:migrate": "pnpm --filter @ishonch/api db:migrate",
-    "db:seed": "pnpm --filter @ishonch/api db:seed"
+    "db:seed": "pnpm --filter @ishonch/api db:seed",
+    "check:i18n": "tsx scripts/check-i18n.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

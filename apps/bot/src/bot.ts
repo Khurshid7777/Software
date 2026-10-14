@@ -1,3 +1,4 @@
+import { sequentialize } from "@grammyjs/runner";
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { Message } from "grammy/types";
 import { normalizeLang, t, type CheckResult, type Lang } from "@ishonch/shared";
@@ -12,8 +13,6 @@ export interface BotConfig {
 }
 
 const MAX_IMAGES = 5;
-/** How long the bot waits for the reply text after "Reply" was pressed. */
-export const REPLY_WINDOW_MS = 15 * 60_000;
 const ALBUM_WAIT_MS = 1200;
 
 function tgUser(ctx: Context): TgUser | null {
@@ -22,6 +21,23 @@ function tgUser(ctx: Context): TgUser | null {
 
 export function createBot(cfg: BotConfig, api: ApiClient) {
   const bot = new Bot(cfg.token);
+
+  // The runner processes updates concurrently; within one chat they stay in order ("Reply", then the text).
+  bot.use(sequentialize((ctx) => ctx.chat?.id.toString() ?? ctx.from?.id.toString()));
+
+  // Long AI work (checks take up to a minute) runs in the background: grammY handles updates one by one,
+  // so awaiting it would freeze every other user's messages and button presses.
+  const inflight = new Set<Promise<unknown>>();
+  function background(task: Promise<unknown>) {
+    const p = task.catch((err) => console.error("background task failed", err)).finally(() => inflight.delete(p));
+    inflight.add(p);
+  }
+
+  // Staff groups (operators, moderators) only use inline buttons; never treat group chatter as listings to check.
+  bot.use(async (ctx, next) => {
+    if (ctx.chat && ctx.chat.type !== "private" && ctx.chat.type !== "channel" && !ctx.callbackQuery) return;
+    await next();
+  });
 
   async function langOf(user: TgUser): Promise<Lang> {
     try {
@@ -34,7 +50,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   function resultKeyboard(lang: Lang, check: CheckResult) {
     const kb = new InlineKeyboard().webApp(
       t(lang, "bot.find_similar"),
-      `${cfg.miniAppUrl}?startapp=similar_${check.id}#/catalog`,
+      `${cfg.miniAppUrl}?startapp=similar_${check.id}`,
     );
     const username = cfg.username ?? (bot.isInited() ? bot.botInfo.username : undefined);
     if (username) {
@@ -123,6 +139,17 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     });
   });
 
+  // Staff panel (admins, operators). Not in the command menu; the Mini App checks the role.
+  bot.command("admin", async (ctx) => {
+    const user = tgUser(ctx);
+    if (!user) return;
+    const me = await api.me(user).catch(() => null);
+    if (!me || (me.role !== "admin" && me.role !== "operator")) return ctx.reply(t(me?.language ?? "ru", "bot.help"));
+    await ctx.reply(me.role === "admin" ? "🛠 Админка Ishonch" : "🚚 Заказы на доставку", {
+      reply_markup: new InlineKeyboard().webApp("Открыть", `${cfg.miniAppUrl}?screen=admin`),
+    });
+  });
+
   bot.command("help", async (ctx) => {
     const user = tgUser(ctx);
     if (user) await ctx.reply(t(await langOf(user), "bot.help"));
@@ -137,31 +164,33 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   bot.callbackQuery(/^lang:(uz|ru)$/, async (ctx) => {
     const user = tgUser(ctx);
     const lang = ctx.match[1] as Lang;
-    if (user) await api.setLanguage(user, lang);
-    await ctx.answerCallbackQuery({ text: t(lang, "bot.language_set") });
+    const saved = user ? await api.setLanguage(user, lang).then(() => true, () => false) : false;
+    await ctx.answerCallbackQuery({ text: t(lang, saved ? "bot.language_set" : "common.error") });
+    if (!saved) return;
     await ctx.reply(t(lang, "bot.help"), {
       reply_markup: new InlineKeyboard().webApp(t(lang, "bot.open_app"), cfg.miniAppUrl),
     });
   });
 
   // ---- masked buyer ↔ seller chat: "Reply" button → next text message is relayed ----
-  const pendingReplies = new Map<number, { conversationId: string; at: number }>();
-
-  bot.callbackQuery(/^reply:([0-9a-f-]{36})$/, async (ctx) => {
-    const user = tgUser(ctx);
-    if (!user) return;
-    pendingReplies.set(user.id, { conversationId: ctx.match[1]!, at: Date.now() });
-    const lang = await langOf(user);
-    await ctx.answerCallbackQuery();
-    await ctx.reply(t(lang, "bot.write_reply"), { reply_markup: { force_reply: true } });
-  });
+  // The pending state lives in the API's database: any bot instance (and a restarted one) sees it.
+  bot.callbackQuery(/^reply:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.setPendingReply(user, ctx.match[1]!);
+      await ctx.reply(t(lang, "bot.write_reply"), { reply_markup: { force_reply: true } });
+      return "";
+    }),
+  );
 
   async function relayReply(ctx: Context, user: TgUser, text: string): Promise<boolean> {
-    const pending = pendingReplies.get(user.id);
-    if (!pending) return false;
-    pendingReplies.delete(user.id);
-    if (Date.now() - pending.at > REPLY_WINDOW_MS) return false;
+    const pending = await api.takePendingReply(user).catch(() => ({}) as { conversationId?: string; expired?: boolean });
+    if (!pending.conversationId && !pending.expired) return false;
     const lang = await langOf(user);
+    if (!pending.conversationId) {
+      // Not a listing to check (that would spend a daily check): the reply window simply closed.
+      await ctx.reply(t(lang, "bot.reply_expired"));
+      return true;
+    }
     try {
       await api.sendConversationMessage(user, pending.conversationId, text);
       await ctx.reply(t(lang, "bot.reply_sent"));
@@ -170,6 +199,70 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     }
     return true;
   }
+
+  // ---- stage 4: delivery orders, operators, moderators, renewals ----
+  async function buttonAction(ctx: Context, run: (user: TgUser, lang: Lang) => Promise<string>) {
+    const user = tgUser(ctx);
+    if (!user) return;
+    const lang = await langOf(user);
+    try {
+      const text = await run(user, lang);
+      await ctx.answerCallbackQuery({ text });
+    } catch (err) {
+      await ctx.answerCallbackQuery({
+        text: err instanceof ApiError ? err.message.slice(0, 190) : t(lang, "common.error"),
+        show_alert: true,
+      });
+    }
+  }
+
+  // Seller: confirm / decline a buyer's delivery request.
+  bot.callbackQuery(/^order:(confirm|decline):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      const action = ctx.match[1] as "confirm" | "decline";
+      const order = await api.orderAction(user, ctx.match[2]!, action);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, `order.status.${order.status}` as Parameters<typeof t>[1]);
+    }),
+  );
+
+  // Operators' chat: move the order to the next status; the card is re-rendered by the API.
+  bot.callbackQuery(/^op:([a-z_]+):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user) => {
+      const res = await api.operatorStatus(user, ctx.match[2]!, ctx.match[1]!);
+      const keyboard = new InlineKeyboard();
+      for (const row of res.card.buttons) {
+        for (const b of row) {
+          if ("url" in b) keyboard.url(b.text, b.url);
+          else keyboard.text(b.text, b.callbackData);
+        }
+        keyboard.row();
+      }
+      await ctx.editMessageText(res.card.text, { reply_markup: keyboard }).catch(() => undefined);
+      return t("ru", `order.status.${res.order.status}` as Parameters<typeof t>[1]);
+    }),
+  );
+
+  // Moderators' chat: approve / reject a pending listing.
+  bot.callbackQuery(/^mod:(approve|reject):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user) => {
+      const res = await api.moderate(user, ctx.match[2]!, ctx.match[1] as "approve" | "reject");
+      const verdict = res.status === "active" ? "✅ Одобрено" : "⛔️ Отклонено";
+      const by = ctx.from?.username ? ` (@${ctx.from.username})` : "";
+      const original = ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : res.title;
+      await ctx.editMessageText(`${original}\n\n${verdict}${by}`).catch(() => undefined);
+      return verdict;
+    }),
+  );
+
+  // Seller: renew a listing from the expiry reminder.
+  bot.callbackQuery(/^renew:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.renewListing(user, ctx.match[1]!);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, "expiry.renewed");
+    }),
+  );
 
   // ---- module D: seller's channel (bot added/removed as channel admin) ----
   bot.on("my_chat_member", async (ctx) => {
@@ -183,7 +276,8 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
 
     if (member.status === "administrator") {
       if (!member.can_post_messages) return notify(t(lang, "bot.channel_need_post_rights", { title }));
-      await api.linkChannel(user, upd.chat.id, title);
+      const linked = await api.linkChannel(user, upd.chat.id, title).then(() => true, () => false);
+      if (!linked) return notify(t(lang, "common.error"));
       return notify(t(lang, "bot.channel_linked", { title }));
     }
     if (member.status === "left" || member.status === "kicked" || member.status === "member") {
@@ -200,7 +294,8 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const lang = await langOf(user);
     const c = ctx.message.contact;
     if (c.user_id !== ctx.from.id) return ctx.reply(t(lang, "bot.phone_not_own"));
-    await api.setPhone(user, c.phone_number);
+    const saved = await api.setPhone(user, c.phone_number).then(() => true, () => false);
+    if (!saved) return ctx.reply(t(lang, "common.error"));
     await ctx.reply(t(lang, "bot.phone_saved"), {
       reply_markup: new InlineKeyboard().webApp(t(lang, "bot.open_app"), `${cfg.miniAppUrl}?screen=sell`),
     });
@@ -221,7 +316,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   bot.on(["message:photo", "message:document"], async (ctx) => {
     if (!imageFileId(ctx.message)) return;
     const groupId = ctx.message.media_group_id;
-    if (!groupId) return checkImages(ctx, [ctx.message]);
+    if (!groupId) return background(checkImages(ctx, [ctx.message]));
 
     const key = `${ctx.chat.id}:${groupId}`;
     const existing = albums.get(key);
@@ -232,7 +327,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const entry = existing ?? { ctx, messages: [ctx.message], timer: undefined as unknown as NodeJS.Timeout };
     entry.timer = setTimeout(() => {
       albums.delete(key);
-      void checkImages(entry.ctx, entry.messages);
+      background(checkImages(entry.ctx, entry.messages));
     }, ALBUM_WAIT_MS);
     albums.set(key, entry);
   });
@@ -241,7 +336,7 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     const user = tgUser(ctx);
     if (!user || ctx.message.text.startsWith("/")) return;
     if (await relayReply(ctx, user, ctx.message.text)) return;
-    await runCheck(ctx, user, (lang) => api.checkText(user, ctx.message.text, lang));
+    background(runCheck(ctx, user, (lang) => api.checkText(user, ctx.message.text, lang)));
   });
 
   bot.on("message", async (ctx) => {
@@ -249,6 +344,10 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     if (user) await ctx.reply(t(await langOf(user), "bot.unsupported"));
   });
 
+  // Old buttons (after a deploy) or unknown data: stop the spinner instead of leaving it forever.
+  bot.on("callback_query:data", (ctx) => ctx.answerCallbackQuery().catch(() => undefined));
+
   bot.catch((err) => console.error("bot error", err.error));
-  return bot;
+  /** Resolves when background checks have finished (tests and graceful shutdown). */
+  return Object.assign(bot, { idle: () => Promise.all([...inflight]) });
 }

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, sql, type SQL } from "drizzle-orm";
 import {
   canonicalQuery,
   canonicalWord,
@@ -21,6 +21,7 @@ import {
 import type { Repo } from "../../db/repo.js";
 import { startOfTashkentDay } from "../../db/repo.js";
 import {
+  botPendingReplies,
   conversationMessages,
   conversations,
   favorites,
@@ -35,14 +36,25 @@ import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/pu
 import type { ListingService } from "../listings/service.js";
 
 export const PAGE_SIZE = 20;
+/** Statuses anyone may see. */
+export const PUBLIC_STATUSES = ["active", "reserved", "sold"];
 export const MAX_NEW_CONVERSATIONS_PER_DAY = 20;
 export const MAX_SEARCH_ALERTS_PER_DAY = 3;
 export const MAX_SAVED_SEARCHES = 20;
+/** Messages one participant may send in one conversation per hour (the other side gets a DM for each). */
+export const MAX_MESSAGES_PER_HOUR = 30;
 const DAY = 24 * 3600_000;
 
 export class CatalogRejected extends Error {
   constructor(
-    public code: "not_found" | "own_listing" | "contact_limit" | "seller_unreachable" | "bad_request" | "too_many_searches",
+    public code:
+      | "not_found"
+      | "own_listing"
+      | "contact_limit"
+      | "seller_unreachable"
+      | "bad_request"
+      | "too_many_searches"
+      | "message_limit",
     public status: number,
   ) {
     super(code);
@@ -121,8 +133,19 @@ export class CatalogService {
     const q = f.q?.trim().toLowerCase();
     if (q) {
       // Full text (Russian stemming + "simple" for Uzbek/model names) OR fuzzy title match for typos.
+      // The fuzzy branch forgives typos in words, never in model numbers: every token with a digit
+      // ("13", "s23", "a54") must appear as a whole word, so "iphone 13" does not match "iPhone 10".
+      const canon = canonicalQuery(q);
+      const numbered = [...new Set(canon.split(/[^\p{L}\p{N}]+/u).filter((w) => /\d/.test(w)))].slice(0, 4);
+      const title = sql`lower(${listings.titleRu} || ' ' || ${listings.titleUz})`;
+      const numbersMatch = numbered.length
+        ? sql.join(
+            numbered.map((w) => sql`${title} ~ ${`(^|[^[:alnum:]])${w}([^[:alnum:]]|$)`}`),
+            sql` and `,
+          )
+        : sql`true`;
       c.push(sql`("listings"."search_vector" @@ ${tsQuery(q)}
-        or word_similarity(${canonicalQuery(q)}, lower(${listings.titleRu} || ' ' || ${listings.titleUz})) >= 0.4)`);
+        or (${canon} <% ${title} and ${numbersMatch}))`);
     }
     return c;
   }
@@ -160,7 +183,11 @@ export class CatalogService {
   /** Builds catalog cards (listing + market label + seller trust + favorite flag). */
   async items(ids: string[], viewer: User | null): Promise<CatalogItem[]> {
     if (ids.length === 0) return [];
-    const dtos = await Promise.all(ids.map((id) => this.listingsSvc.dto(id, viewer?.id ?? null, { withSeller: true })));
+    const staff = viewer?.role === "admin" || viewer?.role === "operator";
+    // Only public listings, unless the viewer owns them or is staff (compare/assistant take arbitrary ids).
+    const dtos = (await this.listingsSvc.dtos(ids, viewer?.id ?? null, { withSeller: true })).filter(
+      (l) => PUBLIC_STATUSES.includes(l.status) || l.seller?.id === viewer?.id || staff,
+    );
     const favs = viewer
       ? new Set(
           (
@@ -212,6 +239,8 @@ export class CatalogService {
       source = "catalog";
     }
     const entry = { range, source: range ? source : ("none" as const), at: Date.now() };
+    // Bounded: keys come from AI-generated model names, so the map must not grow forever.
+    if (this.marketCache.size >= 5000) this.marketCache.delete(this.marketCache.keys().next().value!);
     this.marketCache.set(modelKey, entry);
     return entry;
   }
@@ -224,7 +253,7 @@ export class CatalogService {
       .where(
         sql`${listings.status} in ('active', 'sold') and ${listings.price} > 0
             and ${listings.publishedAt} > now() - interval '90 days'
-            and similarity(coalesce(${listings.attributes}->>'modelKey', ''), ${modelKey}) >= 0.4`,
+            and coalesce(${listings.attributes}->>'modelKey', '') % ${modelKey}`,
       )
       .limit(200);
     const prices = rows
@@ -235,10 +264,14 @@ export class CatalogService {
     return { min: quantile(prices, 0.2), median: quantile(prices, 0.5), max: quantile(prices, 0.8) };
   }
 
+  logSearch(userId: string, f: CatalogFilters, results: number) {
+    return this.repo.event(userId, "catalog_search", { q: f.q?.slice(0, 100) ?? null, category: f.category ?? null, results });
+  }
+
   // ---------- favorites ----------
   async setFavorite(user: User, listingId: string, on: boolean) {
     const [l] = await this.db.select({ id: listings.id, status: listings.status }).from(listings).where(eq(listings.id, listingId));
-    if (!l) throw new CatalogRejected("not_found", 404);
+    if (!l || (on && !PUBLIC_STATUSES.includes(l.status))) throw new CatalogRejected("not_found", 404);
     if (on) {
       const inserted = await this.db.insert(favorites).values({ userId: user.id, listingId }).onConflictDoNothing().returning();
       if (inserted.length) {
@@ -264,8 +297,9 @@ export class CatalogService {
       .select({ id: favorites.listingId })
       .from(favorites)
       .innerJoin(listings, eq(listings.id, favorites.listingId))
-      .where(and(eq(favorites.userId, user.id), inArray(listings.status, ["active", "sold"])))
-      .orderBy(desc(favorites.createdAt));
+      .where(and(eq(favorites.userId, user.id), inArray(listings.status, ["active", "reserved", "sold"])))
+      .orderBy(desc(favorites.createdAt))
+      .limit(200);
     return this.items(
       rows.map((r) => r.id),
       user,
@@ -309,7 +343,14 @@ export class CatalogService {
       .select({ s: savedSearches, telegramId: users.telegramId, language: users.language })
       .from(savedSearches)
       .innerJoin(users, eq(users.id, savedSearches.userId))
-      .where(sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null`);
+      // Cheap pre-filter in SQL on the structured filters; only the survivors run the full search below.
+      .where(
+        sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null
+          and (${savedSearches.filters}->>'category' is null or ${savedSearches.filters}->>'category' = ${l.category})
+          and (${savedSearches.filters}->>'district' is null or ${savedSearches.filters}->>'district' = ${l.district ?? ""})
+          and (${savedSearches.filters}->>'priceMax' is null or (${savedSearches.filters}->>'priceMax')::bigint >= ${l.price ?? 0})
+          and (${savedSearches.filters}->>'priceMin' is null or (${savedSearches.filters}->>'priceMin')::bigint <= ${l.price ?? 0})`,
+      );
 
     let sent = 0;
     const notifiedUsers = new Set<string>();
@@ -378,6 +419,30 @@ export class CatalogService {
     return { ok: true, conversationId: conv!.id };
   }
 
+  // ---------- bot state: "the next text of this user is a reply" ----------
+  /** The bot's "Reply" button: remembered in the DB (shared by bot instances, survives restarts). */
+  async setPendingReply(user: User, conversationId: string, windowMs = 15 * 60_000) {
+    const [conv] = await this.db.select().from(conversations).where(eq(conversations.id, conversationId));
+    if (!conv || (conv.buyerUserId !== user.id && conv.sellerUserId !== user.id)) throw new CatalogRejected("not_found", 404);
+    const expiresAt = new Date(Date.now() + windowMs);
+    await this.db
+      .insert(botPendingReplies)
+      .values({ telegramUserId: user.telegramId, conversationId, expiresAt })
+      .onConflictDoUpdate({ target: botPendingReplies.telegramUserId, set: { conversationId, expiresAt } });
+    return { ok: true, expiresAt: expiresAt.toISOString() };
+  }
+
+  /** Takes (and clears) the pending reply: the conversation, "expired", or nothing pending. */
+  async takePendingReply(user: User): Promise<{ conversationId?: string; expired?: boolean }> {
+    const [row] = await this.db.delete(botPendingReplies).where(eq(botPendingReplies.telegramUserId, user.telegramId)).returning();
+    if (!row) return {};
+    return row.expiresAt > new Date() ? { conversationId: row.conversationId } : { expired: true };
+  }
+
+  async cleanupPendingReplies() {
+    await this.db.delete(botPendingReplies).where(lt(botPendingReplies.expiresAt, new Date(Date.now() - 24 * 3600_000)));
+  }
+
   /** Stores a message and forwards it to the other side with a "Reply" button. Names are never revealed. */
   async relay(conversationId: string, sender: User, text: string) {
     const [conv] = await this.db.select().from(conversations).where(eq(conversations.id, conversationId));
@@ -388,12 +453,18 @@ export class CatalogService {
     const recipientId = fromBuyer ? conv.sellerUserId : conv.buyerUserId;
     const [recipient] = await this.db.select().from(users).where(eq(users.id, recipientId));
     const [l] = await this.db.select().from(listings).where(eq(listings.id, conv.listingId));
-    if (!recipient || !l) throw new CatalogRejected("not_found", 404);
+    // Banned users neither receive nor send through the masked chat (old conversations included).
+    if (!recipient || !l || recipient.bannedAt) throw new CatalogRejected("not_found", 404);
 
-    const [{ n }] = (await this.db
-      .select({ n: count() })
+    const [{ n, mineLastHour }] = (await this.db
+      .select({
+        n: count(),
+        mineLastHour: sql<number>`count(*) filter (where ${conversationMessages.senderUserId} = ${sender.id}
+          and ${conversationMessages.createdAt} > now() - interval '1 hour')::int`,
+      })
       .from(conversationMessages)
-      .where(eq(conversationMessages.conversationId, conversationId))) as [{ n: number }];
+      .where(eq(conversationMessages.conversationId, conversationId))) as [{ n: number; mineLastHour: number }];
+    if (mineLastHour >= MAX_MESSAGES_PER_HOUR) throw new CatalogRejected("message_limit", 429);
     await this.db.insert(conversationMessages).values({ conversationId, senderUserId: sender.id, text: text.slice(0, 1000) });
     await this.db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conversationId));
     if (fromBuyer && n === 0) await this.repo.event(sender.id, "buyer_contacted_seller", { listingId: l.id });

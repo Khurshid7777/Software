@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { listingPlainText, type ListingDto } from "@ishonch/shared";
+import { useEffect, useRef, useState } from "react";
+import { listingPlainText, type ListingDto, type ModerationDecision } from "@ishonch/shared/client";
 import { ApiError, compressImage, type Api, type ShopInfo } from "../api";
 import { ListingEditor } from "../components/ListingEditor";
 import { useRecorder } from "../components/useRecorder";
 import { useLang, useT } from "../i18n";
-import { askPhone } from "../telegram";
+import { sharePhoneAndWait } from "../phone";
 
 type Step = "capture" | "analyzing" | "questions" | "generating" | "edit" | "done";
 const MAX_PHOTOS = 10;
@@ -29,6 +29,12 @@ export function Sell({ api, existing, onDone }: Props) {
   const [channels, setChannels] = useState<ShopInfo["channels"]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [posted, setPosted] = useState(0);
+  const [moderation, setModeration] = useState<ModerationDecision>("approved");
+  const [publishing, setPublishing] = useState(false);
+  const [waitingPhone, setWaitingPhone] = useState(false);
+  const pendingSave = useRef<Promise<unknown> | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => void (mounted.current = false), []);
   const [copied, setCopied] = useState(false);
   const recorder = useRecorder();
 
@@ -72,30 +78,35 @@ export function Sell({ api, existing, onDone }: Props) {
   }
 
   async function publish() {
-    if (!listing) return;
+    if (!listing || publishing) return;
     setError(null);
+    setPublishing(true);
     try {
+      await pendingSave.current; // a field edited just before the tap is saved first
       const res = await api.publish(listing.id, selected);
       setListing(res.listing);
       setPosted(res.postedChannels);
+      setModeration(res.moderation);
       setStep("done");
     } catch (e) {
       if (e instanceof ApiError && e.code === "phone_required") setNeedPhone(true);
       else fail(e);
+    } finally {
+      setPublishing(false);
     }
   }
 
   async function sharePhone() {
-    const sent = await askPhone().catch(() => false);
-    if (!sent) return;
-    // The phone reaches us through the bot; wait for it to land, then publish.
-    for (let i = 0; i < 15; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      if ((await api.me()).hasPhone) {
-        setNeedPhone(false);
-        return publish();
-      }
+    if (waitingPhone) return;
+    setWaitingPhone(true);
+    const r = await sharePhoneAndWait(api, () => mounted.current);
+    if (!mounted.current) return;
+    setWaitingPhone(false);
+    if (r === "ok") {
+      setNeedPhone(false);
+      return publish();
     }
+    if (r === "timeout") setError(t("phone.timeout"));
   }
 
   if (step === "capture") {
@@ -120,8 +131,8 @@ export function Sell({ api, existing, onDone }: Props) {
         {files.length > 0 && (
           <div className="thumbs">
             {files.map((f, i) => (
-              <button key={i} className="thumb" onClick={() => setFiles(files.filter((_, j) => j !== i))}>
-                <img src={URL.createObjectURL(f)} alt="" />
+              <button key={`${f.name}-${f.size}-${i}`} className="thumb" onClick={() => setFiles(files.filter((_, j) => j !== i))}>
+                <FilePreview file={f} />
               </button>
             ))}
           </div>
@@ -132,7 +143,11 @@ export function Sell({ api, existing, onDone }: Props) {
           </button>
         )}
         <textarea rows={3} placeholder={t("sell.text_hint")} value={text} onChange={(e) => setText(e.target.value)} data-testid="sell-text" />
-        {(error || recorder.error) && <p className="error" role="alert">{error ?? recorder.error}</p>}
+        {(error || recorder.error) && (
+          <p className="error" role="alert">
+            {error ?? t("sell.mic_unavailable")}
+          </p>
+        )}
         <button className="primary" onClick={analyze} data-testid="sell-analyze">
           {t("sell.analyze")}
         </button>
@@ -180,7 +195,7 @@ export function Sell({ api, existing, onDone }: Props) {
     return (
       <div className="stack">
         <h2>{t("sell.edit_title")}</h2>
-        <ListingEditor api={api} listing={listing} onChange={setListing} />
+        <ListingEditor api={api} listing={listing} onChange={setListing} onSaving={(p) => (pendingSave.current = p)} />
 
         {listing.status !== "active" && (
           <div className="card stack">
@@ -202,18 +217,18 @@ export function Sell({ api, existing, onDone }: Props) {
         {needPhone && (
           <div className="card stack">
             <p>{t("sell.phone_required")}</p>
-            <button className="secondary" onClick={sharePhone}>
+            <button className="secondary" onClick={sharePhone} disabled={waitingPhone}>
               📱 {t("sell.share_phone")}
             </button>
           </div>
         )}
         {error && <p className="error" role="alert">{error}</p>}
-        {listing.status === "active" ? (
+        {["active", "pending", "reserved"].includes(listing.status) ? (
           <button className="primary" onClick={onDone}>
             {t("shop.save")}
           </button>
         ) : (
-          <button className="primary" onClick={publish} data-testid="sell-publish">
+          <button className="primary" onClick={publish} disabled={publishing} data-testid="sell-publish">
             {t("sell.publish")}
           </button>
         )}
@@ -224,7 +239,14 @@ export function Sell({ api, existing, onDone }: Props) {
   if (step === "done" && listing) {
     return (
       <div className="stack center">
-        <h2>🎉 {t("sell.published")}</h2>
+        {moderation === "approved" && <h2>🎉 {t("sell.published")}</h2>}
+        {moderation === "needs_review" && <h2>⏸ {t("sell.published_pending")}</h2>}
+        {moderation === "rejected" && (
+          <>
+            <h2>⛔️ {t("sell.published_rejected")}</h2>
+            {listing.moderation?.message && <p>{listing.moderation.message}</p>}
+          </>
+        )}
         {posted > 0 && <p>{t("sell.posted_to_channels", { n: posted })}</p>}
         <button
           className="secondary"
@@ -243,4 +265,15 @@ export function Sell({ api, existing, onDone }: Props) {
     );
   }
   return null;
+}
+
+/** Preview of a picked file; the object URL is released when the thumbnail goes away. */
+function FilePreview({ file }: { file: File }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return src ? <img src={src} alt="" /> : null;
 }

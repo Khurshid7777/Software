@@ -16,6 +16,7 @@ import { ListingRejected } from "../listings/service.js";
 
 const MESSAGES: Record<string, string> = {
   contact_limit: "listing.contact_limit",
+  message_limit: "listing.message_limit",
   not_found: "listing.not_found",
   own_listing: "listing.own",
   seller_unreachable: "bot.reply_failed",
@@ -66,7 +67,12 @@ export function catalogRoutes(
     if (!filters) return reply.code(400).send({ error: "bad_request" });
     const sort = (CATALOG_SORTS as readonly string[]).includes(req.query.sort ?? "") ? (req.query.sort as CatalogSort) : "relevance";
     const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
-    return catalog.search(filters, sort, offset, req.user ?? null);
+    const page = await catalog.search(filters, sort, offset, req.user ?? null);
+    // First page only: one event per search, with the result count (zero results feed the spelling dictionary).
+    if (req.user && offset === 0) {
+      await catalog.logSearch(req.user.id, filters, page.items.length);
+    }
+    return page;
   });
 
   app.get<{ Params: { id: string } }>("/catalog/:id", { preHandler: auth.optionalUser }, async (req, reply) => {
@@ -119,6 +125,16 @@ export function catalogRoutes(
         return { ok: true };
       }),
   );
+
+  // Bot state for the "Reply" button (only the bot calls these, as the user who pressed it).
+  app.post<{ Body: { conversationId?: string } }>("/internal/pending-reply", { preHandler: auth.requireInternal }, (req, reply) =>
+    handle(req, reply, async () => {
+      const id = z.string().uuid().safeParse(req.body?.conversationId);
+      if (!id.success) return reply.code(400).send({ error: "bad_request" });
+      return catalog.setPendingReply(req.user!, id.data);
+    }),
+  );
+  app.post("/internal/pending-reply/take", { preHandler: auth.requireInternal }, (req) => catalog.takePendingReply(req.user!));
 
   // ---- AI assistant ----
   app.post<{ Body: { messages?: unknown; lang?: string } }>("/assistant", { preHandler: requireUser }, (req, reply) =>

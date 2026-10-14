@@ -19,6 +19,9 @@ const I18N_KEY: Record<string, string> = {
   need_photo: "sell.need_photo",
   limit_reached: "sell.limit_reached",
   not_found: "listing.not_found",
+  contact_info: "sell.contact_info",
+  duplicate: "sell.duplicate",
+  ai_quota: "sell.ai_quota",
 };
 
 async function readMultipart(req: FastifyRequest) {
@@ -134,6 +137,10 @@ export function listingRoutes(
     handle(req, reply, () => svc.bump(req.user!, req.params.id)),
   );
 
+  app.post<{ Params: { id: string } }>("/listings/:id/renew", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, () => svc.renew(req.user!, req.params.id)),
+  );
+
   app.get<{ Querystring: { status?: string } }>("/listings/mine", { preHandler: requireUser }, async (req) => {
     const status = LISTING_STATUSES.includes(req.query.status as ListingStatus) ? (req.query.status as ListingStatus) : undefined;
     return svc.mine(req.user!, status);
@@ -214,6 +221,12 @@ export function listingRoutes(
   app.post<{ Params: { id: string }; Body: { verified?: boolean } }>(
     "/admin/shops/:id/verify",
     { preHandler: auth.requireAdmin },
-    async (req, reply) => (await shopsSvc.verify(req.params.id, req.body?.verified !== false)) ?? reply.code(404).send({ error: "not_found" }),
+    async (req, reply) => {
+      const verified = req.body?.verified !== false;
+      const shop = await shopsSvc.verify(req.params.id, verified);
+      if (!shop) return reply.code(404).send({ error: "not_found" });
+      await repo.audit(req.user!, verified ? "shop.verify" : "shop.unverify", req.params.id);
+      return shop;
+    },
   );
 }

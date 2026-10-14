@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { t as translate, type I18nKey, type Lang } from "@ishonch/shared/i18n";
+import { t as translate, type I18nKey, type Lang } from "@ishonch/shared/client";
 
 export const LangContext = createContext<Lang>("uz");
 

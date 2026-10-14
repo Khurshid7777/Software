@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AssistantMessage, AssistantResponse, CatalogFilters, CompareResponse } from "@ishonch/shared";
+import type { AssistantMessage, AssistantResponse, CatalogFilters, CompareResponse } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
 import { ItemCard } from "../components/ItemCard";
 import { useLang, useT } from "../i18n";

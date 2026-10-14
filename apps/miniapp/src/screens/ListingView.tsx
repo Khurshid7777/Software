@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
-import { formatUzs, listingDescription, listingTitle, type CatalogItem } from "@ishonch/shared";
+import {
+  COMPLAINT_REASONS,
+  formatUzs,
+  listingDescription,
+  listingTitle,
+  type CatalogItem,
+  type ComplaintReason,
+  type ListingDto,
+} from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { useLang, useT } from "../i18n";
 import { ensureWriteAccess } from "../telegram";
 
 /** Public listing card (catalog, assistant, and the "Buy with delivery" button in seller channels). */
-export function ListingView({ api, id, meId }: { api: Api; id: string; meId: string }) {
+export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; meId: string; onBuy: (l: ListingDto) => void }) {
   const t = useT();
   const lang = useLang();
   const [item, setItem] = useState<CatalogItem | null>(null);
@@ -15,6 +23,8 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
   const [toast, setToast] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [complaint, setComplaint] = useState<{ reason: ComplaintReason | null; text: string } | null>(null);
 
   useEffect(() => {
     api
@@ -29,9 +39,24 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
   const own = l.seller?.id === meId;
   const date = (iso: string) => new Date(iso).toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ");
 
+  async function complain() {
+    if (!complaint?.reason || sending) return;
+    setSending(true);
+    try {
+      const res = await api.complain(l.id, complaint.reason, complaint.text);
+      setToast(res.duplicate ? t("complaint.already") : t("complaint.sent"));
+      setComplaint(null);
+    } catch (e) {
+      setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function send() {
-    if (!message.trim()) return;
+    if (!message.trim() || sending) return;
     if (!(await ensureWriteAccess())) return setToast(t("listing.write_access"));
+    setSending(true);
     try {
       await api.contact(l.id, message);
       setToast(t("listing.sent"));
@@ -39,6 +64,8 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
       setMessage("");
     } catch (e) {
       setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setSending(false);
     }
   }
 
@@ -83,6 +110,11 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
         <section className="card stack">
           <h3>{t("listing.seller")}</h3>
           <TrustBadge item={item} />
+          <p className="hint" data-testid="seller-rating">
+            {l.seller.rating.count > 0
+              ? t("listing.rating", { avg: l.seller.rating.avg ?? "—", n: l.seller.rating.count })
+              : t("listing.no_reviews")}
+          </p>
           {l.seller.shop && (
             <p>
               🏪 {l.seller.shop.name} {l.seller.shop.verified && <span className="badge">{t("shop.verified")}</span>}
@@ -110,6 +142,8 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
         </p>
       )}
 
+      {l.status === "reserved" && <p className="hint-card center">{t("listing.reserved")}</p>}
+
       {own ? (
         <p className="hint center">{t("listing.own")}</p>
       ) : (
@@ -125,7 +159,7 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
                   data-testid="contact-text"
                 />
                 <p className="hint">{t("listing.contact_hint")}</p>
-                <button className="primary" onClick={send} disabled={!message.trim()} data-testid="contact-send">
+                <button className="primary" onClick={send} disabled={!message.trim() || sending} data-testid="contact-send">
                   {t("listing.send")}
                 </button>
               </div>
@@ -134,10 +168,41 @@ export function ListingView({ api, id, meId }: { api: Api; id: string; meId: str
                 💬 {t("listing.write")}
               </button>
             )}
-            <button className="primary" onClick={() => setToast(t("listing.delivery_soon"))}>
-              {t("listing.buy_delivery")}
-            </button>
+            {l.allowedDeliveryModes.length > 0 && (
+              <button className="primary" onClick={() => onBuy(l)} data-testid="buy-delivery">
+                {t("listing.buy_delivery")}
+              </button>
+            )}
           </>
+        )
+      )}
+
+      {!own && ["active", "reserved"].includes(l.status) && (
+        complaint ? (
+          <section className="card stack" data-testid="complaint-form">
+            <h3>{t("complaint.title")}</h3>
+            <div className="chips">
+              {COMPLAINT_REASONS.map((r) => (
+                <button key={r} className={complaint.reason === r ? "chip active" : "chip"} onClick={() => setComplaint({ ...complaint, reason: r })}>
+                  {t(`complaint.reason.${r}`)}
+                </button>
+              ))}
+            </div>
+            <textarea
+              rows={2}
+              maxLength={500}
+              placeholder={t("complaint.text_placeholder")}
+              value={complaint.text}
+              onChange={(e) => setComplaint({ ...complaint, text: e.target.value })}
+            />
+            <button className="secondary" disabled={!complaint.reason || sending} onClick={complain} data-testid="complaint-send">
+              {t("complaint.send")}
+            </button>
+          </section>
+        ) : (
+          <button className="link danger" onClick={() => setComplaint({ reason: null, text: "" })} data-testid="complaint-open">
+            ⚠️ {t("complaint.title")}
+          </button>
         )
       )}
     </div>

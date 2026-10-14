@@ -1,13 +1,14 @@
-import { z } from "zod";
+import type { ListingAnalysis } from "./schemas.js";
 import { CHECK_CATEGORIES, type CheckCategory, type Lang } from "./types.js";
 import { formatUzs } from "./price/parsePrice.js";
-import { t } from "./i18n.js";
+import { t } from "./i18n-core.js";
 import type { MarketRange } from "./price/verdict.js";
 
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
-export const LISTING_STATUSES = ["draft", "pending", "active", "sold", "archived", "rejected"] as const;
+/** reserved = a delivery order was confirmed; pending = waiting for a moderator (AI doubt or complaints). */
+export const LISTING_STATUSES = ["draft", "pending", "active", "reserved", "sold", "archived", "rejected"] as const;
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
 
 export const DELIVERY_MODES = ["delivery_only", "cod_seller", "cod_platform"] as const;
@@ -38,42 +39,7 @@ export const PRIVATE_SELLER_ACTIVE_LIMIT = 10;
 export const BUMP_INTERVAL_DAYS = 3;
 export const LISTING_TTL_DAYS = 30;
 
-/** Step 1: what the AI can see in the photos / hear in the voice note. */
-export const ListingAnalysisSchema = z.object({
-  category: z.enum(CHECK_CATEGORIES),
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
-  model_key: z.string().nullable().describe("lowercase 'brand model storage', e.g. 'apple iphone 13 128gb'"),
-  specs: z
-    .array(z.object({ name: z.string(), value: z.string() }))
-    .describe("only characteristics that are visible or stated; never guessed"),
-  condition: z.enum([...CONDITIONS, "unknown"]),
-  visible_defects: z.array(z.string()).describe("scratches, cracks, dents actually visible in photos"),
-  questions: z
-    .array(
-      z.object({
-        key: z.string().describe("snake_case id, e.g. storage, battery_health, kit, warranty"),
-        question_ru: z.string(),
-        question_uz: z.string(),
-        options: z.array(z.string()).describe("2-5 short answer options, may be empty for free text"),
-      }),
-    )
-    .describe("1-3 questions about important missing facts; empty if nothing important is missing"),
-  photo_hints: z
-    .array(z.object({ ru: z.string(), uz: z.string() }))
-    .describe("advice to improve photos, e.g. 'add a photo of the screen turned on'"),
-  ai_market_estimate_uzs: z.object({ min: z.number(), max: z.number() }).nullable(),
-});
-export type ListingAnalysis = z.infer<typeof ListingAnalysisSchema>;
 
-/** Step 2: the selling text in both languages. */
-export const ListingTextSchema = z.object({
-  title_ru: z.string(),
-  title_uz: z.string(),
-  description_ru: z.string(),
-  description_uz: z.string(),
-});
-export type ListingText = z.infer<typeof ListingTextSchema>;
 
 export interface PriceSuggestion {
   quick: number;
@@ -106,6 +72,7 @@ export interface ListingSeller {
   id: string;
   registeredAt: string;
   platformSales: number;
+  rating: { avg: number | null; count: number };
   shop: { id: string; name: string; verified: boolean; marketLocation: string | null } | null;
 }
 
@@ -136,6 +103,8 @@ export interface ListingDto {
   canBumpAt: string | null;
   expiresAt: string | null;
   soldVia: "platform" | "elsewhere" | null;
+  /** Owner only: why the listing is pending / rejected / archived by the system. */
+  moderation: { reason: string | null; message: string | null } | null;
   seller?: ListingSeller;
 }
 
@@ -156,3 +125,4 @@ export function listingPlainText(l: ListingDto, lang: Lang): string {
   lines.push("", `📍 ${lang === "ru" ? "Ташкент" : "Toshkent"}${l.district ? `, ${t(lang, `district.${l.district}`)}` : ""}`);
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+

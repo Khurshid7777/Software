@@ -11,7 +11,7 @@ import {
   type RiskRules,
 } from "@ishonch/shared";
 import type { Db } from "./client.js";
-import { aiUsage, checks, events, priceReference, settings, users, type User } from "./schema.js";
+import { adminAudit, aiBudget, aiUsage, checks, events, priceReference, settings, users, type User } from "./schema.js";
 import type { AiUsageRecord } from "../ai/aiService.js";
 
 /** Tashkent is UTC+5 with no DST; "today" for limits is a Tashkent calendar day. */
@@ -31,18 +31,26 @@ export class Repo {
   constructor(
     readonly db: Db,
     private adminTelegramIds: number[] = [],
+    private operatorTelegramIds: number[] = [],
   ) {}
 
   // ---- users ----
   async upsertTelegramUser(tg: { id: number; language_code?: string }): Promise<User> {
-    const role: Role | undefined = this.adminTelegramIds.includes(tg.id) ? "admin" : undefined;
+    const role: Role | undefined = this.adminTelegramIds.includes(tg.id)
+      ? "admin"
+      : this.operatorTelegramIds.includes(tg.id)
+        ? "operator"
+        : undefined;
     const [row] = await this.db
       .insert(users)
       .values({ telegramId: tg.id, language: normalizeLang(tg.language_code), ...(role ? { role } : {}) })
       .onConflictDoUpdate({
         target: users.telegramId,
         // Language is chosen once from Telegram, then only changed explicitly by the user.
-        set: role ? { role } : { telegramId: sql`excluded.telegram_id` },
+        // Staff roles follow the env lists: an id removed from ADMIN/OPERATOR_TELEGRAM_IDS loses the role.
+        set: role
+          ? { role }
+          : { role: sql`case when ${users.role} in ('admin', 'operator') then 'buyer' else ${users.role} end` },
       })
       .returning();
     return row!;
@@ -54,6 +62,13 @@ export class Repo {
 
   async setPhone(userId: string, phone: string) {
     await this.db.update(users).set({ phone }).where(eq(users.id, userId));
+  }
+
+  async hasOpenOrders(userId: string) {
+    const rows = await this.db.execute(sql`
+      select 1 from orders where (buyer_user_id = ${userId} or seller_user_id = ${userId})
+        and status in ('new', 'confirmed', 'courier_assigned', 'picked_up') limit 1`);
+    return (rows as unknown as unknown[]).length > 0;
   }
 
   async acceptTerms(userId: string) {
@@ -93,6 +108,24 @@ export class Repo {
     await this.db.insert(aiUsage).values(u);
   }
 
+  /** Running monthly counter (UTC month), by model tier. */
+  async aiBudget(now = new Date()): Promise<{ fast: number; strong: number }> {
+    const rows = await this.db.select().from(aiBudget).where(eq(aiBudget.month, now.toISOString().slice(0, 7)));
+    const out = { fast: 0, strong: 0 };
+    for (const r of rows) if (r.tier === "fast" || r.tier === "strong") out[r.tier] = Number(r.spentUsd);
+    return out;
+  }
+
+  async addAiSpend(tier: "fast" | "strong", usd: number, now = new Date()) {
+    await this.db
+      .insert(aiBudget)
+      .values({ month: now.toISOString().slice(0, 7), tier, spentUsd: usd, calls: 1 })
+      .onConflictDoUpdate({
+        target: [aiBudget.month, aiBudget.tier],
+        set: { spentUsd: sql`${aiBudget.spentUsd} + ${usd}`, calls: sql`${aiBudget.calls} + 1` },
+      });
+  }
+
   async aiSpendSince(since: Date): Promise<number> {
     const [row] = await this.db
       .select({ total: sql<string>`coalesce(sum(${aiUsage.costUsd}), 0)` })
@@ -116,7 +149,7 @@ export class Repo {
         max: priceReference.priceMax,
       })
       .from(priceReference)
-      .where(sql`similarity(${priceReference.modelKey}, ${key}) >= 0.4`)
+      .where(sql`${priceReference.modelKey} % ${key}`)
       .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
       .limit(5);
     const row = rows.find((r) => sameModel(r.modelKey, key));
@@ -169,6 +202,50 @@ export class Repo {
   async getCheck(id: string) {
     const [row] = await this.db.select().from(checks).where(eq(checks.id, id));
     return row ?? null;
+  }
+
+  // ---- per-user daily quotas (paid AI calls) ----
+  /**
+   * Reserves one unit of a daily quota BEFORE the expensive call: insert, then count. Parallel requests
+   * cannot all slip through (at the boundary some may be refused, never over-admitted).
+   * Returns the reservation id (to refund on our own failures) or null when the quota is used up.
+   */
+  async reserveDaily(userId: string, quota: string, limit: number): Promise<number | null> {
+    const [row] = await this.db.insert(events).values({ userId, name: quota }).returning({ id: events.id });
+    const used = await this.usedToday(userId, quota);
+    if (used > limit) {
+      await this.db.delete(events).where(eq(events.id, row!.id));
+      return null;
+    }
+    return row!.id;
+  }
+
+  async usedToday(userId: string, quota: string): Promise<number> {
+    const [r] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(events)
+      .where(and(eq(events.userId, userId), eq(events.name, quota), gte(events.createdAt, startOfTashkentDay())));
+    return r?.n ?? 0;
+  }
+
+  /** Gives a reservation back (the AI was unavailable — not the user's fault). */
+  async refundDaily(reservationId: number | null) {
+    if (reservationId != null) await this.db.delete(events).where(eq(events.id, reservationId));
+  }
+
+  // ---- staff audit log ----
+  async audit(actor: Pick<User, "id" | "telegramId"> | null, action: string, target?: string | null, details: Record<string, unknown> = {}) {
+    await this.db.insert(adminAudit).values({
+      actorUserId: actor?.id ?? null,
+      actorTelegramId: actor?.telegramId ?? null,
+      action,
+      target: target ?? null,
+      details,
+    });
+  }
+
+  listAudit(limit = 200) {
+    return this.db.select().from(adminAudit).orderBy(desc(adminAudit.id)).limit(Math.min(limit, 1000));
   }
 
   // ---- analytics ----

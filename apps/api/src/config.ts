@@ -11,6 +11,9 @@ const csvNumbers = z
       .map(Number),
   );
 
+/** Optional number where an empty value (`OPERATOR_CHAT_ID=`) means "not set". */
+const optionalNumber = z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().optional());
+
 const EnvSchema = z.object({
   NODE_ENV: z.string().default("development"),
   PORT: z.coerce.number().default(3000),
@@ -21,11 +24,36 @@ const EnvSchema = z.object({
   AI_MODEL_FAST: z.string().default("claude-haiku-5-5"),
   AI_MODEL_STRONG: z.string().default("claude-opus-5-5"),
   AI_MONTHLY_LIMIT_USD: z.coerce.number().default(50),
+  // Part of the monthly limit the strong model (buyer assistant) may use.
+  AI_STRONG_MONTHLY_LIMIT_USD: z.coerce.number().default(20),
   CHECKS_PER_DAY: z.coerce.number().default(5),
   ASSISTANT_PER_DAY: z.coerce.number().default(10),
   USD_RATE: z.coerce.number().default(12800),
   ADMIN_TELEGRAM_IDS: csvNumbers,
-  INIT_DATA_MAX_AGE_SEC: z.coerce.number().default(24 * 3600),
+  // Delivery operators (role "operator"): change order statuses via bot buttons.
+  OPERATOR_TELEGRAM_IDS: csvNumbers,
+  // Telegram group for operators (confirmed orders with addresses and phones). Empty: DM each operator.
+  OPERATOR_CHAT_ID: optionalNumber,
+  // Telegram group for moderators (pending listings, complaints). Empty: DM each admin.
+  MODERATION_CHAT_ID: optionalNumber,
+  // Courier integration. Only "manual" exists: operators arrange couriers themselves.
+  COURIER_PROVIDER: z.enum(["manual"]).default("manual"),
+  // Hour (Tashkent, 0-23) of the daily digest to admins; empty or -1 turns it off.
+  DIGEST_HOUR: z.preprocess((v) => (v === "" ? -1 : v), z.coerce.number().int().min(-1).max(23).default(9)),
+  // AI pre-moderation of listings at publication. "false": rules and duplicate checks only.
+  AI_MODERATION: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false"),
+  // How long a Mini App launch stays valid; a leaked initData can be replayed only within this window.
+  INIT_DATA_MAX_AGE_SEC: z.coerce.number().default(4 * 3600),
+  // Per-user request limits (off in tests unless set explicitly).
+  RATE_LIMITS: z.enum(["on", "off"]).optional(),
+  // Behind nginx: take the client IP from X-Forwarded-For.
+  TRUST_PROXY: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false"),
   CORS_ORIGIN: z.string().default("*"),
   LOG_FILE: z.string().optional(),
   // Photo storage: "s3" (MinIO) in production, "fs" for local development and tests.
@@ -50,6 +78,16 @@ const EnvSchema = z.object({
 
 export type Config = z.infer<typeof EnvSchema>;
 
+const WEAK_SECRETS = new Set(["dev-internal-token", "change-me-long-random", ""]);
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  return EnvSchema.parse(env);
+  const config = EnvSchema.parse(env);
+  if (config.NODE_ENV === "production") {
+    // The internal token lets the bot act as any user, admins included: never start with a placeholder.
+    if (WEAK_SECRETS.has(config.INTERNAL_API_TOKEN) || config.INTERNAL_API_TOKEN.length < 32) {
+      throw new Error("INTERNAL_API_TOKEN must be a random string of at least 32 characters in production");
+    }
+    if (!config.BOT_TOKEN) throw new Error("BOT_TOKEN is required in production");
+  }
+  return config;
 }

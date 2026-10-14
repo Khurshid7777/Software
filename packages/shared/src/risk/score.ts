@@ -1,18 +1,10 @@
-import { z } from "zod";
+import type { RiskRules } from "../schemas.js";
 import defaultRulesJson from "./defaultRules.json" with { type: "json" };
 import type { RiskFlag, RiskLevel, RiskResult } from "../types.js";
 
-export const RiskRulesSchema = z.object({
-  version: z.number(),
-  priceBelowMarketPct: z.number(),
-  newAccountDays: z.number(),
-  aiAdjustmentMax: z.number(),
-  levels: z.object({ medium: z.number(), high: z.number() }),
-  weights: z.record(z.string(), z.number()),
-});
-export type RiskRules = z.infer<typeof RiskRulesSchema>;
 
-export const DEFAULT_RISK_RULES: RiskRules = RiskRulesSchema.parse(defaultRulesJson);
+/** Validated against RiskRulesSchema in tests and when the API loads overrides from `settings`. */
+export const DEFAULT_RISK_RULES: RiskRules = defaultRulesJson as RiskRules;
 
 /** Facts known about a listing/seller; every field optional so module B and A can share it. */
 export interface RiskSignals {
@@ -69,3 +61,4 @@ export function scoreRisk(signals: RiskSignals, rules: RiskRules = DEFAULT_RISK_
   score = Math.max(score, floor);
   return { score, level: riskLevel(score, rules), flags, aiAdjustment };
 }
+

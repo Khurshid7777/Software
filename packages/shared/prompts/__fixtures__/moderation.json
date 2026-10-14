@@ -1,0 +1,188 @@
+[
+  {
+    "name": "iphone13_ok_ru",
+    "lang": "ru",
+    "listing": {
+      "category": "smartphone",
+      "title_ru": "Apple iPhone 13 128 ГБ, отличное состояние",
+      "title_uz": "Apple iPhone 13 128 GB, a'lo holatda",
+      "description_ru": "iPhone 13 на 128 ГБ, батарея 88%. Небольшая царапина на рамке. Коробка и кабель в комплекте.",
+      "description_uz": "iPhone 13, 128 GB, batareya 88%. Ramkada kichik tirnalish bor. Qutisi va kabeli bor.",
+      "condition": "good",
+      "price_uzs": 5600000,
+      "market_range_uzs": {
+        "min": 5200000,
+        "median": 5800000,
+        "max": 6500000
+      }
+    },
+    "expect": {
+      "decision": [
+        "approved"
+      ]
+    },
+    "mock": {
+      "decision": "approved",
+      "reasons": [],
+      "seller_message_ru": "",
+      "seller_message_uz": ""
+    }
+  },
+  {
+    "name": "redmi_ok_uz",
+    "lang": "uz",
+    "listing": {
+      "category": "smartphone",
+      "title_ru": "Xiaomi Redmi Note 13 256 ГБ",
+      "title_uz": "Xiaomi Redmi Note 13 256 GB",
+      "description_ru": "Телефон в хорошем состоянии, пользовался полгода. Есть чехол.",
+      "description_uz": "Telefon yaxshi holatda, yarim yil ishlatilgan. G'ilofi bor.",
+      "condition": "good",
+      "price_uzs": 2400000,
+      "market_range_uzs": {
+        "min": 2100000,
+        "median": 2500000,
+        "max": 2900000
+      }
+    },
+    "expect": {
+      "decision": [
+        "approved"
+      ]
+    },
+    "mock": {
+      "decision": "approved",
+      "reasons": [],
+      "seller_message_ru": "",
+      "seller_message_uz": ""
+    }
+  },
+  {
+    "name": "pistol_rejected_ru",
+    "lang": "ru",
+    "listing": {
+      "category": "other",
+      "title_ru": "Травматический пистолет с патронами",
+      "title_uz": "Travmatik to'pponcha o'qlari bilan",
+      "description_ru": "Продаю травматический пистолет, 2 обоймы патронов в подарок. Без документов.",
+      "description_uz": "Travmatik to'pponcha sotiladi, 2 ta o'q sovg'a. Hujjatsiz.",
+      "condition": "good",
+      "price_uzs": 3000000,
+      "market_range_uzs": null
+    },
+    "expect": {
+      "decision": [
+        "rejected"
+      ],
+      "reason": "prohibited_item"
+    },
+    "mock": {
+      "decision": "rejected",
+      "reasons": [
+        {
+          "code": "prohibited_item",
+          "note": "Оружие и патроны"
+        }
+      ],
+      "seller_message_ru": "Оружие и патроны продавать на Ishonch нельзя.",
+      "seller_message_uz": "Ishonch'da qurol va o'q-dorilarni sotish mumkin emas."
+    }
+  },
+  {
+    "name": "medicine_rejected_uz",
+    "lang": "uz",
+    "listing": {
+      "category": "other",
+      "title_ru": "Таблетки для похудения, импорт",
+      "title_uz": "Ozish uchun tabletkalar, import",
+      "description_ru": "Остались 3 упаковки таблеток, срок годности до конца года.",
+      "description_uz": "3 qadoq tabletka qoldi, yaroqlilik muddati yil oxirigacha.",
+      "condition": "new",
+      "price_uzs": 400000,
+      "market_range_uzs": null
+    },
+    "expect": {
+      "decision": [
+        "rejected"
+      ],
+      "reason": "prohibited_item"
+    },
+    "mock": {
+      "decision": "rejected",
+      "reasons": [
+        {
+          "code": "prohibited_item",
+          "note": "Лекарства"
+        }
+      ],
+      "seller_message_ru": "Лекарства и БАДы продавать на Ishonch нельзя.",
+      "seller_message_uz": "Ishonch'da dori-darmonlarni sotish mumkin emas."
+    }
+  },
+  {
+    "name": "macbook_bait_ru",
+    "lang": "ru",
+    "listing": {
+      "category": "laptop",
+      "title_ru": "MacBook Air M2 256 ГБ, как новый",
+      "title_uz": "MacBook Air M2 256 GB, yangidek",
+      "description_ru": "Срочно! MacBook Air M2, как новый. Только сегодня такая цена.",
+      "description_uz": "Shoshilinch! MacBook Air M2, yangidek. Faqat bugun shunday narx.",
+      "condition": "like_new",
+      "price_uzs": 2500000,
+      "market_range_uzs": {
+        "min": 9500000,
+        "median": 10500000,
+        "max": 11800000
+      }
+    },
+    "expect": {
+      "decision": [
+        "needs_review",
+        "rejected"
+      ]
+    },
+    "mock": {
+      "decision": "needs_review",
+      "reasons": [
+        {
+          "code": "misleading",
+          "note": "Цена в 4 раза ниже рынка"
+        }
+      ],
+      "seller_message_ru": "Проверьте цену — она сильно ниже рынка.",
+      "seller_message_uz": "Narxni tekshiring — u bozordan ancha past."
+    }
+  },
+  {
+    "name": "game_account_ru",
+    "lang": "ru",
+    "listing": {
+      "category": "other",
+      "title_ru": "Аккаунт PUBG Mobile, много скинов",
+      "title_uz": "PUBG Mobile akkaunti, ko'p skinlar",
+      "description_ru": "Продаю аккаунт PUBG, 70 уровень, привязка к почте, передам логин и пароль.",
+      "description_uz": "PUBG akkaunti sotiladi, 70-daraja, login va parolni beraman.",
+      "condition": "good",
+      "price_uzs": 800000,
+      "market_range_uzs": null
+    },
+    "expect": {
+      "decision": [
+        "rejected",
+        "needs_review"
+      ]
+    },
+    "mock": {
+      "decision": "rejected",
+      "reasons": [
+        {
+          "code": "not_an_item",
+          "note": "Продажа аккаунта"
+        }
+      ],
+      "seller_message_ru": "Аккаунты продавать на Ishonch нельзя.",
+      "seller_message_uz": "Ishonch'da akkauntlarni sotish mumkin emas."
+    }
+  }
+]

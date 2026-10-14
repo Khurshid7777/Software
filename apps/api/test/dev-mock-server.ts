@@ -50,6 +50,7 @@ const ai = mockAiByPrompt({
   },
   listing_analyze: listing.mock_analysis,
   listing_generate: listing.mock_text,
+  listing_moderate: { decision: "approved", reasons: [], seller_message_ru: "", seller_message_uz: "" },
 });
 
 const app = await buildApp({

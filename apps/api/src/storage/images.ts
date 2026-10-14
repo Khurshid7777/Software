@@ -11,8 +11,12 @@ export interface ProcessedImage {
   phash: string;
 }
 
+/** Rejects decompression bombs: 40 MP covers any phone camera (a 1 GB raw decode does not). */
+const LIMIT_INPUT_PIXELS = 40_000_000;
+sharp.concurrency(2);
+
 export async function processImage(input: Buffer): Promise<ProcessedImage> {
-  const base = sharp(input, { failOn: "error" }).rotate();
+  const base = sharp(input, { failOn: "error", limitInputPixels: LIMIT_INPUT_PIXELS }).rotate();
   const full = await base
     .clone()
     .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
@@ -23,12 +27,12 @@ export async function processImage(input: Buffer): Promise<ProcessedImage> {
     .resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 75 })
     .toBuffer();
-  return { full: full.data, ai, width: full.info.width, height: full.info.height, phash: await dHash(input) };
+  return { full: full.data, ai, width: full.info.width, height: full.info.height, phash: await dHash(full.data) }; // hash the normalised copy: one decode less, same structure
 }
 
 /** Difference hash: 9x8 greyscale, compare neighbours → 64 bits. Robust to resizing and recompression. */
 export async function dHash(input: Buffer): Promise<string> {
-  const px = await sharp(input).rotate().greyscale().resize(9, 8, { fit: "fill" }).raw().toBuffer();
+  const px = await sharp(input, { limitInputPixels: LIMIT_INPUT_PIXELS }).rotate().greyscale().resize(9, 8, { fit: "fill" }).raw().toBuffer();
   let bits = 0n;
   for (let y = 0; y < 8; y++) {
     for (let x = 0; x < 8; x++) {

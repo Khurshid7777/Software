@@ -1,4 +1,3 @@
-import { count, and, eq, gte } from "drizzle-orm";
 import {
   AssistantCompareSchema,
   AssistantQuerySchema,
@@ -18,8 +17,8 @@ import {
 } from "@ishonch/shared";
 import type { AiService } from "../../ai/aiService.js";
 import { AiLimitExceededError, AiOutputError } from "../../ai/aiService.js";
-import { startOfTashkentDay, type Repo } from "../../db/repo.js";
-import { events, type User } from "../../db/schema.js";
+import type { Repo } from "../../db/repo.js";
+import type { User } from "../../db/schema.js";
 import type { CatalogService } from "./service.js";
 
 const LANG_NAME: Record<Lang, string> = { ru: "Russian", uz: "Uzbek (Latin script)" };
@@ -53,13 +52,13 @@ export class AssistantService {
 
   private async remaining(user: User) {
     const perDay = await this.repo.getSetting("assistant_per_day", this.defaults.perDay);
-    const [{ n }] = (await this.repo.db
-      .select({ n: count() })
-      .from(events)
-      .where(and(eq(events.userId, user.id), eq(events.name, "assistant_query"), gte(events.createdAt, startOfTashkentDay())))) as [
-      { n: number },
-    ];
-    return Math.max(0, perDay - n);
+    return Math.max(0, perDay - (await this.repo.usedToday(user.id, "assistant_query")));
+  }
+
+  /** One unit of the daily assistant quota (questions and comparisons share it), reserved before any AI call. */
+  private async reserve(user: User) {
+    const perDay = await this.repo.getSetting("assistant_per_day", this.defaults.perDay);
+    if ((await this.repo.reserveDaily(user.id, "assistant_query", perDay)) === null) throw new AssistantRejected("limit_reached", 429);
   }
 
   private async withAi<T>(fn: () => Promise<T>) {
@@ -74,9 +73,7 @@ export class AssistantService {
   async ask(user: User, lang: Lang, messages: AssistantMessage[]): Promise<AssistantResponse> {
     const history = messages.slice(-10);
     if (!history.length || history.at(-1)!.role !== "user") throw new AssistantRejected("bad_request", 400);
-    const left = await this.remaining(user);
-    if (left <= 0) throw new AssistantRejected("limit_reached", 429);
-    await this.repo.event(user.id, "assistant_query", { turns: history.length });
+    await this.reserve(user);
 
     // Count questions the assistant has already asked (each assistant turn with "?" lines).
     const asked = history
@@ -94,7 +91,7 @@ export class AssistantService {
       }),
     );
     const parsed = q.data;
-    const base = { remainingToday: left - 1 };
+    const base = { remainingToday: await this.remaining(user) };
 
     if (parsed.action === "off_topic") {
       return { ...base, kind: "off_topic", reply: parsed.reply, questions: [], options: [], filters: null };
@@ -172,6 +169,7 @@ export class AssistantService {
     if (unique.length < 2 || unique.length > 3) throw new AssistantRejected("bad_request", 400);
     const items = await this.catalog.items(unique, user);
     if (items.length !== unique.length) throw new AssistantRejected("bad_request", 400);
+    await this.reserve(user);
 
     // The table is built from data, not by the AI.
     const rows: CompareResponse["rows"] = [

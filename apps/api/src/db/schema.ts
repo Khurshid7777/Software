@@ -12,6 +12,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -158,6 +159,8 @@ export const listings = pgTable(
     feePayer: text("fee_payer").notNull().default("buyer"),
     status: text("status").notNull().default("draft"),
     moderationReason: text("moderation_reason"),
+    /** Last moderation result (AI / rules / admin / complaints), see ModerationRecord. */
+    moderation: jsonb("moderation"),
     riskScore: integer("risk_score"),
     /** AI analysis (questions, photo hints, market estimate) and seller answers. */
     aiDraft: jsonb("ai_draft").notNull().default({}),
@@ -172,12 +175,14 @@ export const listings = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true }),
     bumpedAt: timestamp("bumped_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    expiryRemindedAt: timestamp("expiry_reminded_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("listings_seller_status_idx").on(t.sellerUserId, t.status),
     index("listings_status_bumped_idx").on(t.status, t.bumpedAt),
+    index("listings_status_expires_idx").on(t.status, t.expiresAt),
   ],
 );
 
@@ -277,6 +282,173 @@ export const conversationMessages = pgTable("conversation_messages", {
   createdAt: createdAt(),
 });
 
+/** Courier prices by district; the most specific active row wins (see pickTariff). */
+export const courierTariffs = pgTable("courier_tariffs", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  fromDistrict: text("from_district"),
+  toDistrict: text("to_district"),
+  price: bigint("price", { mode: "number" }).notNull(),
+  codFeePct: numeric("cod_fee_pct", { precision: 5, scale: 2, mode: "number" }).notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Delivery request: buyer → seller confirms → operator and courier → delivered / returned. */
+export const orders = pgTable(
+  "orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull(),
+    status: text("status").notNull().default("new"),
+    district: text("district").notNull(),
+    address: text("address").notNull(),
+    comment: text("comment"),
+    /** Snapshot at order time: item price, fees and who pays them (DeliveryQuote). */
+    quote: jsonb("quote").notNull(),
+    feePayer: text("fee_payer").notNull(),
+    provider: text("provider").notNull().default("manual"),
+    externalId: text("external_id"),
+    courierName: text("courier_name"),
+    courierPhone: text("courier_phone"),
+    cancelReason: text("cancel_reason"),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("orders_buyer_idx").on(t.buyerUserId, t.createdAt),
+    index("orders_seller_idx").on(t.sellerUserId, t.createdAt),
+    index("orders_listing_status_idx").on(t.listingId, t.status),
+    index("orders_status_idx").on(t.status, t.updatedAt),
+  ],
+);
+
+export const orderEvents = pgTable(
+  "order_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actor: text("actor").notNull(),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("order_events_order_idx").on(t.orderId)],
+);
+
+/** One review per delivered order, written by the buyer about the seller. */
+export const reviews = pgTable(
+  "reviews",
+  {
+    id: serial("id").primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id").references(() => users.id, { onDelete: "set null" }),
+    rating: integer("rating").notNull(),
+    text: text("text"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("reviews_seller_idx").on(t.sellerUserId, t.createdAt)],
+);
+
+export const complaints = pgTable(
+  "complaints",
+  {
+    id: serial("id").primaryKey(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    text: text("text"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolution: text("resolution"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("complaints_listing_user_uq").on(t.listingId, t.userId),
+    index("complaints_user_created_idx").on(t.userId, t.createdAt),
+  ],
+);
+
+/**
+ * Background jobs (saved-search alerts, channel posts): a table queue polled with FOR UPDATE SKIP LOCKED,
+ * so any number of API instances share the work and a crashed worker's job is retried after `lockedUntil`.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastError: text("last_error"),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("jobs_due_idx").on(t.runAt).where(sql`${t.doneAt} is null`)],
+);
+
+/** Running AI spend per calendar month (UTC) and model tier; incremented atomically after each call. */
+export const aiBudget = pgTable(
+  "ai_budget",
+  {
+    month: text("month").notNull(),
+    tier: text("tier").notNull(),
+    spentUsd: numeric("spent_usd", { precision: 12, scale: 6, mode: "number" }).notNull().default(0),
+    calls: integer("calls").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.month, t.tier] })],
+);
+
+/** Who did what in the admin panel and staff chats (moderation, bans, settings, tariffs, prices). */
+export const adminAudit = pgTable(
+  "admin_audit",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorTelegramId: bigint("actor_telegram_id", { mode: "number" }),
+    action: text("action").notNull(),
+    target: text("target"),
+    details: jsonb("details").notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [index("admin_audit_created_idx").on(t.createdAt)],
+);
+
+/** Bot state "the next text of this user is a reply in conversation X" (shared by bot instances, survives restarts). */
+export const botPendingReplies = pgTable("bot_pending_replies", {
+  telegramUserId: bigint("telegram_user_id", { mode: "number" }).primaryKey(),
+  conversationId: uuid("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
 export type User = typeof users.$inferSelect;
+export type Order = typeof orders.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
 export type Shop = typeof shops.$inferSelect;

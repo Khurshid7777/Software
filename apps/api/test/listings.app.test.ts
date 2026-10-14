@@ -87,6 +87,8 @@ describe.skipIf(!reachable)("seller cabinet (integration)", () => {
     db = created.db;
     close = () => created.sql.end();
     app = await buildApp({ config, db, ai, storage: new FsStorage(storageDir), stt, publisher });
+    // Isolate from live listings left by other test files or dev seeds: duplicate-photo checks see every live listing.
+    await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved')`);
   });
 
   beforeEach(async () => {
@@ -219,7 +221,7 @@ describe.skipIf(!reachable)("seller cabinet (integration)", () => {
     expect(card.seller?.platformSales).toBe(1);
   });
 
-  it("private sellers are limited to 10 active listings; shops are not", async () => {
+  it("private sellers are limited to 10 active listings; only verified shops are not", async () => {
     await app.inject({ method: "POST", url: "/internal/phone", headers: internal(SELLER), payload: { phone: "+998901234567" } });
     const me = (await app.inject({ url: "/me", headers: tma(SELLER) })).json();
     // Fast-forward: 10 active listings already exist.
@@ -235,15 +237,18 @@ describe.skipIf(!reachable)("seller cabinet (integration)", () => {
     expect(limited.json()).toMatchObject({ error: "limit_reached" });
     expect(limited.json().message).toContain("10");
 
+    // A self-declared shop is still limited: anyone can fill in a shop name.
     const shop = await app.inject({ method: "PUT", url: "/shops/mine", headers: tma(SELLER), payload: { name: "Malika Mobile", marketLocation: "Malika, 3-qator" } });
     expect(shop.json()).toMatchObject({ name: "Malika Mobile", verified: false });
-    const ok = await app.inject({ method: "POST", url: `/listings/${d.id}/publish`, headers: tma(SELLER), payload: {} });
-    expect(ok.statusCode).toBe(200);
+    const stillLimited = await app.inject({ method: "POST", url: `/listings/${d.id}/publish`, headers: tma(SELLER), payload: {} });
+    expect(stillLimited.json().error).toBe("limit_reached");
 
-    // Admin grants the "verified shop" badge; buyers see it on the card.
+    // Admin grants the "verified shop" badge: the limit is lifted and buyers see the badge.
     expect((await app.inject({ method: "POST", url: `/admin/shops/${shop.json().id}/verify`, headers: tma(SELLER), payload: {} })).statusCode).toBe(403);
     const v = await app.inject({ method: "POST", url: `/admin/shops/${shop.json().id}/verify`, headers: tma(ADMIN), payload: { verified: true } });
     expect(v.json().verified).toBe(true);
+    const ok = await app.inject({ method: "POST", url: `/listings/${d.id}/publish`, headers: tma(SELLER), payload: {} });
+    expect(ok.statusCode).toBe(200);
     const card = (await app.inject({ url: `/listings/${d.id}`, headers: tma(BUYER) })).json() as ListingDto;
     expect(card.seller?.shop).toMatchObject({ name: "Malika Mobile", verified: true });
   });

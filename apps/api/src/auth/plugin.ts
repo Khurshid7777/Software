@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Repo } from "../db/repo.js";
@@ -11,6 +12,12 @@ declare module "fastify" {
     authVia?: "tma" | "internal";
   }
 }
+
+/** What the bot may assert about a user: a Telegram id and the client language, nothing else. */
+const InternalUserSchema = z.object({
+  id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  language_code: z.string().max(16).optional(),
+});
 
 export interface AuthOptions {
   repo: Repo;
@@ -50,8 +57,8 @@ export function makeAuth(opts: AuthOptions) {
       const raw = req.headers["x-telegram-user"];
       if (typeof raw !== "string") return null;
       try {
-        const u = JSON.parse(raw) as TelegramUser;
-        return typeof u.id === "number" ? { user: u, via: "internal" } : null;
+        const parsed = InternalUserSchema.safeParse(JSON.parse(raw));
+        return parsed.success ? { user: parsed.data as TelegramUser, via: "internal" } : null;
       } catch {
         return null;
       }
@@ -85,7 +92,9 @@ export function makeAuth(opts: AuthOptions) {
   /** Optional auth: sets req.user when credentials are valid, never rejects. */
   async function optionalUser(req: FastifyRequest) {
     const tg = await resolveTelegramUser(req);
-    if (tg) req.user = await opts.repo.upsertTelegramUser(tg);
+    if (!tg) return;
+    const user = await opts.repo.upsertTelegramUser(tg);
+    if (!user.bannedAt) req.user = user; // a banned user browses as an anonymous visitor
   }
 
   return { requireUser, requireRole, requireInternal, optionalUser };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CatalogItem } from "@ishonch/shared";
+import type { CatalogItem } from "@ishonch/shared/client";
 import type { Api, SavedSearch } from "../api";
 import { ItemCard } from "../components/ItemCard";
 import { useT } from "../i18n";

@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  canTransition,
   dictionaries,
   inspectionChecklist,
   isLinkOnly,
   normalizeLang,
+  operatorNextStatuses,
   parsePrice,
+  pickTariff,
   priceVerdict,
+  quoteDelivery,
   scoreRisk,
   scrubPii,
   t,
@@ -16,6 +20,8 @@ import {
   sameModel,
   listingPlainText,
   suggestPrice,
+  sellerTrust,
+  type CourierTariff,
 } from "../src/index.js";
 
 describe("parsePrice", () => {
@@ -120,7 +126,7 @@ describe("scoreRisk", () => {
 
 describe("i18n", () => {
   it("ru and uz have the same keys", () => {
-    expect(Object.keys(dictionaries.uz).sort()).toEqual(Object.keys(dictionaries.ru).sort());
+    expect(Object.keys(dictionaries.uz!).sort()).toEqual(Object.keys(dictionaries.ru!).sort());
   });
 
   it("interpolates params", () => {
@@ -210,4 +216,65 @@ describe("listing helpers", () => {
     });
     expect(suggestPrice(null, "none")).toBeNull();
   });
+});
+
+// ---------- stage 4: delivery & trust ----------
+describe("courier tariffs", () => {
+  const tariffs: CourierTariff[] = [
+    { id: 1, name: "default", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, active: true },
+    { id: 2, name: "to sergeli", fromDistrict: null, toDistrict: "sergeli", price: 40_000, codFeePct: 1, active: true },
+    { id: 3, name: "chilonzor local", fromDistrict: "chilonzor", toDistrict: "chilonzor", price: 20_000, codFeePct: 1, active: true },
+    { id: 4, name: "disabled", fromDistrict: null, toDistrict: "yunusobod", price: 1, codFeePct: 0, active: false },
+  ];
+
+  it("picks the most specific active tariff", () => {
+    expect(pickTariff(tariffs, "chilonzor", "chilonzor")!.id).toBe(3);
+    expect(pickTariff(tariffs, "chilonzor", "sergeli")!.id).toBe(2);
+    expect(pickTariff(tariffs, null, "yunusobod")!.id).toBe(1);
+    expect(pickTariff([], null, "yunusobod")).toBeNull();
+  });
+
+  it("quotes COD fee and splits fees by payer", () => {
+    const t = tariffs[0]!;
+    const buyer = quoteDelivery({ tariff: t, itemPrice: 5_000_000, mode: "cod_seller", feePayer: "buyer" });
+    expect(buyer).toMatchObject({ deliveryFee: 30_000, codFee: 50_000, buyerFee: 80_000, sellerFee: 0, buyerTotal: 5_080_000, sellerReceives: 5_000_000 });
+    const seller = quoteDelivery({ tariff: t, itemPrice: 5_000_000, mode: "delivery_only", feePayer: "seller" });
+    expect(seller).toMatchObject({ codFee: 0, buyerFee: 0, sellerFee: 30_000, buyerTotal: 5_000_000, sellerReceives: 4_970_000 });
+    const split = quoteDelivery({ tariff: t, itemPrice: 1_000_000, mode: "cod_seller", feePayer: "split" });
+    expect(split.buyerFee + split.sellerFee).toBe(40_000);
+    expect(quoteDelivery({ tariff: null, itemPrice: 1_000_000, mode: "cod_seller", feePayer: "buyer" }).buyerFee).toBe(0);
+  });
+});
+
+describe("order status machine", () => {
+  it("lets each actor make only their own moves", () => {
+    expect(canTransition("new", "confirmed", "seller")).toBe(true);
+    expect(canTransition("new", "confirmed", "buyer")).toBe(false);
+    expect(canTransition("confirmed", "cancelled", "buyer")).toBe(true);
+    expect(canTransition("courier_assigned", "cancelled", "buyer")).toBe(false);
+    expect(canTransition("picked_up", "delivered", "operator")).toBe(true);
+    expect(canTransition("picked_up", "cancelled", "operator")).toBe(false);
+    expect(canTransition("delivered", "returned", "operator")).toBe(false);
+    expect(operatorNextStatuses("picked_up")).toEqual(["delivered", "returned"]);
+    expect(operatorNextStatuses("new")).toEqual(["cancelled"]);
+  });
+});
+
+describe("seller trust with reviews", () => {
+  it("poor reviews override other signals; few reviews do not", () => {
+    expect(sellerTrust({ verifiedShop: true, platformSales: 10, accountAgeDays: 400, rating: { avg: 2.3, count: 4 } })).toBe("low");
+    expect(sellerTrust({ verifiedShop: true, platformSales: 0, accountAgeDays: 1, rating: { avg: 1, count: 2 } })).toBe("high");
+    expect(sellerTrust({ verifiedShop: false, platformSales: 3, accountAgeDays: 1, rating: { avg: 4.8, count: 3 } })).toBe("high");
+  });
+});
+
+describe("phone detection in listing text", () => {
+  it.each(["звоните 90 123 45 67", "+998 90 123-45-67", "+998901234567", "901234567", "90.123.45.67", "(90) 123 45 67"])(
+    "finds %s",
+    (s) => expect(scrubPii(s)).toContain("[phone]"),
+  );
+  it.each(["Цена: 125000000 сум", "S/N 123456789", "IMEI 356789012345678", "5 200 000 сум", "Samsung A54 2023", "12 500 000", "батарея 87%"])(
+    "leaves %s alone",
+    (s) => expect(scrubPii(s)).toBe(s),
+  );
 });

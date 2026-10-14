@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Records a voice note with MediaRecorder (supported in Telegram's Android/iOS/desktop webviews). */
 export function useRecorder() {
@@ -6,11 +6,22 @@ export function useRecorder() {
   const [audio, setAudio] = useState<Blob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const rec = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Leaving the screen mid-recording must release the microphone.
+  useEffect(
+    () => () => {
+      if (rec.current?.state === "recording") rec.current.stop();
+      streamRef.current?.getTracks().forEach((tr) => tr.stop());
+    },
+    [],
+  );
 
   async function start() {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
       const r = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks: Blob[] = [];
@@ -24,7 +35,9 @@ export function useRecorder() {
       rec.current = r;
       setRecording(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // Browser messages ("Permission denied") are English and technical: the screen shows a translated hint.
+      console.warn("microphone unavailable", e);
+      setError("mic_unavailable");
     }
   }
 

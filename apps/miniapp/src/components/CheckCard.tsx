@@ -1,4 +1,4 @@
-import { formatUzs, type CheckResult } from "@ishonch/shared";
+import { formatUzs, type CheckResult } from "@ishonch/shared/client";
 import { useT } from "../i18n";
 
 const RISK_CLASS = { low: "risk-low", medium: "risk-medium", high: "risk-high" } as const;

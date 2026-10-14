@@ -1,14 +1,16 @@
-import type { Lang } from "@ishonch/shared";
+import type { Lang } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
 
 interface Props {
+  /** Staff see an entry to the admin panel (operators: delivery orders only). */
+  staff?: "admin" | "operator" | null;
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "my" | "shop" | "catalog" | "assistant" | "favorites") => void;
+  onOpen: (screen: "check" | "sell" | "my" | "shop" | "catalog" | "assistant" | "favorites" | "orders" | "admin") => void;
   onLanguage: (lang: Lang) => void;
   onDeleteAccount: () => void;
 }
 
-export function Home({ remaining, onOpen, onLanguage, onDeleteAccount }: Props) {
+export function Home({ staff, remaining, onOpen, onLanguage, onDeleteAccount }: Props) {
   const t = useT();
   const lang = useLang();
   return (
@@ -26,6 +28,16 @@ export function Home({ remaining, onOpen, onLanguage, onDeleteAccount }: Props) 
           ))}
         </div>
       </header>
+
+      {staff && (
+        <button className="tile" onClick={() => onOpen("admin")} data-testid="open-admin">
+          <span className="tile-icon">🛠</span>
+          <span>
+            <strong>{staff === "admin" ? "Админка" : "Заказы на доставку"}</strong>
+            <span className="hint">{staff === "admin" ? "Метрики, модерация, заказы, пользователи" : "Курьеры и статусы"}</span>
+          </span>
+        </button>
+      )}
 
       <button className="tile primary-tile" onClick={() => onOpen("check")} data-testid="open-check">
         <span className="tile-icon">🔎</span>
@@ -57,6 +69,14 @@ export function Home({ remaining, onOpen, onLanguage, onDeleteAccount }: Props) 
         <span>
           <strong>{t("home.favorites.title")}</strong>
           <span className="hint">{t("home.favorites.desc")}</span>
+        </span>
+      </button>
+
+      <button className="tile" onClick={() => onOpen("orders")} data-testid="open-orders">
+        <span className="tile-icon">🚚</span>
+        <span>
+          <strong>{t("home.orders.title")}</strong>
+          <span className="hint">{t("home.orders.desc")}</span>
         </span>
       </button>
 

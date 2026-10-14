@@ -1,4 +1,4 @@
-import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared";
+import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared/client";
 import { apiUrl } from "../api";
 import { useLang, useT } from "../i18n";
 

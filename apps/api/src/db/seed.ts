@@ -1,8 +1,8 @@
 import { sql as dsql } from "drizzle-orm";
-import { DEFAULT_RISK_RULES } from "@ishonch/shared";
+import { DEFAULT_COMPLAINTS_TO_HIDE, DEFAULT_RISK_RULES } from "@ishonch/shared";
 import { loadConfig } from "../config.js";
 import { createDb } from "./client.js";
-import { categories, priceReference, settings } from "./schema.js";
+import { categories, courierTariffs, priceReference, settings } from "./schema.js";
 
 const config = loadConfig();
 const { db, sql } = createDb(config.DATABASE_URL);
@@ -54,7 +54,9 @@ for (const c of CATEGORY_SEED) {
   catIds.set(c.slug, row!.id);
 }
 
-for (const [cat, modelKey, min, med, max] of PRICE_SEED) {
+// Only into an empty table: rows an admin deleted or edited are not brought back on every API start.
+const [{ refs }] = (await db.execute(dsql`select count(*)::int as refs from price_reference`)) as unknown as [{ refs: number }];
+for (const [cat, modelKey, min, med, max] of refs > 0 ? [] : PRICE_SEED) {
   await db
     .insert(priceReference)
     .values({
@@ -68,11 +70,23 @@ for (const [cat, modelKey, min, med, max] of PRICE_SEED) {
     .onConflictDoNothing({ target: priceReference.modelKey });
 }
 
+// Starting courier prices in Tashkent (UZS). The most specific row wins; the admin edits them via /admin/tariffs.
+const [{ tariffs }] = (await db.execute(dsql`select count(*)::int as tariffs from courier_tariffs`)) as unknown as [{ tariffs: number }];
+if (tariffs === 0) {
+  await db.insert(courierTariffs).values([
+    { name: "Ташкент (по умолчанию)", price: 30_000, codFeePct: 1 },
+    { name: "Окраины: Бектемир", toDistrict: "bektemir", price: 40_000, codFeePct: 1 },
+    { name: "Окраины: Сергели", toDistrict: "sergeli", price: 40_000, codFeePct: 1 },
+    { name: "Окраины: Янгихаёт", toDistrict: "yangihayot", price: 40_000, codFeePct: 1 },
+  ]);
+}
+
 const defaults: Record<string, unknown> = {
   checks_per_day: config.CHECKS_PER_DAY,
   usd_rate: config.USD_RATE,
   ai_monthly_limit_usd: config.AI_MONTHLY_LIMIT_USD,
   risk_rules: DEFAULT_RISK_RULES,
+  complaints_to_hide: DEFAULT_COMPLAINTS_TO_HIDE,
 };
 for (const [key, value] of Object.entries(defaults)) {
   await db.insert(settings).values({ key, value }).onConflictDoNothing({ target: settings.key });

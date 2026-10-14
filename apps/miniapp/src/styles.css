@@ -103,7 +103,7 @@ button.secondary {
 button.secondary.recording { color: var(--danger); border-color: var(--danger); }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--hint); border: 0; padding: 0; margin: 0; }
 .field legend { margin-bottom: 4px; }
-.field input:not([type="checkbox"]):not([type="file"]), .field select, .card input:not([type="checkbox"]):not([type="file"]) {
+.field input:not([type="checkbox"]):not([type="file"]), .field select, .card input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
   font: inherit; color: var(--text); background: var(--bg); border: 1px solid transparent;
   border-radius: 10px; padding: 10px 12px; width: 100%;
 }
@@ -142,7 +142,7 @@ button.secondary.recording { color: var(--danger); border-color: var(--danger); 
 .shop-photo { width: 100%; max-height: 200px; object-fit: cover; border-radius: 10px; }
 
 /* ---- catalog & assistant ---- */
-input.search, .card input:not([type="checkbox"]), .card select, .row > input {
+input.search, .card input:not([type="checkbox"]):not([type="radio"]), .card select, .row > input {
   font: inherit; color: var(--text); background: var(--bg); border: 1px solid transparent;
   border-radius: 10px; padding: 10px 12px; width: 100%; min-width: 0;
 }
@@ -175,3 +175,28 @@ table { border-collapse: collapse; font-size: 13px; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bg2); vertical-align: top; }
 thead th { font-weight: 700; }
 tbody th { color: var(--hint); font-weight: 500; white-space: nowrap; }
+
+/* ---- stage 4: orders, reviews, complaints ---- */
+.highlighted { outline: 2px solid var(--button); }
+.history { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
+.stars { gap: 4px; }
+.star { background: none; border: 0; font-size: 28px; line-height: 1; padding: 0 2px; color: var(--hint); cursor: pointer; }
+.star.active { color: #f5a623; }
+.badge.order-delivered { color: var(--low); }
+.badge.order-cancelled, .badge.order-returned { color: var(--high); }
+
+/* ---- stage 5: staff panel ---- */
+.kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.kpi { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; }
+.kpi-value { font-size: 22px; font-variant-numeric: tabular-nums; }
+.kpi-alert { box-shadow: inset 3px 0 0 var(--medium); }
+.funnel { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.funnel-track { height: 8px; margin-top: 4px; }
+.funnel-bar { height: 8px; min-width: 2px; background: var(--button); border-radius: 0 4px 4px 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table th { text-align: left; color: var(--hint); font-weight: 500; padding: 4px 6px; }
+.admin-table td { padding: 4px 6px; border-top: 1px solid color-mix(in srgb, var(--hint) 20%, transparent); }
+.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tariff-row { padding-bottom: 8px; border-bottom: 1px solid color-mix(in srgb, var(--hint) 20%, transparent); }
+.tariff-row .row > * { flex: 1; min-width: 0; }

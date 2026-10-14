@@ -2,4 +2,5 @@
 **/dist
 .env
 logs
+**/data
 .git
