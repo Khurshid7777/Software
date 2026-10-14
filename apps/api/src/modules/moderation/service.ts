@@ -52,13 +52,21 @@ export class ModerationService {
   }
 
   async findDuplicates(l: Listing): Promise<Duplicates> {
+    // LATERAL + OFFSET 0 makes the planner probe the GIN index on bands for each photo of this listing
+    // instead of scanning every photo. Near-uniform pictures (flat background, almost all bits equal) are
+    // skipped: their hashes collide with each other and would flag unrelated listings.
     const photoRows = (await this.db.execute(sql`
-      select distinct p2.listing_id as id, l2.seller_user_id as seller
+      select distinct m.listing_id as id, l2.seller_user_id as seller
       from ${listingPhotos} p1
-      join ${listingPhotos} p2 on p2.phash_bands && p1.phash_bands and p2.listing_id <> p1.listing_id
-        and bit_count(('x' || p1.phash)::bit(64) # ('x' || p2.phash)::bit(64)) <= ${PHOTO_DUPLICATE_DISTANCE}
-      join ${listings} l2 on l2.id = p2.listing_id and l2.status in ('active', 'pending', 'reserved')
+      cross join lateral (
+        select p2.listing_id, p2.phash from ${listingPhotos} p2
+        where p2.phash_bands && p1.phash_bands and p2.listing_id <> p1.listing_id
+        offset 0
+      ) m
+      join ${listings} l2 on l2.id = m.listing_id and l2.status in ('active', 'pending', 'reserved')
       where p1.listing_id = ${l.id} and p1.phash is not null
+        and bit_count(('x' || p1.phash)::bit(64)) between 4 and 60
+        and bit_count(('x' || p1.phash)::bit(64) # ('x' || m.phash)::bit(64)) <= ${PHOTO_DUPLICATE_DISTANCE}
       limit 20`)) as unknown as Array<{ id: string; seller: string }>;
 
     const own = photoRows.filter((r) => r.seller === l.sellerUserId).map((r) => r.id);

@@ -36,6 +36,13 @@
       "when": 1791965390665,
       "tag": "0004_metrics_dedup_index",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792001467634,
+      "tag": "0005_perf_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -267,3 +267,14 @@ describe("seller trust with reviews", () => {
     expect(sellerTrust({ verifiedShop: false, platformSales: 3, accountAgeDays: 1, rating: { avg: 4.8, count: 3 } })).toBe("high");
   });
 });
+
+describe("phone detection in listing text", () => {
+  it.each(["звоните 90 123 45 67", "+998 90 123-45-67", "+998901234567", "901234567", "90.123.45.67", "(90) 123 45 67"])(
+    "finds %s",
+    (s) => expect(scrubPii(s)).toContain("[phone]"),
+  );
+  it.each(["Цена: 125000000 сум", "S/N 123456789", "IMEI 356789012345678", "5 200 000 сум", "Samsung A54 2023", "12 500 000", "батарея 87%"])(
+    "leaves %s alone",
+    (s) => expect(scrubPii(s)).toBe(s),
+  );
+});

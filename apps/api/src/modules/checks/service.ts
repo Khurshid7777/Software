@@ -34,7 +34,8 @@ export class CheckService {
 
   async limitInfo(user: User) {
     const perDay = await this.repo.getSetting("checks_per_day", this.defaults.checksPerDay);
-    const used = await this.repo.countChecksToday(user.id);
+    // Every AI run counts, including "not a listing" answers (the AI was paid either way).
+    const used = await this.repo.usedToday(user.id, "quota_check");
     return { perDay, remaining: Math.max(0, perDay - used) };
   }
 
@@ -47,6 +48,8 @@ export class CheckService {
 
     const { perDay, remaining } = await this.limitInfo(user);
     if (remaining <= 0) throw new CheckRejected("limit_reached", 429, { n: perDay });
+    const reservation = await this.repo.reserveDaily(user.id, "quota_check", perDay);
+    if (reservation === null) throw new CheckRejected("limit_reached", 429, { n: perDay });
 
     const started = Date.now();
     let outcome;
@@ -62,6 +65,7 @@ export class CheckService {
         },
       );
     } catch (err) {
+      await this.repo.refundDaily(reservation);
       if (err instanceof AiLimitExceededError || err instanceof AiOutputError) {
         throw new CheckRejected("ai_unavailable", 503);
       }

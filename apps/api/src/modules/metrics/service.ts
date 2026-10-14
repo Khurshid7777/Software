@@ -125,19 +125,30 @@ export class MetricsService {
     const limit = await this.repo.getSetting("ai_monthly_limit_usd", 50);
 
     // ---- daily series ----
-    const daily = await this.rows(sql`
-      with d as (
-        select to_char(g at time zone 'Asia/Tashkent', 'YYYY-MM-DD') as day
-        from generate_series(${ts(from)}, ${ts(to)}, interval '1 day') g
-      )
-      select d.day,
-        (select count(*) from users u where ${TASHKENT_DAY(sql`u.created_at`)} = d.day) as new_users,
-        (select count(*) from checks c where ${TASHKENT_DAY(sql`c.created_at`)} = d.day) as checks,
-        (select count(*) from events e where e.name = 'listing_published' and ${TASHKENT_DAY(sql`e.created_at`)} = d.day) as published,
-        (select count(*) from orders o where ${TASHKENT_DAY(sql`o.created_at`)} = d.day) as orders,
-        (select count(*) from orders o where o.delivered_at is not null and ${TASHKENT_DAY(sql`o.delivered_at`)} = d.day) as delivered,
-        (select coalesce(sum(a.cost_usd), 0) from ai_usage a where ${TASHKENT_DAY(sql`a.created_at`)} = d.day) as ai_usd
-      from d order by d.day`);
+    // One grouped query per table over the range (indexable), merged onto the calendar in code.
+    const perDay = async (q: SQL) => new Map((await this.rows(q)).map((r) => [String(r.day), num(r.n)]));
+    const [newUsers, checksByDay, publishedByDay, ordersByDay, deliveredByDay, aiByDay] = await Promise.all([
+      perDay(sql`select ${TASHKENT_DAY(sql`created_at`)} as day, count(*) as n from users where created_at >= ${ts(from)} group by 1`),
+      perDay(sql`select ${TASHKENT_DAY(sql`created_at`)} as day, count(*) as n from checks where created_at >= ${ts(from)} group by 1`),
+      perDay(sql`select ${TASHKENT_DAY(sql`created_at`)} as day, count(*) as n from events
+        where name = 'listing_published' and created_at >= ${ts(from)} group by 1`),
+      perDay(sql`select ${TASHKENT_DAY(sql`created_at`)} as day, count(*) as n from orders where created_at >= ${ts(from)} group by 1`),
+      perDay(sql`select ${TASHKENT_DAY(sql`delivered_at`)} as day, count(*) as n from orders where delivered_at >= ${ts(from)} group by 1`),
+      perDay(sql`select ${TASHKENT_DAY(sql`created_at`)} as day, sum(cost_usd) as n from ai_usage where created_at >= ${ts(from)} group by 1`),
+    ]);
+    const calendar: string[] = [];
+    for (let t = from.getTime(); t <= to.getTime(); t += DAY) {
+      calendar.push(new Date(t + 5 * 3600_000).toISOString().slice(0, 10));
+    }
+    const daily = calendar.map((day) => ({
+      day,
+      new_users: newUsers.get(day),
+      checks: checksByDay.get(day),
+      published: publishedByDay.get(day),
+      orders: ordersByDay.get(day),
+      delivered: deliveredByDay.get(day),
+      ai_usd: aiByDay.get(day),
+    }));
 
     const delivered = num(orders.delivered);
     const returned = num(orders.returned);
@@ -221,8 +232,10 @@ export class MetricsService {
       "fee_payer", "buyer_pays", "seller_receives", "courier", "delivered_at", "cancel_reason", "reviewed",
     ];
     const cell = (v: unknown) => {
-      const s = v == null ? "" : v instanceof Date ? v.toISOString() : String(v);
-      return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      let s = v == null ? "" : v instanceof Date ? v.toISOString() : String(v);
+      // Seller-controlled text must not run as a formula in Excel (=, +, -, @, tab, CR).
+      if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = rows.map((r) => {
       const q = (r.quote ?? {}) as Record<string, number>;

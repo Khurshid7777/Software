@@ -398,5 +398,9 @@
   "my.reserved": "🔒 Band qilingan, yetkazilmoqda",
   "my.renew": "Uzaytirish",
   "my.renewed": "30 kunga uzaytirildi",
-  "my.reason": "Sabab: {reason}"
+  "my.reason": "Sabab: {reason}",
+  "order.cancel_reason.listing_unavailable": "Mahsulot endi sotilmayapti.",
+  "order.cancel_reason.seller_timeout": "Sotuvchi 48 soat ichida so'rovga javob bermadi.",
+  "sell.ai_quota": "Bugungi AI-qoralamalar limiti tugadi ({n}). Ertaga urinib ko'ring yoki e'lonni qo'lda to'ldiring.",
+  "home.delete_open_orders": "Avval ochiq buyurtmalarni yakunlang yoki bekor qiling — shundan keyin akkauntni o'chirish mumkin."
 }

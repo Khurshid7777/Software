@@ -20,12 +20,17 @@ process.on("SIGINT", shutdown);
 
 await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
-// Listing expiry: reminders 3 days ahead and auto-archive after 30 days. Hourly; safe with several instances.
-const runExpiry = () =>
-  app.services.listings
-    .runExpiry()
-    .then((r) => (r.reminded || r.archived) && app.log.info(r, "listing expiry"))
-    .catch((err) => app.log.error({ err }, "listing expiry failed"));
+// Hourly: listing expiry (reminders 3 days ahead, auto-archive after 30 days) and delivery requests unanswered for 48 h.
+// Safe with several instances: rows are claimed by conditional updates.
+const runExpiry = async () => {
+  try {
+    const r = await app.services.listings.runExpiry();
+    const staleOrders = await app.services.orders.expireStale();
+    if (r.reminded || r.archived || staleOrders) app.log.info({ ...r, staleOrders }, "expiry job");
+  } catch (err) {
+    app.log.error({ err }, "expiry job failed");
+  }
+};
 setTimeout(runExpiry, 30_000);
 expiryTimer = setInterval(runExpiry, 3600_000);
 

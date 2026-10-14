@@ -1,5 +1,5 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { LANGS, type Lang } from "@ishonch/shared";
+import { LANGS, t, type Lang } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import type { CheckService } from "../checks/service.js";
 
@@ -37,7 +37,11 @@ export function userRoutes(
     return { ok: true, language: lang };
   });
 
-  app.delete("/me", { preHandler: requireUser }, async (req) => {
+  app.delete("/me", { preHandler: requireUser }, async (req, reply) => {
+    // Orders reference both sides; deleting mid-delivery would erase a courier's cash record.
+    if (await repo.hasOpenOrders(req.user!.id)) {
+      return reply.code(409).send({ error: "open_orders", message: t(req.user!.language as Lang, "home.delete_open_orders") });
+    }
     await repo.deleteUser(req.user!.id);
     return { ok: true };
   });

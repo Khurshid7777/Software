@@ -28,7 +28,7 @@ import {
   type PriceSuggestion,
 } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { channels, listingPhotos, listings, reviews, shops, users, type Listing, type User } from "../../db/schema.js";
+import { channels, complaints, listingPhotos, listings, reviews, shops, users, type Listing, type User } from "../../db/schema.js";
 import { AiLimitExceededError, AiOutputError, type AiService } from "../../ai/aiService.js";
 import { processImage } from "../../storage/images.js";
 import type { Storage } from "../../storage/storage.js";
@@ -39,6 +39,8 @@ import { hasContactInfo, type ModerationService } from "../moderation/service.js
 import { analyzeListing, generateListingText } from "./ai.js";
 
 export const MAX_PHOTOS = 10;
+/** Default for the `listing_ai_per_day` setting: AI drafts + text generations per seller per day. */
+export const LISTING_AI_PER_DAY = 30;
 const DAY = 24 * 3600_000;
 
 export type ListingError =
@@ -56,7 +58,8 @@ export type ListingError =
   | "bump_too_soon"
   | "bad_image"
   | "contact_info"
-  | "duplicate";
+  | "duplicate"
+  | "ai_quota";
 
 export class ListingRejected extends Error {
   constructor(
@@ -109,6 +112,8 @@ export interface ListingServiceDeps {
   usdRate: number;
   /** Feature flag: `cod_platform` stays off until there is a legal entity and a courier contract. */
   codPlatformEnabled: boolean;
+  /** A listing left sale (sold, archived, hidden, expired): open "new" delivery requests are closed. */
+  onUnavailable?: (listingId: string, reason: string) => Promise<unknown>;
   /** Hook for saved-search alerts (module A). Failures never block publication. */
   onPublished?: (listingId: string) => Promise<unknown>;
 }
@@ -167,6 +172,7 @@ export class ListingService {
     const text = input.text?.trim() || undefined;
     if (input.photos.length === 0 && !input.audio && !text) throw new ListingRejected("need_photo_or_voice", 400);
     if (input.photos.length > MAX_PHOTOS) throw new ListingRejected("too_many_photos", 400);
+    const reservation = await this.reserveAi(user);
 
     let transcript: string | undefined;
     if (input.audio) {
@@ -211,6 +217,7 @@ export class ListingService {
         .where(eq(listings.id, listing.id));
     } catch (err) {
       await this.deleteListing(listing.id);
+      if (err instanceof ListingRejected && err.code === "ai_unavailable") await this.d.repo.refundDaily(reservation);
       throw err;
     }
     await this.d.repo.event(user.id, "listing_draft_created", { photos: input.photos.length, voice: !!input.audio });
@@ -219,11 +226,13 @@ export class ListingService {
 
   async generate(user: User, id: string, answers: Record<string, string>) {
     const l = await this.own(user, id);
-    if (!["draft", "active"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    // Live listings are edited field by field (and re-moderated), never regenerated wholesale.
+    if (!["draft", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     const draft = l.aiDraft as AiDraft;
     if (!draft.analysis) throw new ListingRejected("bad_state", 409);
 
     const merged = { ...(draft.answers ?? {}), ...answers };
+    await this.reserveAi(user);
     const sellerWords = [draft.transcript, l.sourceText].filter(Boolean).join("\n");
     const { text } = await this.withAi(() =>
       generateListingText({ analysis: draft.analysis!, answers: merged, sellerWords }, { ai: this.d.ai }),
@@ -264,19 +273,26 @@ export class ListingService {
     const textChanged = (["titleRu", "titleUz", "descriptionRu", "descriptionUz"] as const).some(
       (k) => patch[k] !== undefined && patch[k] !== l[k],
     );
+    // A reserved item is being delivered: what the buyer ordered must not change under them.
+    if (l.status === "reserved" && (textChanged || patch.price !== undefined)) throw new ListingRejected("bad_state", 409);
+    if (patch.price === null && l.status !== "draft") throw new ListingRejected("fill_required", 400);
     if (textChanged && l.status !== "draft" && hasContactInfo({ ...l, ...patch })) throw new ListingRejected("contact_info", 400);
     await this.db
       .update(listings)
       .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), updatedAt: new Date() })
       .where(eq(listings.id, id));
     // A live listing whose text changed goes through moderation again (it could be swapped for something else).
-    if (textChanged && l.status === "active" && this.d.moderation) {
-      const [fresh] = await this.db.select().from(listings).where(eq(listings.id, id));
-      const record = await this.d.moderation.review(fresh!);
-      if (record.decision !== "approved") await this.holdForModeration(fresh!, record);
-      else await this.db.update(listings).set({ moderation: record }).where(eq(listings.id, id));
-    }
+    if (textChanged && l.status === "active") await this.remoderate(id);
     return this.dto(id, user.id);
+  }
+
+  private async remoderate(id: string) {
+    if (!this.d.moderation) return;
+    const [fresh] = await this.db.select().from(listings).where(eq(listings.id, id));
+    if (!fresh || fresh.status !== "active") return;
+    const record = await this.d.moderation.review(fresh);
+    if (record.decision !== "approved") await this.holdForModeration(fresh, record, { from: ["active"] });
+    else await this.db.update(listings).set({ moderation: record }).where(eq(listings.id, id));
   }
 
   async addPhotos(user: User, id: string, files: UploadedFile[]) {
@@ -288,11 +304,20 @@ export class ListingService {
       .where(eq(listingPhotos.listingId, id))) as [{ n: number }];
     if (n + files.length > MAX_PHOTOS) throw new ListingRejected("too_many_photos", 400);
     await this.storePhotos(id, files, n);
+    // New photos on a live listing are checked like new text (duplicates, item swap).
+    if (l.status === "active") await this.remoderate(id);
     return this.dto(id, user.id);
   }
 
   async deletePhoto(user: User, id: string, photoId: number) {
-    await this.own(user, id);
+    const l = await this.own(user, id);
+    if (!["draft", "active", "pending", "rejected", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    if (l.status === "active") {
+      const [{ n }] = (await this.db.select({ n: count() }).from(listingPhotos).where(eq(listingPhotos.listingId, id))) as [
+        { n: number },
+      ];
+      if (n <= 1) throw new ListingRejected("need_photo", 400);
+    }
     const [p] = await this.db
       .delete(listingPhotos)
       .where(and(eq(listingPhotos.id, photoId), eq(listingPhotos.listingId, id)))
@@ -323,21 +348,40 @@ export class ListingService {
     const shop = await this.shopOf(user.id);
     const duplicates = this.d.moderation ? await this.d.moderation.findDuplicates(l) : null;
     // The same photos in another live listing of this seller: bump that one instead (shops may sell identical stock).
-    if (duplicates?.own.length && !shop) throw new ListingRejected("duplicate", 409, { id: duplicates.own[0]! });
+    if (duplicates?.own.length && !shop?.verified) throw new ListingRejected("duplicate", 409, { id: duplicates.own[0]! });
     await this.assertUnderLimit(user);
 
     const record: ModerationRecord = this.d.moderation
       ? await this.d.moderation.review(l, duplicates!)
       : { decision: "approved", source: "rules", reasons: [], at: new Date().toISOString() };
+    // Archive → republish must not undo a moderator's rejection or a complaint hide: those go back to a person.
+    const prev = l.moderation as ModerationRecord | null;
+    const [{ open }] = (await this.db
+      .select({ open: count() })
+      .from(complaints)
+      .where(and(eq(complaints.listingId, id), isNull(complaints.resolvedAt)))) as [{ open: number }];
+    const rejectedByAdmin = prev?.source === "admin" && prev.decision === "rejected";
+    if (record.decision === "approved" && (open > 0 || rejectedByAdmin)) {
+      record.decision = "needs_review";
+      record.reasons.push({
+        code: open > 0 ? "complaints" : "other",
+        note: open > 0 ? `Повторная публикация при ${open} открытых жалобах` : "Повторная публикация после отклонения модератором",
+      });
+    }
     await this.db.update(listings).set({ shopId: shop?.id ?? null }).where(eq(listings.id, id));
     if (user.role === "buyer") await this.db.update(users).set({ role: "seller" }).where(eq(users.id, user.id));
 
     if (record.decision !== "approved") {
-      await this.holdForModeration({ ...l, shopId: shop?.id ?? null }, { ...record, pendingChannelIds: channelIds }, { notifySeller: false });
+      const held = await this.holdForModeration(
+        { ...l, shopId: shop?.id ?? null },
+        { ...record, pendingChannelIds: channelIds },
+        { notifySeller: false, from: [l.status] },
+      );
+      if (!held) throw new ListingRejected("bad_state", 409); // a parallel publish got there first
       await this.d.repo.event(user.id, "listing_moderation", { listingId: id, decision: record.decision, source: record.source });
       return { listing: await this.dto(id, user.id), postedChannels: 0, failedChannels: 0, moderation: record.decision };
     }
-    const posted = await this.activate(id, channelIds, record);
+    const posted = await this.activate(id, channelIds, record, [l.status]);
     await this.d.repo.event(user.id, "listing_published", { listingId: id, channels: posted.length });
     return {
       listing: await this.dto(id, user.id),
@@ -348,23 +392,26 @@ export class ListingService {
   }
 
   /** Makes a listing live: 30 days from now, channel posts, saved-search alerts. Used by publish and admin approval. */
-  async activate(id: string, channelIds: number[], record: ModerationRecord) {
+  async activate(id: string, channelIds: number[], record: ModerationRecord, from: string[]) {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
     if (!l) throw new ListingRejected("not_found", 404);
     const now = new Date();
-    await this.db
+    // A live listing hidden for a while (complaints, re-moderation) keeps its place and expiry when approved.
+    const keepClock = l.status === "pending" && !!l.publishedAt && !!l.expiresAt && l.expiresAt > now;
+    // Compare-and-set on the status: a double tap or two moderators clicking at once activate only once.
+    const updated = await this.db
       .update(listings)
       .set({
         status: "active",
         moderation: record,
         moderationReason: null,
         publishedAt: l.publishedAt ?? now,
-        bumpedAt: now,
-        expiresAt: new Date(now.getTime() + LISTING_TTL_DAYS * DAY),
-        expiryRemindedAt: null,
+        ...(keepClock ? {} : { bumpedAt: now, expiresAt: new Date(now.getTime() + LISTING_TTL_DAYS * DAY), expiryRemindedAt: null }),
         updatedAt: now,
       })
-      .where(eq(listings.id, id));
+      .where(and(eq(listings.id, id), inArray(listings.status, from)))
+      .returning({ id: listings.id });
+    if (!updated.length) throw new ListingRejected("bad_state", 409);
     const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
     const posted = seller ? await this.postToChannels(seller, id, channelIds) : [];
     await this.d.onPublished?.(id).catch((err) => console.error("onPublished failed", err));
@@ -372,13 +419,17 @@ export class ListingService {
   }
 
   /** needs_review → pending (moderators are asked), rejected → rejected (the seller is told why). */
-  async holdForModeration(l: Listing, record: ModerationRecord, opts: { notifySeller?: boolean } = {}) {
+  async holdForModeration(l: Listing, record: ModerationRecord, opts: { notifySeller?: boolean; from: string[] }) {
     const status = record.decision === "rejected" ? "rejected" : "pending";
     const reason = record.reasons[0]?.code ?? "other";
-    await this.db
+    // Only from the expected status: a listing reserved or sold meanwhile is left alone.
+    const updated = await this.db
       .update(listings)
       .set({ status, moderation: record, moderationReason: reason, updatedAt: new Date() })
-      .where(eq(listings.id, l.id));
+      .where(and(eq(listings.id, l.id), inArray(listings.status, opts.from)))
+      .returning({ id: listings.id });
+    if (!updated.length) return false;
+    await this.d.onUnavailable?.(l.id, "listing_unavailable");
     if (status === "pending") {
       const notes = record.reasons.map((r) => `• ${r.code}: ${r.note}`).join("\n");
       const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
@@ -394,6 +445,7 @@ export class ListingService {
       );
     }
     if (opts.notifySeller !== false) await this.notifySeller(l, status === "pending" ? "moderation.hidden" : "moderation.rejected", record);
+    return true;
   }
 
   /** Seller DM about a moderation outcome; the AI's own advice is appended when present. */
@@ -411,7 +463,9 @@ export class ListingService {
   }
 
   private async assertUnderLimit(user: User) {
-    if (user.role === "shop" || user.role === "admin") return;
+    if (user.role === "admin") return;
+    // Anyone can create a shop profile; only a shop verified by an admin is free of the private-seller limit.
+    if (user.role === "shop" && (await this.shopOf(user.id))?.verified) return;
     const [{ n }] = (await this.db
       .select({ n: count() })
       .from(listings)
@@ -481,6 +535,7 @@ export class ListingService {
     // A reserved listing is sold through its delivery order (or the order is cancelled first).
     if (!["active", "pending", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     await this.db.update(listings).set({ status: "sold", soldVia: via, soldAt: new Date(), updatedAt: new Date() }).where(eq(listings.id, id));
+    await this.d.onUnavailable?.(id, "listing_unavailable");
     await this.d.repo.event(user.id, "listing_sold", { listingId: id, via });
     return this.dto(id, user.id);
   }
@@ -489,6 +544,7 @@ export class ListingService {
     const l = await this.own(user, id);
     if (!["active", "pending", "draft", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
     await this.db.update(listings).set({ status: "archived", moderationReason: null, updatedAt: new Date() }).where(eq(listings.id, id));
+    await this.d.onUnavailable?.(id, "listing_unavailable");
     return this.dto(id, user.id);
   }
 
@@ -551,7 +607,10 @@ export class ListingService {
       .set({ status: "archived", moderationReason: "expired", updatedAt: now })
       .where(and(eq(listings.status, "active"), lte(listings.expiresAt, now)))
       .returning();
-    for (const l of expired) await this.dmSeller(l, "expiry.archived", [{ key: "expiry.renew", callbackData: `renew:${l.id}` }]);
+    for (const l of expired) {
+      await this.d.onUnavailable?.(l.id, "listing_unavailable");
+      await this.dmSeller(l, "expiry.archived", [{ key: "expiry.renew", callbackData: `renew:${l.id}` }]);
+    }
     return { reminded, archived: expired.length };
   }
 
@@ -581,8 +640,12 @@ export class ListingService {
       .select({ id: listings.id })
       .from(listings)
       .where(and(eq(listings.sellerUserId, user.id), statuses ? inArray(listings.status, statuses) : undefined))
-      .orderBy(desc(listings.updatedAt));
-    return Promise.all(rows.map((r) => this.dto(r.id, user.id)));
+      .orderBy(desc(listings.updatedAt))
+      .limit(200);
+    return this.dtos(
+      rows.map((r) => r.id),
+      user.id,
+    );
   }
 
   /** Public card. Counts a view when the viewer is not the seller. */
@@ -607,6 +670,14 @@ export class ListingService {
   }
 
   // ---------- helpers ----------
+  /** Each AI analysis / generation costs money: a per-seller daily quota (setting `listing_ai_per_day`). */
+  private async reserveAi(user: User) {
+    const limit = await this.d.repo.getSetting("listing_ai_per_day", LISTING_AI_PER_DAY);
+    const id = await this.d.repo.reserveDaily(user.id, "quota_listing_ai", limit);
+    if (id === null) throw new ListingRejected("ai_quota", 429, { n: limit });
+    return id;
+  }
+
   private async withAi<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
@@ -643,76 +714,110 @@ export class ListingService {
     return { avg: r?.n ? Math.round(Number(r.avg) * 10) / 10 : null, count: r?.n ?? 0 };
   }
 
-  private async langOf(userId: string): Promise<Lang | null> {
-    const [u] = await this.db.select({ language: users.language }).from(users).where(eq(users.id, userId));
-    return (u?.language as Lang | undefined) ?? null;
-  }
 
   async dto(id: string, viewerId: string | null, opts: { withSeller?: boolean } = {}): Promise<ListingDto> {
-    const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
-    if (!l) throw new ListingRejected("not_found", 404);
+    const [dto] = await this.dtos([id], viewerId, opts);
+    if (!dto) throw new ListingRejected("not_found", 404);
+    return dto;
+  }
+
+  /**
+   * Batched DTOs: a fixed number of queries for any number of listings (listings, photos, and with
+   * `withSeller` users, shops, platform sales and ratings), in the order of `ids`; missing ids are skipped.
+   */
+  async dtos(ids: string[], viewerId: string | null, opts: { withSeller?: boolean } = {}): Promise<ListingDto[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db.select().from(listings).where(inArray(listings.id, ids));
+    const byId = new Map(rows.map((r) => [r.id, r]));
     const photos = await this.db
       .select()
       .from(listingPhotos)
-      .where(eq(listingPhotos.listingId, id))
+      .where(inArray(listingPhotos.listingId, ids))
       .orderBy(asc(listingPhotos.position), asc(listingPhotos.id));
-    const draft = l.aiDraft as AiDraft;
-    const isOwner = viewerId === l.sellerUserId;
-    const attrs = l.attributes as ListingDto["attributes"];
+    const photosOf = new Map<string, typeof photos>();
+    for (const p of photos) photosOf.set(p.listingId, [...(photosOf.get(p.listingId) ?? []), p]);
 
-    const dto: ListingDto = {
-      id: l.id,
-      status: l.status as ListingStatus,
-      category: l.category as ListingDto["category"],
-      titleRu: l.titleRu,
-      titleUz: l.titleUz,
-      descriptionRu: l.descriptionRu,
-      descriptionUz: l.descriptionUz,
-      attributes: { brand: attrs.brand ?? null, model: attrs.model ?? null, modelKey: attrs.modelKey ?? null, specs: attrs.specs ?? [] },
-      condition: (l.condition as Condition | null) ?? null,
-      price: l.price,
-      currency: "UZS",
-      district: (l.district as District | null) ?? null,
-      allowedDeliveryModes: l.allowedDeliveryModes as DeliveryMode[],
-      feePayer: l.feePayer as FeePayer,
-      photos: photos.map((p) => ({ id: p.id, url: this.photoUrl(p.id, p.storageKey), position: p.position })),
-      priceSuggestion: (l.priceSuggestion as PriceSuggestion | null) ?? null,
-      questions: isOwner ? (draft.analysis?.questions ?? []) : [],
-      photoHints: isOwner ? (draft.analysis?.photo_hints ?? []) : [],
-      stats: { views: l.views, favorites: l.favoritesCount, requests: l.requestsCount },
-      createdAt: l.createdAt.toISOString(),
-      publishedAt: l.publishedAt?.toISOString() ?? null,
-      bumpedAt: l.bumpedAt?.toISOString() ?? null,
-      canBumpAt: l.bumpedAt ? new Date(l.bumpedAt.getTime() + BUMP_INTERVAL_DAYS * DAY).toISOString() : null,
-      expiresAt: l.expiresAt?.toISOString() ?? null,
-      soldVia: (l.soldVia as ListingDto["soldVia"]) ?? null,
-      moderation: null,
-    };
-    if (isOwner && l.moderationReason) {
-      const record = l.moderation as ModerationRecord | null;
-      const lang = (await this.langOf(l.sellerUserId)) ?? "ru";
-      dto.moderation = { reason: l.moderationReason, message: record?.sellerMessage?.[lang] ?? null };
-    }
-
-    if (opts.withSeller) {
-      const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
-      const [{ sales }] = (await this.db
-        .select({ sales: count() })
+    const sellerIds = [...new Set(rows.map((r) => r.sellerUserId))];
+    const needSellers = opts.withSeller || rows.some((r) => r.sellerUserId === viewerId && r.moderationReason);
+    const sellers = needSellers && sellerIds.length ? await this.db.select().from(users).where(inArray(users.id, sellerIds)) : [];
+    const sellerOf = new Map(sellers.map((u) => [u.id, u]));
+    let shopOf = new Map<string, typeof shops.$inferSelect>();
+    let salesOf = new Map<string, number>();
+    let ratingOf = new Map<string, { avg: number | null; count: number }>();
+    if (opts.withSeller && sellerIds.length) {
+      const shopRows = await this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds));
+      shopOf = new Map(shopRows.map((s) => [s.ownerUserId, s]));
+      const sales = await this.db
+        .select({ seller: listings.sellerUserId, n: count() })
         .from(listings)
-        .where(and(eq(listings.sellerUserId, l.sellerUserId), eq(listings.soldVia, "platform")))) as [{ sales: number }];
-      const shop = await this.shopOf(l.sellerUserId);
-      dto.seller = {
-        id: l.sellerUserId,
-        registeredAt: seller!.createdAt.toISOString(),
-        platformSales: sales,
-        rating: await this.sellerRating(l.sellerUserId),
-        shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
+        .where(and(inArray(listings.sellerUserId, sellerIds), eq(listings.soldVia, "platform")))
+        .groupBy(listings.sellerUserId);
+      salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
+      const ratings = await this.db
+        .select({ seller: reviews.sellerUserId, avg: avg(reviews.rating), n: count() })
+        .from(reviews)
+        .where(inArray(reviews.sellerUserId, sellerIds))
+        .groupBy(reviews.sellerUserId);
+      ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
+    }
+
+    const out: ListingDto[] = [];
+    for (const id of ids) {
+      const l = byId.get(id);
+      if (!l) continue;
+      const draft = l.aiDraft as AiDraft;
+      const isOwner = viewerId === l.sellerUserId;
+      const attrs = l.attributes as ListingDto["attributes"];
+      const dto: ListingDto = {
+        id: l.id,
+        status: l.status as ListingStatus,
+        category: l.category as ListingDto["category"],
+        titleRu: l.titleRu,
+        titleUz: l.titleUz,
+        descriptionRu: l.descriptionRu,
+        descriptionUz: l.descriptionUz,
+        attributes: { brand: attrs.brand ?? null, model: attrs.model ?? null, modelKey: attrs.modelKey ?? null, specs: attrs.specs ?? [] },
+        condition: (l.condition as Condition | null) ?? null,
+        price: l.price,
+        currency: "UZS",
+        district: (l.district as District | null) ?? null,
+        // Modes switched off by the feature flag are never offered to buyers.
+        allowedDeliveryModes: (l.allowedDeliveryModes as DeliveryMode[]).filter(
+          (m) => this.d.codPlatformEnabled || MVP_DELIVERY_MODES.includes(m),
+        ),
+        feePayer: l.feePayer as FeePayer,
+        photos: (photosOf.get(l.id) ?? []).map((p) => ({ id: p.id, url: this.photoUrl(p.id, p.storageKey), position: p.position })),
+        priceSuggestion: isOwner ? ((l.priceSuggestion as PriceSuggestion | null) ?? null) : null,
+        questions: isOwner ? (draft.analysis?.questions ?? []) : [],
+        photoHints: isOwner ? (draft.analysis?.photo_hints ?? []) : [],
+        stats: isOwner ? { views: l.views, favorites: l.favoritesCount, requests: l.requestsCount } : { views: 0, favorites: 0, requests: 0 },
+        createdAt: l.createdAt.toISOString(),
+        publishedAt: l.publishedAt?.toISOString() ?? null,
+        bumpedAt: l.bumpedAt?.toISOString() ?? null,
+        canBumpAt: l.bumpedAt ? new Date(l.bumpedAt.getTime() + BUMP_INTERVAL_DAYS * DAY).toISOString() : null,
+        expiresAt: l.expiresAt?.toISOString() ?? null,
+        soldVia: (l.soldVia as ListingDto["soldVia"]) ?? null,
+        moderation: null,
       };
+      if (isOwner && l.moderationReason) {
+        const record = l.moderation as ModerationRecord | null;
+        const lang = (sellerOf.get(l.sellerUserId)?.language as Lang | undefined) ?? "ru";
+        dto.moderation = { reason: l.moderationReason, message: record?.sellerMessage?.[lang] ?? null };
+      }
+      if (opts.withSeller) {
+        const seller = sellerOf.get(l.sellerUserId);
+        const shop = shopOf.get(l.sellerUserId);
+        dto.seller = {
+          id: l.sellerUserId,
+          registeredAt: (seller?.createdAt ?? l.createdAt).toISOString(),
+          platformSales: salesOf.get(l.sellerUserId) ?? 0,
+          rating: ratingOf.get(l.sellerUserId) ?? { avg: null, count: 0 },
+          shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
+        };
+      }
+      out.push(dto);
     }
-    if (!isOwner) {
-      dto.stats = { views: 0, favorites: 0, requests: 0 };
-      dto.priceSuggestion = null;
-    }
-    return dto;
+    return out;
   }
+
 }

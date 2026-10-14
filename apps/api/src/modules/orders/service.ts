@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import {
   MAX_OPEN_ORDERS_PER_BUYER,
   MVP_DELIVERY_MODES,
@@ -227,7 +227,11 @@ export class OrderService {
     try {
       await this.transition(o, "confirmed", "seller", seller, null);
     } catch (err) {
-      await this.db.update(listings).set({ status: "active" }).where(and(eq(listings.id, o.listingId), eq(listings.status, "reserved")));
+      // Undo the reservation only if the order did not get confirmed (a later side effect may have thrown).
+      const [now] = await this.db.select({ status: orders.status }).from(orders).where(eq(orders.id, o.id));
+      if (now?.status === "new" || now?.status === "cancelled") {
+        await this.db.update(listings).set({ status: "active" }).where(and(eq(listings.id, o.listingId), eq(listings.status, "reserved")));
+      }
       if (isUniqueViolation(err)) throw new OrderRejected("not_available", 409);
       throw err;
     }
@@ -298,6 +302,24 @@ export class OrderService {
       { text: t("ru", `order.op_action.${s}`), callbackData: `op:${s}:${o.id}` },
     ]);
     return { text: lines.join("\n"), buttons };
+  }
+
+  /** The listing left sale (sold elsewhere, archived, hidden, expired): pending requests are closed, buyers told. */
+  async closeNewOrders(listingId: string, reason: string) {
+    const open = await this.db.select().from(orders).where(and(eq(orders.listingId, listingId), eq(orders.status, "new")));
+    for (const o of open) await this.transition(o, "cancelled", "seller", null, reason).catch(() => undefined);
+    return open.length;
+  }
+
+  /** Requests the seller ignored for `hours` are cancelled, so buyers are not stuck and their slots free up. */
+  async expireStale(hours = 48, now = new Date()) {
+    const stale = await this.db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.status, "new"), lt(orders.createdAt, new Date(now.getTime() - hours * 3600_000))))
+      .limit(500);
+    for (const o of stale) await this.transition(o, "cancelled", "operator", null, "seller_timeout").catch(() => undefined);
+    return stale.length;
   }
 
   /** Ban: open orders of the user are cancelled; ones already with the courier are left to the operator. */
@@ -420,7 +442,7 @@ export class OrderService {
         .returning();
       for (const other of others) {
         await this.db.insert(orderEvents).values({ orderId: other.id, status: "cancelled", actor: "seller", note: "reserved_by_other" });
-        await this.notifyStatus(other, l ?? null, "cancelled");
+        await this.notifyStatus(other, l ?? null, "cancelled", "seller"); // the seller caused it: tell the buyer only
       }
       const [buyer, seller] = await Promise.all([this.user(o.buyerUserId), this.user(o.sellerUserId)]);
       const q = o.quote as DeliveryQuote;
@@ -526,7 +548,8 @@ export class OrderService {
       },
       district: o.district as District,
       address: role === "seller" ? null : o.address,
-      comment: o.comment,
+      // The buyer's free text reaches the seller only without phones and links (deals stay inside Ishonch).
+      comment: o.comment && role === "seller" ? scrubPii(o.comment) : o.comment,
       quote: o.quote as DeliveryQuote,
       feePayer: o.feePayer as FeePayer,
       courier: o.courierName ? { name: o.courierName } : null,

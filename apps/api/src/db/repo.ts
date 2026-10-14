@@ -47,7 +47,10 @@ export class Repo {
       .onConflictDoUpdate({
         target: users.telegramId,
         // Language is chosen once from Telegram, then only changed explicitly by the user.
-        set: role ? { role } : { telegramId: sql`excluded.telegram_id` },
+        // Staff roles follow the env lists: an id removed from ADMIN/OPERATOR_TELEGRAM_IDS loses the role.
+        set: role
+          ? { role }
+          : { role: sql`case when ${users.role} in ('admin', 'operator') then 'buyer' else ${users.role} end` },
       })
       .returning();
     return row!;
@@ -59,6 +62,13 @@ export class Repo {
 
   async setPhone(userId: string, phone: string) {
     await this.db.update(users).set({ phone }).where(eq(users.id, userId));
+  }
+
+  async hasOpenOrders(userId: string) {
+    const rows = await this.db.execute(sql`
+      select 1 from orders where (buyer_user_id = ${userId} or seller_user_id = ${userId})
+        and status in ('new', 'confirmed', 'courier_assigned', 'picked_up') limit 1`);
+    return (rows as unknown as unknown[]).length > 0;
   }
 
   async acceptTerms(userId: string) {
@@ -174,6 +184,35 @@ export class Repo {
   async getCheck(id: string) {
     const [row] = await this.db.select().from(checks).where(eq(checks.id, id));
     return row ?? null;
+  }
+
+  // ---- per-user daily quotas (paid AI calls) ----
+  /**
+   * Reserves one unit of a daily quota BEFORE the expensive call: insert, then count. Parallel requests
+   * cannot all slip through (at the boundary some may be refused, never over-admitted).
+   * Returns the reservation id (to refund on our own failures) or null when the quota is used up.
+   */
+  async reserveDaily(userId: string, quota: string, limit: number): Promise<number | null> {
+    const [row] = await this.db.insert(events).values({ userId, name: quota }).returning({ id: events.id });
+    const used = await this.usedToday(userId, quota);
+    if (used > limit) {
+      await this.db.delete(events).where(eq(events.id, row!.id));
+      return null;
+    }
+    return row!.id;
+  }
+
+  async usedToday(userId: string, quota: string): Promise<number> {
+    const [r] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(events)
+      .where(and(eq(events.userId, userId), eq(events.name, quota), gte(events.createdAt, startOfTashkentDay())));
+    return r?.n ?? 0;
+  }
+
+  /** Gives a reservation back (the AI was unavailable — not the user's fault). */
+  async refundDaily(reservationId: number | null) {
+    if (reservationId != null) await this.db.delete(events).where(eq(events.id, reservationId));
   }
 
   // ---- analytics ----

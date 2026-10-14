@@ -68,6 +68,16 @@ const EnvSchema = z.object({
 
 export type Config = z.infer<typeof EnvSchema>;
 
+const WEAK_SECRETS = new Set(["dev-internal-token", "change-me-long-random", ""]);
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  return EnvSchema.parse(env);
+  const config = EnvSchema.parse(env);
+  if (config.NODE_ENV === "production") {
+    // The internal token lets the bot act as any user, admins included: never start with a placeholder.
+    if (WEAK_SECRETS.has(config.INTERNAL_API_TOKEN) || config.INTERNAL_API_TOKEN.length < 32) {
+      throw new Error("INTERNAL_API_TOKEN must be a random string of at least 32 characters in production");
+    }
+    if (!config.BOT_TOKEN) throw new Error("BOT_TOKEN is required in production");
+  }
+  return config;
 }

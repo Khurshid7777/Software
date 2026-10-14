@@ -35,6 +35,8 @@ import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/pu
 import type { ListingService } from "../listings/service.js";
 
 export const PAGE_SIZE = 20;
+/** Statuses anyone may see. */
+export const PUBLIC_STATUSES = ["active", "reserved", "sold"];
 export const MAX_NEW_CONVERSATIONS_PER_DAY = 20;
 export const MAX_SEARCH_ALERTS_PER_DAY = 3;
 export const MAX_SAVED_SEARCHES = 20;
@@ -121,8 +123,19 @@ export class CatalogService {
     const q = f.q?.trim().toLowerCase();
     if (q) {
       // Full text (Russian stemming + "simple" for Uzbek/model names) OR fuzzy title match for typos.
+      // The fuzzy branch forgives typos in words, never in model numbers: every token with a digit
+      // ("13", "s23", "a54") must appear as a whole word, so "iphone 13" does not match "iPhone 10".
+      const canon = canonicalQuery(q);
+      const numbered = [...new Set(canon.split(/[^\p{L}\p{N}]+/u).filter((w) => /\d/.test(w)))].slice(0, 4);
+      const title = sql`lower(${listings.titleRu} || ' ' || ${listings.titleUz})`;
+      const numbersMatch = numbered.length
+        ? sql.join(
+            numbered.map((w) => sql`${title} ~ ${`(^|[^[:alnum:]])${w}([^[:alnum:]]|$)`}`),
+            sql` and `,
+          )
+        : sql`true`;
       c.push(sql`("listings"."search_vector" @@ ${tsQuery(q)}
-        or word_similarity(${canonicalQuery(q)}, lower(${listings.titleRu} || ' ' || ${listings.titleUz})) >= 0.4)`);
+        or (word_similarity(${canon}, ${title}) >= 0.4 and ${numbersMatch}))`);
     }
     return c;
   }
@@ -160,7 +173,11 @@ export class CatalogService {
   /** Builds catalog cards (listing + market label + seller trust + favorite flag). */
   async items(ids: string[], viewer: User | null): Promise<CatalogItem[]> {
     if (ids.length === 0) return [];
-    const dtos = await Promise.all(ids.map((id) => this.listingsSvc.dto(id, viewer?.id ?? null, { withSeller: true })));
+    const staff = viewer?.role === "admin" || viewer?.role === "operator";
+    // Only public listings, unless the viewer owns them or is staff (compare/assistant take arbitrary ids).
+    const dtos = (await this.listingsSvc.dtos(ids, viewer?.id ?? null, { withSeller: true })).filter(
+      (l) => PUBLIC_STATUSES.includes(l.status) || l.seller?.id === viewer?.id || staff,
+    );
     const favs = viewer
       ? new Set(
           (
@@ -212,6 +229,8 @@ export class CatalogService {
       source = "catalog";
     }
     const entry = { range, source: range ? source : ("none" as const), at: Date.now() };
+    // Bounded: keys come from AI-generated model names, so the map must not grow forever.
+    if (this.marketCache.size >= 5000) this.marketCache.delete(this.marketCache.keys().next().value!);
     this.marketCache.set(modelKey, entry);
     return entry;
   }
@@ -242,7 +261,7 @@ export class CatalogService {
   // ---------- favorites ----------
   async setFavorite(user: User, listingId: string, on: boolean) {
     const [l] = await this.db.select({ id: listings.id, status: listings.status }).from(listings).where(eq(listings.id, listingId));
-    if (!l) throw new CatalogRejected("not_found", 404);
+    if (!l || (on && !PUBLIC_STATUSES.includes(l.status))) throw new CatalogRejected("not_found", 404);
     if (on) {
       const inserted = await this.db.insert(favorites).values({ userId: user.id, listingId }).onConflictDoNothing().returning();
       if (inserted.length) {
@@ -269,7 +288,8 @@ export class CatalogService {
       .from(favorites)
       .innerJoin(listings, eq(listings.id, favorites.listingId))
       .where(and(eq(favorites.userId, user.id), inArray(listings.status, ["active", "reserved", "sold"])))
-      .orderBy(desc(favorites.createdAt));
+      .orderBy(desc(favorites.createdAt))
+      .limit(200);
     return this.items(
       rows.map((r) => r.id),
       user,
@@ -313,7 +333,14 @@ export class CatalogService {
       .select({ s: savedSearches, telegramId: users.telegramId, language: users.language })
       .from(savedSearches)
       .innerJoin(users, eq(users.id, savedSearches.userId))
-      .where(sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null`);
+      // Cheap pre-filter in SQL on the structured filters; only the survivors run the full search below.
+      .where(
+        sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null
+          and (${savedSearches.filters}->>'category' is null or ${savedSearches.filters}->>'category' = ${l.category})
+          and (${savedSearches.filters}->>'district' is null or ${savedSearches.filters}->>'district' = ${l.district ?? ""})
+          and (${savedSearches.filters}->>'priceMax' is null or (${savedSearches.filters}->>'priceMax')::bigint >= ${l.price ?? 0})
+          and (${savedSearches.filters}->>'priceMin' is null or (${savedSearches.filters}->>'priceMin')::bigint <= ${l.price ?? 0})`,
+      );
 
     let sent = 0;
     const notifiedUsers = new Set<string>();
@@ -392,7 +419,8 @@ export class CatalogService {
     const recipientId = fromBuyer ? conv.sellerUserId : conv.buyerUserId;
     const [recipient] = await this.db.select().from(users).where(eq(users.id, recipientId));
     const [l] = await this.db.select().from(listings).where(eq(listings.id, conv.listingId));
-    if (!recipient || !l) throw new CatalogRejected("not_found", 404);
+    // Banned users neither receive nor send through the masked chat (old conversations included).
+    if (!recipient || !l || recipient.bannedAt) throw new CatalogRejected("not_found", 404);
 
     const [{ n }] = (await this.db
       .select({ n: count() })

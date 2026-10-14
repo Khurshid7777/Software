@@ -12,7 +12,7 @@ import { checkRoutes, multipartLimits } from "./modules/checks/routes.js";
 import { CheckService } from "./modules/checks/service.js";
 import { userRoutes } from "./modules/users/routes.js";
 import { listingRoutes, MAX_UPLOAD_BYTES } from "./modules/listings/routes.js";
-import { ListingService } from "./modules/listings/service.js";
+import { LISTING_AI_PER_DAY, ListingService } from "./modules/listings/service.js";
 import { ShopService } from "./modules/shops/service.js";
 import { FsStorage, S3Storage, type Storage } from "./storage/storage.js";
 import { DisabledSpeechToText, HttpWhisperSpeechToText, type SpeechToText } from "./stt/speechToText.js";
@@ -64,6 +64,14 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {
     limits: { ...multipartLimits, files: 12, fileSize: Math.max(multipartLimits.fileSize, MAX_UPLOAD_BYTES) },
+  });
+  // Malformed ids in the URL (not a uuid / not a number) reach PostgreSQL as invalid input: that is a 404, not a 500.
+  app.setErrorHandler((err, req, reply) => {
+    const code = (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+    if (code === "22P02" || code === "22003") return reply.code(404).send({ error: "not_found" });
+    if ((err as { statusCode?: number }).statusCode && (err as { statusCode: number }).statusCode < 500) return reply.send(err);
+    req.log.error({ err }, "unhandled error");
+    return reply.code(500).send({ error: "internal" });
   });
   app.addContentTypeParser("text/csv", { parseAs: "string" }, (_req, body, done) => done(null, body));
 
@@ -124,6 +132,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     staff,
     moderation,
     onPublished: (id) => catalog.notifySavedSearches(id),
+    onUnavailable: (id, reason): Promise<number> => ordersSvc.closeNewOrders(id, reason),
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
     usdRate: config.USD_RATE,
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
@@ -135,7 +144,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     usdRate: config.USD_RATE,
   });
 
-  const ordersSvc = new OrderService({
+  const ordersSvc: OrderService = new OrderService({
     repo,
     listings: listingsSvc,
     notifier: gateway,
@@ -158,6 +167,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       usd_rate: config.USD_RATE,
       ai_monthly_limit_usd: config.AI_MONTHLY_LIMIT_USD,
       complaints_to_hide: DEFAULT_COMPLAINTS_TO_HIDE,
+      listing_ai_per_day: LISTING_AI_PER_DAY,
     },
     sendDigest: async () => {
       const link = await adminLink();

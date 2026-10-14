@@ -21,6 +21,7 @@ const I18N_KEY: Record<string, string> = {
   not_found: "listing.not_found",
   contact_info: "sell.contact_info",
   duplicate: "sell.duplicate",
+  ai_quota: "sell.ai_quota",
 };
 
 async function readMultipart(req: FastifyRequest) {

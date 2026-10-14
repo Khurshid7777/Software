@@ -76,12 +76,17 @@ export class TrustService {
     )
       .map(([r, k]) => `${r} ×${k}`)
       .join(", ");
-    await this.d.listings.holdForModeration(l, {
-      decision: "needs_review",
-      source: "complaints",
-      reasons: [{ code: "complaints", note: `Жалобы от ${n} пользователей: ${byReason}` }],
-      at: new Date().toISOString(),
-    });
+    const hidden = await this.d.listings.holdForModeration(
+      l,
+      {
+        decision: "needs_review",
+        source: "complaints",
+        reasons: [{ code: "complaints", note: `Жалобы от ${n} пользователей: ${byReason}` }],
+        at: new Date().toISOString(),
+      },
+      { from: ["active"] },
+    );
+    if (!hidden) return { ok: true, duplicate: false, hidden: false };
     await this.d.repo.event(null, "listing_hidden_by_complaints", { listingId, users: n });
     return { ok: true, duplicate: false, hidden: true };
   }
@@ -115,17 +120,24 @@ export class TrustService {
       .where(eq(listings.status, "pending"))
       .orderBy(listings.updatedAt)
       .limit(100);
-    return Promise.all(
-      rows.map(async (r) => {
-        const dto = await this.d.listings.dto(r.id, null, { withSeller: true });
-        const [l] = await this.db.select({ moderation: listings.moderation }).from(listings).where(eq(listings.id, r.id));
-        const [{ n }] = (await this.db
-          .select({ n: count() })
-          .from(complaints)
-          .where(and(eq(complaints.listingId, r.id), isNull(complaints.resolvedAt)))) as [{ n: number }];
-        return { listing: dto, moderation: l?.moderation as ModerationRecord | null, openComplaints: n };
-      }),
+    const ids = rows.map((r) => r.id);
+    if (!ids.length) return [];
+    const dtos = await this.d.listings.dtos(ids, null, { withSeller: true });
+    const records = new Map(
+      (await this.db.select({ id: listings.id, moderation: listings.moderation }).from(listings).where(inArray(listings.id, ids))).map(
+        (r) => [r.id, r.moderation as ModerationRecord | null],
+      ),
     );
+    const open = new Map(
+      (
+        await this.db
+          .select({ id: complaints.listingId, n: count() })
+          .from(complaints)
+          .where(and(inArray(complaints.listingId, ids), isNull(complaints.resolvedAt)))
+          .groupBy(complaints.listingId)
+      ).map((r) => [r.id, Number(r.n)]),
+    );
+    return dtos.map((dto) => ({ listing: dto, moderation: records.get(dto.id) ?? null, openComplaints: open.get(dto.id) ?? 0 }));
   }
 
   /** Moderator decision on a pending listing (Mini App admin API or the bot's buttons in the moderators' chat). */
@@ -145,21 +157,27 @@ export class TrustService {
       at: new Date().toISOString(),
     };
 
+    // Compare-and-set on "pending": two moderators clicking at once (or approve vs reject) decide only once.
+    if (decision === "approve") {
+      try {
+        await this.d.listings.activate(listingId, prev?.pendingChannelIds ?? [], record, ["pending"]);
+      } catch (err) {
+        if ((err as { code?: string }).code === "bad_state") throw new TrustRejected("bad_state", 409);
+        throw err;
+      }
+    } else {
+      const updated = await this.db
+        .update(listings)
+        .set({ status: "rejected", moderation: record, moderationReason: code, updatedAt: new Date() })
+        .where(and(eq(listings.id, listingId), eq(listings.status, "pending")))
+        .returning({ id: listings.id });
+      if (!updated.length) throw new TrustRejected("bad_state", 409);
+    }
     await this.db
       .update(complaints)
       .set({ resolvedAt: new Date(), resolution: decision === "approve" ? "dismissed" : "upheld" })
       .where(and(eq(complaints.listingId, listingId), isNull(complaints.resolvedAt)));
-
-    if (decision === "approve") {
-      await this.d.listings.activate(listingId, prev?.pendingChannelIds ?? [], record);
-      await this.d.listings.notifySeller(l, "moderation.approved");
-    } else {
-      await this.db
-        .update(listings)
-        .set({ status: "rejected", moderation: record, moderationReason: code, updatedAt: new Date() })
-        .where(eq(listings.id, listingId));
-      await this.d.listings.notifySeller(l, "moderation.rejected", record);
-    }
+    await this.d.listings.notifySeller(l, decision === "approve" ? "moderation.approved" : "moderation.rejected", decision === "reject" ? record : null);
     await this.d.repo.event(admin.id, "moderation_decision", { listingId, decision, reason: code });
     return { ok: true, status: decision === "approve" ? "active" : "rejected", title: l.titleRu || l.titleUz };
   }

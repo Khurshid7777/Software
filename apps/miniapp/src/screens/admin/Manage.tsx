@@ -249,6 +249,7 @@ const SETTING_LABEL: Record<keyof AdminSettings, string> = {
   usd_rate: "Курс USD, сум",
   ai_monthly_limit_usd: "Лимит расходов на AI в месяц, $",
   complaints_to_hide: "Жалоб от разных людей, чтобы скрыть объявление",
+  listing_ai_per_day: "AI-черновиков и генераций текста в день на продавца",
 };
 
 export function Settings({ api }: { api: Api }) {

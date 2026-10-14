@@ -85,7 +85,9 @@ export function makeAuth(opts: AuthOptions) {
   /** Optional auth: sets req.user when credentials are valid, never rejects. */
   async function optionalUser(req: FastifyRequest) {
     const tg = await resolveTelegramUser(req);
-    if (tg) req.user = await opts.repo.upsertTelegramUser(tg);
+    if (!tg) return;
+    const user = await opts.repo.upsertTelegramUser(tg);
+    if (!user.bannedAt) req.user = user; // a banned user browses as an anonymous visitor
   }
 
   return { requireUser, requireRole, requireInternal, optionalUser };
