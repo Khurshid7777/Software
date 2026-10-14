@@ -14,7 +14,7 @@ export interface StaffTargets {
 export class StaffNotifier {
   constructor(
     private notifier: Notifier | null,
-    private targets: { operators: StaffTargets; moderators: StaffTargets },
+    private targets: { operators: StaffTargets; moderators: StaffTargets; admins?: StaffTargets },
   ) {}
 
   operators(text: string, buttons: NotifyButton[][] = []) {
@@ -23,6 +23,11 @@ export class StaffNotifier {
 
   moderators(text: string, buttons: NotifyButton[][] = []) {
     return this.send(this.targets.moderators, text, buttons);
+  }
+
+  /** Admins only (daily digest); falls back to the moderators' target when no admin target is set. */
+  admins(text: string, buttons: NotifyButton[][] = []) {
+    return this.send(this.targets.admins ?? this.targets.moderators, text, buttons);
   }
 
   private async send(to: StaffTargets, text: string, buttons: NotifyButton[][]) {

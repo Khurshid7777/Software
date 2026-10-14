@@ -590,9 +590,12 @@ export class ListingService {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
     if (!l) throw new ListingRejected("not_found", 404);
     const isOwner = viewer?.id === l.sellerUserId;
-    if (!isOwner && !["active", "reserved", "sold"].includes(l.status)) throw new ListingRejected("not_found", 404);
-    if (!isOwner && l.status === "active") {
+    // Staff open any listing (moderation queue, complaints, orders) without counting a view.
+    const isStaff = viewer?.role === "admin" || viewer?.role === "operator";
+    if (!isOwner && !isStaff && !["active", "reserved", "sold"].includes(l.status)) throw new ListingRejected("not_found", 404);
+    if (!isOwner && !isStaff && l.status === "active") {
       await this.db.update(listings).set({ views: sql`${listings.views} + 1` }).where(eq(listings.id, id));
+      if (viewer) await this.d.repo.event(viewer.id, "listing_viewed", { listingId: id });
     }
     return this.dto(id, viewer?.id ?? null, { withSeller: true });
   }

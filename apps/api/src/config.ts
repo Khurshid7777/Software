@@ -36,6 +36,8 @@ const EnvSchema = z.object({
   MODERATION_CHAT_ID: optionalNumber,
   // Courier integration. Only "manual" exists: operators arrange couriers themselves.
   COURIER_PROVIDER: z.enum(["manual"]).default("manual"),
+  // Hour (Tashkent, 0-23) of the daily digest to admins; empty or -1 turns it off.
+  DIGEST_HOUR: z.preprocess((v) => (v === "" ? -1 : v), z.coerce.number().int().min(-1).max(23).default(9)),
   // AI pre-moderation of listings at publication. "false": rules and duplicate checks only.
   AI_MODERATION: z
     .string()

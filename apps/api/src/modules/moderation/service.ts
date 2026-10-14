@@ -55,7 +55,7 @@ export class ModerationService {
     const photoRows = (await this.db.execute(sql`
       select distinct p2.listing_id as id, l2.seller_user_id as seller
       from ${listingPhotos} p1
-      join ${listingPhotos} p2 on p2.listing_id <> p1.listing_id and p2.phash is not null
+      join ${listingPhotos} p2 on p2.phash_bands && p1.phash_bands and p2.listing_id <> p1.listing_id
         and bit_count(('x' || p1.phash)::bit(64) # ('x' || p2.phash)::bit(64)) <= ${PHOTO_DUPLICATE_DISTANCE}
       join ${listings} l2 on l2.id = p2.listing_id and l2.status in ('active', 'pending', 'reserved')
       where p1.listing_id = ${l.id} and p1.phash is not null

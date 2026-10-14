@@ -29,6 +29,13 @@
       "when": 1791964071216,
       "tag": "0003_delivery_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791965390665,
+      "tag": "0004_metrics_dedup_index",
+      "breakpoints": true
     }
   ]
 }

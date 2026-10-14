@@ -20,6 +20,7 @@ import { BotApiPublisher, type ChannelPublisher, type Notifier } from "./telegra
 import { AssistantService } from "./modules/catalog/assistant.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { CatalogService } from "./modules/catalog/service.js";
+import { MetricsService } from "./modules/metrics/service.js";
 import { ModerationService } from "./modules/moderation/service.js";
 import { createCourierProvider, type CourierProvider } from "./modules/orders/courier.js";
 import { orderRoutes } from "./modules/orders/routes.js";
@@ -27,6 +28,8 @@ import { OrderService } from "./modules/orders/service.js";
 import { trustRoutes } from "./modules/trust/routes.js";
 import { TrustService } from "./modules/trust/service.js";
 import { StaffNotifier } from "./telegram/staff.js";
+import { maybeSendDigest } from "./jobs.js";
+import { DEFAULT_COMPLAINTS_TO_HIDE } from "@ishonch/shared";
 
 export interface AppDeps {
   config: Config;
@@ -98,6 +101,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   const staff = new StaffNotifier(gateway, {
     operators: { chatId: config.OPERATOR_CHAT_ID, userIds: [...config.OPERATOR_TELEGRAM_IDS, ...config.ADMIN_TELEGRAM_IDS] },
     moderators: { chatId: config.MODERATION_CHAT_ID, userIds: config.ADMIN_TELEGRAM_IDS },
+    admins: { userIds: config.ADMIN_TELEGRAM_IDS },
   });
   const moderation = new ModerationService({
     repo,
@@ -144,7 +148,18 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   app.get("/health", async () => ({ ok: true }));
   userRoutes(app, repo, checks, auth.requireUser);
   checkRoutes(app, checks, auth.requireUser);
-  adminRoutes(app, repo, auth.requireRole("admin"));
+  const metrics = new MetricsService(repo);
+  adminRoutes(app, repo, auth.requireRole("admin"), {
+    metrics,
+    settingDefaults: {
+      checks_per_day: config.CHECKS_PER_DAY,
+      assistant_per_day: config.ASSISTANT_PER_DAY,
+      usd_rate: config.USD_RATE,
+      ai_monthly_limit_usd: config.AI_MONTHLY_LIMIT_USD,
+      complaints_to_hide: DEFAULT_COMPLAINTS_TO_HIDE,
+    },
+    sendDigest: async () => staff.admins(await metrics.digest()),
+  });
   listingRoutes(app, listingsSvc, shopsSvc, repo, {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
@@ -163,12 +178,24 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     optionalUser: auth.optionalUser,
   });
 
-  app.decorate("services", { listings: listingsSvc, orders: ordersSvc, trust });
+  app.decorate("services", {
+    listings: listingsSvc,
+    orders: ordersSvc,
+    trust,
+    metrics,
+    digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff }, config.DIGEST_HOUR, now),
+  });
   return app;
 }
 
 declare module "fastify" {
   interface FastifyInstance {
-    services: { listings: ListingService; orders: OrderService; trust: TrustService };
+    services: {
+      listings: ListingService;
+      orders: OrderService;
+      trust: TrustService;
+      metrics: MetricsService;
+      digest: (now?: Date) => Promise<boolean>;
+    };
   }
 }

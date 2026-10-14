@@ -1,6 +1,10 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { z } from "zod";
+import { desc, isNotNull } from "drizzle-orm";
+import { ADMIN_SETTING_KEYS, AdminSettingsSchema, type AdminSettings } from "@ishonch/shared";
 import { startOfMonthUtc, startOfTashkentDay, type Repo } from "../../db/repo.js";
+import { users } from "../../db/schema.js";
+import type { MetricsService } from "../metrics/service.js";
 
 const PriceRowSchema = z.object({
   modelKey: z.string().min(2),
@@ -34,7 +38,54 @@ export function parsePriceCsv(csv: string) {
   return { rows, errors };
 }
 
-export function adminRoutes(app: FastifyInstance, repo: Repo, requireAdmin: preHandlerHookHandler) {
+export function adminRoutes(
+  app: FastifyInstance,
+  repo: Repo,
+  requireAdmin: preHandlerHookHandler,
+  extra: { metrics: MetricsService; settingDefaults: AdminSettings; sendDigest: () => Promise<number> },
+) {
+  const days = (v: unknown) => Math.min(365, Math.max(1, Math.round(Number(v) || 30)));
+
+  app.get<{ Querystring: { days?: string } }>("/admin/metrics", { preHandler: requireAdmin }, (req) =>
+    extra.metrics.overview(days(req.query.days)),
+  );
+
+  app.get<{ Querystring: { days?: string } }>("/admin/reports/orders.csv", { preHandler: requireAdmin }, async (req, reply) => {
+    const n = days(req.query.days);
+    const csv = await extra.metrics.ordersCsv(n);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="ishonch-orders-${n}d.csv"`)
+      .send("\uFEFF" + csv); // BOM: Excel opens UTF-8 Cyrillic correctly
+  });
+
+  app.post("/admin/digest", { preHandler: requireAdmin }, async () => ({ sent: await extra.sendDigest() }));
+
+  app.get("/admin/settings", { preHandler: requireAdmin }, async () => {
+    const out: Record<string, unknown> = {};
+    for (const k of ADMIN_SETTING_KEYS) out[k] = await repo.getSetting(k, extra.settingDefaults[k]);
+    return out as AdminSettings;
+  });
+
+  app.put("/admin/settings", { preHandler: requireAdmin }, async (req, reply) => {
+    const parsed = AdminSettingsSchema.strict().safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad_request", details: parsed.error.issues });
+    for (const [k, v] of Object.entries(parsed.data)) await repo.setSetting(k, v);
+    await repo.event(req.user!.id, "settings_changed", parsed.data);
+    const out: Record<string, unknown> = {};
+    for (const k of ADMIN_SETTING_KEYS) out[k] = await repo.getSetting(k, extra.settingDefaults[k]);
+    return out;
+  });
+
+  app.get("/admin/users/banned", { preHandler: requireAdmin }, () =>
+    repo.db
+      .select({ id: users.id, telegramId: users.telegramId, bannedAt: users.bannedAt, banReason: users.banReason, role: users.role })
+      .from(users)
+      .where(isNotNull(users.bannedAt))
+      .orderBy(desc(users.bannedAt))
+      .limit(200),
+  );
+
   app.get("/admin/price-reference", { preHandler: requireAdmin }, () => repo.listPriceReference());
 
   app.put("/admin/price-reference", { preHandler: requireAdmin }, async (req, reply) => {

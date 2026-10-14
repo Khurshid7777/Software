@@ -66,7 +66,12 @@ export function catalogRoutes(
     if (!filters) return reply.code(400).send({ error: "bad_request" });
     const sort = (CATALOG_SORTS as readonly string[]).includes(req.query.sort ?? "") ? (req.query.sort as CatalogSort) : "relevance";
     const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
-    return catalog.search(filters, sort, offset, req.user ?? null);
+    const page = await catalog.search(filters, sort, offset, req.user ?? null);
+    // First page only: one event per search, with the result count (zero results feed the spelling dictionary).
+    if (req.user && offset === 0) {
+      await catalog.logSearch(req.user.id, filters, page.items.length);
+    }
+    return page;
   });
 
   app.get<{ Params: { id: string } }>("/catalog/:id", { preHandler: auth.optionalUser }, async (req, reply) => {

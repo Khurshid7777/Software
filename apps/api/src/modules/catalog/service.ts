@@ -235,6 +235,10 @@ export class CatalogService {
     return { min: quantile(prices, 0.2), median: quantile(prices, 0.5), max: quantile(prices, 0.8) };
   }
 
+  logSearch(userId: string, f: CatalogFilters, results: number) {
+    return this.repo.event(userId, "catalog_search", { q: f.q?.slice(0, 100) ?? null, category: f.category ?? null, results });
+  }
+
   // ---------- favorites ----------
   async setFavorite(user: User, listingId: string, on: boolean) {
     const [l] = await this.db.select({ id: listings.id, status: listings.status }).from(listings).where(eq(listings.id, listingId));
