@@ -283,3 +283,52 @@ export function Settings({ api }: { api: Api }) {
     </div>
   );
 }
+
+const ACTION_LABEL: Record<string, string> = {
+  "moderation.approve": "Одобрил объявление",
+  "moderation.reject": "Отклонил объявление",
+  "user.ban": "Заблокировал пользователя",
+  "user.unban": "Разблокировал пользователя",
+  "settings.update": "Изменил настройки",
+  "tariffs.replace": "Изменил тарифы",
+  "prices.import": "Импортировал цены",
+  "prices.upsert": "Изменил цены",
+  "prices.delete": "Удалил цену",
+  "shop.verify": "Подтвердил магазин",
+  "shop.unverify": "Снял подтверждение магазина",
+  "report.orders_csv": "Скачал отчёт по заказам",
+};
+
+/** Who did what: moderation, bans, settings, prices, tariffs, shops, delivery statuses. */
+export function AuditLog({ api }: { api: Api }) {
+  const [rows, setRows] = useState<Awaited<ReturnType<Api["audit"]>> | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => void api.audit().then(setRows).catch((e) => setMsg(errText(e))), [api]);
+  if (msg) return <p className="error">{msg}</p>;
+  if (!rows) return <p className="hint center">Загрузка…</p>;
+  if (!rows.length) return <p className="hint center">Пока пусто</p>;
+  return (
+    <div className="table-wrap">
+      <table className="admin-table" data-testid="audit-table">
+        <thead>
+          <tr>
+            <th>Когда</th>
+            <th>Кто (Telegram ID)</th>
+            <th>Что</th>
+            <th>Объект</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} title={JSON.stringify(r.details)}>
+              <td>{new Date(r.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+              <td className="num">{r.actorTelegramId ?? "—"}</td>
+              <td>{ACTION_LABEL[r.action] ?? (r.action.startsWith("order.") ? `Заказ → ${r.action.slice(6)}` : r.action)}</td>
+              <td>{r.target ? r.target.slice(0, 8) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

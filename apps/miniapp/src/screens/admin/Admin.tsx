@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Api } from "../../api";
 import { Dashboard } from "./Dashboard";
-import { References, Settings, Users } from "./Manage";
+import { AuditLog, References, Settings, Users } from "./Manage";
 import { Complaints, ModerationQueue, OperatorOrders } from "./Queues";
 
 const ADMIN_TABS = [
@@ -12,6 +12,7 @@ const ADMIN_TABS = [
   ["users", "Пользователи"],
   ["references", "Справочники"],
   ["settings", "Настройки"],
+  ["audit", "Журнал"],
 ] as const;
 type Tab = (typeof ADMIN_TABS)[number][0];
 
@@ -40,6 +41,7 @@ export function Admin({ api, role, onOpenListing }: { api: Api; role: string; on
       {tab === "users" && <Users api={api} />}
       {tab === "references" && <References api={api} />}
       {tab === "settings" && <Settings api={api} />}
+      {tab === "audit" && <AuditLog api={api} />}
     </div>
   );
 }

@@ -220,6 +220,10 @@ export function createApi(initData: string | null) {
       const { url } = await request<{ url: string }>("/admin/reports/orders.csv/link", json("POST", { days }));
       return new URL(`${BASE}${url}`, window.location.href).href;
     },
+    audit: () =>
+      request<Array<{ id: number; actorTelegramId: number | null; action: string; target: string | null; details: Record<string, unknown>; createdAt: string }>>(
+        "/admin/audit",
+      ),
     sendDigest: () => request<{ sent: number }>("/admin/digest", { method: "POST" }),
     moderationQueue: () => request<QueueItem[]>("/admin/moderation"),
     moderate: (id: string, decision: "approve" | "reject") =>
