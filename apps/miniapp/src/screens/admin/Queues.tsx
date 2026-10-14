@@ -159,6 +159,7 @@ export function OperatorOrders({ api }: { api: Api }) {
             <span className="hint">
               Покупатель {o.contacts.buyerPhone ?? "—"} · продавец {o.contacts.sellerPhone ?? "—"}
             </span>
+            {o.imei && <span className="hint">🔐 IMEI {o.imei} — сверить с *#06# при получении</span>}
             {o.courier?.name && <span className="hint">Курьер: {o.courier.name}</span>}
             {next.includes("courier_assigned") && (
               <input

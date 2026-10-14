@@ -216,7 +216,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     optionalUser: auth.optionalUser,
   });
 
-  for (const kind of ["channel_posts", "saved_search_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+  for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
 
   app.decorate("services", {
     queue,

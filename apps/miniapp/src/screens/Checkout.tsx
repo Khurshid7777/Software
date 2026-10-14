@@ -131,6 +131,9 @@ export function Checkout({ api, listing, onDone }: Props) {
             <span>{t("checkout.item")}</span>
             <span>{formatUzs(quote.itemPrice)}</span>
           </div>
+          {listing.price != null && quote.itemPrice < listing.price && (
+            <p className="hint" data-testid="offer-applied">🤝 {t("checkout.offer_applied", { amount: formatUzs(quote.itemPrice) })}</p>
+          )}
           <div className="row between">
             <span>{t("checkout.delivery_fee")}</span>
             <span>{quote.tariffId ? formatUzs(quote.deliveryFee) : t("checkout.no_tariff")}</span>

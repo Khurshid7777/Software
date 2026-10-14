@@ -153,6 +153,11 @@ export const listings = pgTable(
     attributes: jsonb("attributes").notNull().default({}),
     condition: text("condition"),
     price: bigint("price", { mode: "number" }),
+    /** Price before the last reduction (shown crossed out for a while; favorites get an alert). */
+    previousPrice: bigint("previous_price", { mode: "number" }),
+    priceDroppedAt: timestamp("price_dropped_at", { withTimezone: true }),
+    /** Phones: 15-digit IMEI (Luhn-checked). Only the owner and operators see it; buyers see the last 4 digits. */
+    imei: text("imei"),
     currency: text("currency").notNull().default("UZS"),
     district: text("district"),
     allowedDeliveryModes: text("allowed_delivery_modes").array().notNull().default(sql`ARRAY['delivery_only','cod_seller']::text[]`),
@@ -183,6 +188,7 @@ export const listings = pgTable(
     index("listings_seller_status_idx").on(t.sellerUserId, t.status),
     index("listings_status_bumped_idx").on(t.status, t.bumpedAt),
     index("listings_status_expires_idx").on(t.status, t.expiresAt),
+    index("listings_imei_idx").on(t.imei).where(sql`${t.imei} is not null`),
   ],
 );
 
@@ -267,7 +273,11 @@ export const conversations = pgTable(
     createdAt: createdAt(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("conversations_buyer_idx").on(t.buyerUserId, t.listingId)],
+  (t) => [
+    index("conversations_buyer_idx").on(t.buyerUserId, t.listingId),
+    // Seller's typical reply time (listing card).
+    index("conversations_seller_created_idx").on(t.sellerUserId, t.createdAt),
+  ],
 );
 
 export const conversationMessages = pgTable("conversation_messages", {
@@ -281,6 +291,39 @@ export const conversationMessages = pgTable("conversation_messages", {
   text: text("text").notNull(),
   createdAt: createdAt(),
 });
+
+/**
+ * Buyer's price offer ("торг"): pending → accepted / declined / expired. An accepted offer is valid for
+ * OFFER_ACCEPTED_HOURS and replaces the listing price in that buyer's delivery quote.
+ */
+export const offers = pgTable(
+  "offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    amount: bigint("amount", { mode: "number" }).notNull(),
+    /** Listing price when the offer was made. */
+    listPrice: bigint("list_price", { mode: "number" }).notNull(),
+    status: text("status").notNull().default("pending"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("offers_listing_buyer_idx").on(t.listingId, t.buyerUserId, t.createdAt),
+    index("offers_seller_idx").on(t.sellerUserId, t.createdAt),
+    // One live offer per buyer and listing: a new one waits until the previous is answered or expires.
+    uniqueIndex("offers_one_pending_idx").on(t.listingId, t.buyerUserId).where(sql`${t.status} = 'pending'`),
+  ],
+);
 
 /** Courier prices by district; the most specific active row wins (see pickTariff). */
 export const courierTariffs = pgTable("courier_tariffs", {

@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import type { Lang } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
+import { canAddToHomeScreen, promptAddToHomeScreen } from "../telegram";
 
 interface Props {
   /** Staff see an entry to the admin panel (operators: delivery orders only). */
@@ -13,6 +15,10 @@ interface Props {
 export function Home({ staff, remaining, onOpen, onLanguage, onDeleteAccount }: Props) {
   const t = useT();
   const lang = useLang();
+  const [homeScreen, setHomeScreen] = useState(false);
+  useEffect(() => {
+    canAddToHomeScreen().then(setHomeScreen);
+  }, []);
   return (
     <div className="stack">
       <header className="row between">
@@ -103,6 +109,18 @@ export function Home({ staff, remaining, onOpen, onLanguage, onDeleteAccount }: 
           <span className="hint">{t("home.shop.desc")}</span>
         </span>
       </button>
+
+      {homeScreen && (
+        <button
+          className="link"
+          onClick={() => {
+            promptAddToHomeScreen();
+            setHomeScreen(false);
+          }}
+        >
+          📲 {t("home.add_to_home")}
+        </button>
+      )}
 
       <button className="link danger" onClick={onDeleteAccount}>
         {t("home.delete_account")}

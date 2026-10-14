@@ -169,6 +169,10 @@ export const CreateOrderSchema = z.object({
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
 
+export const OfferInputSchema = z.object({
+  amount: z.number().int().positive().max(10_000_000_000),
+});
+
 export const ReviewInputSchema = z.object({
   rating: z.number().int().min(1).max(5),
   text: z.string().trim().max(500).optional(),

@@ -74,6 +74,8 @@ export interface ListingSeller {
   platformSales: number;
   rating: { avg: number | null; count: number };
   shop: { id: string; name: string; verified: boolean; marketLocation: string | null } | null;
+  /** Median minutes to the first reply in chats (last 60 days, at least 3 chats), else null. */
+  responseMinutes: number | null;
 }
 
 /** Listing as returned by the API. */
@@ -88,7 +90,13 @@ export interface ListingDto {
   attributes: { brand: string | null; model: string | null; modelKey: string | null; specs: { name: string; value: string }[] };
   condition: Condition | null;
   price: number | null;
+  /** Price before a recent reduction (shown crossed out), else null. */
+  previousPrice: number | null;
   currency: "UZS";
+  /** Phones: the full IMEI for the owner only. */
+  imei?: string | null;
+  /** Last 4 IMEI digits for buyers to compare with *#06# at handover; null when not given. */
+  imeiTail: string | null;
   district: District | null;
   allowedDeliveryModes: DeliveryMode[];
   feePayer: FeePayer;

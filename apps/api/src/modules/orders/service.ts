@@ -2,11 +2,15 @@ import { and, asc, count, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm
 import {
   MAX_OPEN_ORDERS_PER_BUYER,
   MVP_DELIVERY_MODES,
+  OFFER_ACCEPTED_HOURS,
+  OFFER_PENDING_HOURS,
+  OFFERS_PER_DAY,
   OPEN_ORDER_STATUSES,
   RESERVING_ORDER_STATUSES,
   canTransition,
   formatUzs,
   listingTitle,
+  minOffer,
   operatorNextStatuses,
   pickTariff,
   quoteDelivery,
@@ -19,12 +23,14 @@ import {
   type District,
   type FeePayer,
   type Lang,
+  type OfferDto,
+  type OfferStatus,
   type OrderActor,
   type OrderDto,
   type OrderStatus,
 } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { courierTariffs, listingPhotos, listings, orderEvents, orders, reviews, users, type Order, type User } from "../../db/schema.js";
+import { courierTariffs, listingPhotos, listings, offers, orderEvents, orders, reviews, users, type Order, type User } from "../../db/schema.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
 import type { StaffNotifier } from "../../telegram/staff.js";
 import type { ListingService } from "../listings/service.js";
@@ -41,7 +47,11 @@ export type OrderError =
   | "bad_state"
   | "forbidden"
   | "review_exists"
-  | "too_many_attempts";
+  | "too_many_attempts"
+  | "offer_too_low"
+  | "offer_not_lower"
+  | "offer_pending"
+  | "too_many_offers";
 
 export class OrderRejected extends Error {
   constructor(
@@ -112,12 +122,160 @@ export class OrderService {
     return l;
   }
 
-  async quote(listingId: string, district: District, mode: DeliveryMode): Promise<DeliveryQuote & { modes: DeliveryMode[] }> {
+  /** `buyerId`: a price the seller accepted for this buyer replaces the asking price (never above it). */
+  async quote(
+    listingId: string,
+    district: District,
+    mode: DeliveryMode,
+    buyerId?: string,
+  ): Promise<DeliveryQuote & { modes: DeliveryMode[]; offerId: string | null }> {
     const l = await this.availableListing(listingId);
     const modes = this.allowedModes(l);
     if (!modes.includes(mode)) throw new OrderRejected("mode_not_allowed", 400);
     const tariff = pickTariff(await this.tariffs(), (l.district as District | null) ?? null, district);
-    return { ...quoteDelivery({ tariff, itemPrice: l.price!, mode, feePayer: l.feePayer as FeePayer }), modes };
+    const offer = buyerId ? await this.acceptedOffer(l.id, buyerId) : null;
+    const itemPrice = offer ? Math.min(offer.amount, l.price!) : l.price!;
+    return { ...quoteDelivery({ tariff, itemPrice, mode, feePayer: l.feePayer as FeePayer }), modes, offerId: offer?.id ?? null };
+  }
+
+  // ---------- price offers ----------
+  private async acceptedOffer(listingId: string, buyerId: string) {
+    const [o] = await this.db
+      .select()
+      .from(offers)
+      .where(
+        and(eq(offers.listingId, listingId), eq(offers.buyerUserId, buyerId), eq(offers.status, "accepted"), gt(offers.expiresAt, new Date())),
+      )
+      .orderBy(desc(offers.decidedAt))
+      .limit(1);
+    return o ?? null;
+  }
+
+  private offerDto(o: typeof offers.$inferSelect): OfferDto {
+    // Lazily expired: the hourly job only tidies the table.
+    const status = (["pending", "accepted"].includes(o.status) && o.expiresAt <= new Date() ? "expired" : o.status) as OfferStatus;
+    return {
+      id: o.id,
+      listingId: o.listingId,
+      amount: o.amount,
+      listPrice: o.listPrice,
+      status,
+      createdAt: o.createdAt.toISOString(),
+      decidedAt: o.decidedAt?.toISOString() ?? null,
+      expiresAt: o.expiresAt.toISOString(),
+    };
+  }
+
+  /** The buyer's latest offer on a listing (for the listing card), or null. */
+  async myOffer(buyer: User, listingId: string): Promise<OfferDto | null> {
+    const [o] = await this.db
+      .select()
+      .from(offers)
+      .where(and(eq(offers.listingId, listingId), eq(offers.buyerUserId, buyer.id)))
+      .orderBy(desc(offers.createdAt))
+      .limit(1);
+    return o ? this.offerDto(o) : null;
+  }
+
+  /** Buyer proposes a lower price; the seller answers with bot buttons (accept / decline). */
+  async makeOffer(buyer: User, listingId: string, amount: number): Promise<OfferDto> {
+    const l = await this.availableListing(listingId);
+    if (l.sellerUserId === buyer.id) throw new OrderRejected("own_listing", 409);
+    if (amount >= l.price!) throw new OrderRejected("offer_not_lower", 400);
+    if (amount < minOffer(l.price!)) throw new OrderRejected("offer_too_low", 400);
+    const now = new Date();
+    // A pending offer past its deadline no longer blocks a new one.
+    await this.db
+      .update(offers)
+      .set({ status: "expired" })
+      .where(and(eq(offers.listingId, l.id), eq(offers.buyerUserId, buyer.id), eq(offers.status, "pending"), lt(offers.expiresAt, now)));
+    const reservation = await this.d.repo.reserveDaily(buyer.id, "offer_made", OFFERS_PER_DAY);
+    if (reservation == null) throw new OrderRejected("too_many_offers", 429);
+    let offer: typeof offers.$inferSelect;
+    try {
+      [offer] = (await this.db
+        .insert(offers)
+        .values({
+          listingId: l.id,
+          buyerUserId: buyer.id,
+          sellerUserId: l.sellerUserId,
+          amount,
+          listPrice: l.price!,
+          expiresAt: new Date(now.getTime() + OFFER_PENDING_HOURS * 3600_000),
+        })
+        .returning()) as [typeof offers.$inferSelect];
+    } catch (err) {
+      await this.d.repo.refundDaily(reservation);
+      if (isUniqueViolation(err)) throw new OrderRejected("offer_pending", 409);
+      throw err;
+    }
+    const seller = await this.user(l.sellerUserId);
+    if (seller) {
+      const lang = seller.language as Lang;
+      const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      await this.dm(
+        seller,
+        t(lang, "offer.new_for_seller", {
+          title: listingTitle(l, lang),
+          amount: formatUzs(amount),
+          price: formatUzs(l.price!),
+          hours: OFFER_PENDING_HOURS,
+        }),
+        [
+          [
+            { text: t(lang, "offer.accept"), callbackData: `offer:accept:${offer.id}` },
+            { text: t(lang, "offer.decline"), callbackData: `offer:decline:${offer.id}` },
+          ],
+          ...(url ? [[{ text: t(lang, "favorites.open"), url }]] : []),
+        ],
+      );
+    }
+    return this.offerDto(offer);
+  }
+
+  /** Seller's answer (bot button or API). Compare-and-set: a second tap or an expired offer changes nothing. */
+  async decideOffer(seller: User, id: string, decision: "accept" | "decline"): Promise<OfferDto> {
+    const [o] = await this.db.select().from(offers).where(eq(offers.id, id));
+    if (!o) throw new OrderRejected("not_found", 404);
+    if (o.sellerUserId !== seller.id) throw new OrderRejected("forbidden", 403);
+    const now = new Date();
+    if (decision === "accept") {
+      const [l] = await this.db.select({ status: listings.status }).from(listings).where(eq(listings.id, o.listingId));
+      if (l?.status !== "active") throw new OrderRejected("not_available", 409);
+    }
+    const [updated] = await this.db
+      .update(offers)
+      .set(
+        decision === "accept"
+          ? { status: "accepted", decidedAt: now, expiresAt: new Date(now.getTime() + OFFER_ACCEPTED_HOURS * 3600_000) }
+          : { status: "declined", decidedAt: now },
+      )
+      .where(and(eq(offers.id, id), eq(offers.status, "pending"), gt(offers.expiresAt, now)))
+      .returning();
+    if (!updated) throw new OrderRejected("bad_state", 409);
+    await this.d.repo.event(seller.id, `offer_${updated.status}`, { offerId: id, listingId: o.listingId });
+
+    const [buyer, [l]] = await Promise.all([this.user(o.buyerUserId), this.db.select().from(listings).where(eq(listings.id, o.listingId))]);
+    if (buyer && l) {
+      const lang = buyer.language as Lang;
+      const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      const text =
+        updated.status === "accepted"
+          ? t(lang, "offer.accepted_for_buyer", { title: listingTitle(l, lang), amount: formatUzs(o.amount), hours: OFFER_ACCEPTED_HOURS })
+          : t(lang, "offer.declined_for_buyer", { title: listingTitle(l, lang), amount: formatUzs(o.amount) });
+      await this.dm(buyer, text, url ? [[{ text: t(lang, updated.status === "accepted" ? "offer.checkout" : "favorites.open"), url }]] : []);
+    }
+    return this.offerDto(updated);
+  }
+
+  /** Hourly tidy-up: offers past their deadline are marked expired. */
+  async expireOffers(now = new Date()) {
+    const rows = await this.db
+      .update(offers)
+      .set({ status: "expired" })
+      .where(and(inArray(offers.status, ["pending", "accepted"]), lt(offers.expiresAt, now)))
+      .returning({ id: offers.id });
+    return rows.length;
   }
 
   // ---------- buyer ----------
@@ -142,7 +300,7 @@ export class OrderService {
     ];
     if (recent >= 3) throw new OrderRejected("too_many_attempts", 429);
 
-    const { modes: _m, ...quote } = await this.quote(l.id, input.district, input.mode);
+    const { modes: _m, offerId, ...quote } = await this.quote(l.id, input.district, input.mode, buyer.id);
     let order: Order;
     try {
       [order] = (await this.db
@@ -167,7 +325,7 @@ export class OrderService {
     }
     await this.db.insert(orderEvents).values({ orderId: order.id, status: "new", actorUserId: buyer.id, actor: "buyer" });
     await this.db.update(listings).set({ requestsCount: sql`${listings.requestsCount} + 1` }).where(eq(listings.id, l.id));
-    await this.d.repo.event(buyer.id, "order_created", { orderId: order.id, listingId: l.id, mode: input.mode });
+    await this.d.repo.event(buyer.id, "order_created", { orderId: order.id, listingId: l.id, mode: input.mode, offerId });
 
     const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
     if (seller) {
@@ -284,6 +442,7 @@ export class OrderService {
         return {
           ...(await this.dto(r.id, null, "operator")),
           contacts: { buyerPhone: buyer?.phone ?? null, sellerPhone: seller?.phone ?? null, courierPhone: o.courierPhone },
+          imei: (await this.db.select({ imei: listings.imei }).from(listings).where(eq(listings.id, o.listingId)))[0]?.imei ?? null,
         };
       }),
     );
@@ -303,6 +462,7 @@ export class OrderService {
       `Доставка: ${formatUzs(q.deliveryFee)}${q.codFee ? ` + ${formatUzs(q.codFee)} за наличные` : ""} (${t("ru", `fee_payer.${o.feePayer as FeePayer}`)})`,
       ``,
       `Забрать: ${l?.district ? t("ru", `district.${l.district as District}`) : "район не указан"}, продавец ${seller?.phone ?? "—"}`,
+      ...(l?.imei ? [`IMEI: ${l.imei} — сверить с *#06# при получении`] : []),
       `Доставить: ${t("ru", `district.${o.district as District}`)}, ${o.address}`,
       `Покупатель: ${buyer?.phone ?? "—"}${o.comment ? `\nКомментарий: ${o.comment}` : ""}`,
       ...(o.courierName ? [`Курьер: ${o.courierName}${o.courierPhone ? `, ${o.courierPhone}` : ""}`] : []),

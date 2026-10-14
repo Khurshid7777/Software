@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   CreateOrderSchema,
   DELIVERY_MODES,
+  OfferInputSchema,
   ORDER_STATUSES,
   ReviewInputSchema,
   TASHKENT_DISTRICTS,
@@ -23,6 +24,10 @@ const MESSAGES: Record<string, string> = {
   bad_state: "order.err.bad_state",
   review_exists: "order.err.review_exists",
   too_many_attempts: "order.err.too_many_attempts",
+  offer_too_low: "offer.err.too_low",
+  offer_not_lower: "offer.err.not_lower",
+  offer_pending: "offer.err.pending",
+  too_many_offers: "offer.err.too_many",
 };
 
 const TariffSchema = z.object({
@@ -64,7 +69,7 @@ export function orderRoutes(
           .object({ listingId: z.string().uuid(), district: z.enum(TASHKENT_DISTRICTS), mode: z.enum(DELIVERY_MODES) })
           .safeParse(req.query);
         if (!q.success) return reply.code(400).send({ error: "bad_request" });
-        return svc.quote(q.data.listingId, q.data.district, q.data.mode);
+        return svc.quote(q.data.listingId, q.data.district, q.data.mode, req.user!.id);
       }),
   );
 
@@ -73,6 +78,27 @@ export function orderRoutes(
       const parsed = CreateOrderSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request", details: parsed.error.issues });
       return svc.create(req.user!, parsed.data);
+    }),
+  );
+
+  // ---- price offers ("торг"): buyer offers, seller answers with bot buttons ----
+  const uuidParam = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
+  app.get<{ Params: { id: string } }>("/listings/:id/offers/mine", { preHandler: requireUser }, async (req, reply) => {
+    if (!uuidParam(req.params.id)) return reply.code(404).send({ error: "not_found" });
+    return { offer: await svc.myOffer(req.user!, req.params.id) };
+  });
+  app.post<{ Params: { id: string } }>("/listings/:id/offers", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = OfferInputSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.makeOffer(req.user!, req.params.id, parsed.data.amount);
+    }),
+  );
+  app.post<{ Params: { id: string; decision: string } }>("/offers/:id/:decision", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const { decision } = req.params;
+      if ((decision !== "accept" && decision !== "decline") || !uuidParam(req.params.id)) return reply.code(404).send({ error: "not_found" });
+      return svc.decideOffer(req.user!, req.params.id, decision);
     }),
   );
 

@@ -19,6 +19,7 @@ import type {
   AdminSettings,
   CourierTariff,
   ModerationDecision,
+  OfferDto,
   OrderStatus,
   OrderDto,
   ReviewDto,
@@ -76,7 +77,7 @@ export interface ShopInfo {
 }
 
 export type ListingPatch = Partial<
-  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer">
+  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei">
 >;
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
@@ -116,7 +117,10 @@ export interface PriceRow {
   source: string;
   updatedAt: string;
 }
-export type OperatorOrder = OrderDto & { contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null } };
+export type OperatorOrder = OrderDto & {
+  contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null };
+  imei: string | null;
+};
 
 export function createApi(initData: string | null) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -191,6 +195,8 @@ export function createApi(initData: string | null) {
     // ---- catalog & buyer tools ----
     catalog: (f: CatalogFilters, sort: CatalogSort, offset = 0) => request<CatalogPage>(`/catalog?${filtersToQuery(f, sort, offset)}`),
     catalogItem: (id: string) => request<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
+    myOffer: (listingId: string) => request<{ offer: OfferDto | null }>(`/listings/${listingId}/offers/mine`),
+    makeOffer: (listingId: string, amount: number) => request<OfferDto>(`/listings/${listingId}/offers`, json("POST", { amount })),
     setFavorite: (id: string, on: boolean) => request(`/favorites/${id}`, { method: on ? "POST" : "DELETE" }),
     favorites: () => request<CatalogItem[]>("/favorites"),
     searches: () => request<SavedSearch[]>("/searches"),

@@ -42,7 +42,12 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props
         {l.photos[0] ? <img src={apiUrl(l.photos[0].url)} alt="" loading="lazy" /> : <div className="no-photo">📦</div>}
         <span className="item-body">
           <strong>{listingTitle(l, lang)}</strong>
-          {l.price && <span className="item-price">{formatUzs(l.price)}</span>}
+          {l.price && (
+            <span className="item-price">
+              {formatUzs(l.price)}
+              {l.previousPrice && <s className="old-price"> {formatUzs(l.previousPrice)}</s>}
+            </span>
+          )}
           <MarketBadge item={item} />
           <span className="hint">
             {l.district ? `📍 ${t(`district.${l.district}`)} · ` : ""}

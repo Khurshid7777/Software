@@ -25,6 +25,8 @@ export interface Duplicates {
   otherPhotos: string[];
   /** Other sellers' live listings with an almost identical description. */
   otherText: string[];
+  /** Other sellers' listings with the same IMEI (live or sold within 90 days): resale of one phone, or a fake. */
+  otherImei: string[];
 }
 
 export interface ModerationDeps {
@@ -90,7 +92,23 @@ export class ModerationService {
         .limit(5);
       otherText = rows.map((r) => r.id);
     }
-    return { own, otherPhotos, otherText };
+    let otherImei: string[] = [];
+    if (l.imei) {
+      const rows = await this.db
+        .select({ id: listings.id })
+        .from(listings)
+        .where(
+          and(
+            eq(listings.imei, l.imei),
+            ne(listings.id, l.id),
+            ne(listings.sellerUserId, l.sellerUserId),
+            sql`(${listings.status} in ('active', 'pending', 'reserved') or (${listings.status} = 'sold' and ${listings.soldAt} > now() - interval '90 days'))`,
+          ),
+        )
+        .limit(5);
+      otherImei = rows.map((r) => r.id);
+    }
+    return { own, otherPhotos, otherText, otherImei };
   }
 
   /** Rule-based checks plus the AI review → one decision. */
@@ -105,7 +123,11 @@ export class ModerationService {
       record.decision = "needs_review";
       record.reasons.push({ code: "duplicate_text", note: "Описание почти совпадает с объявлением другого продавца" });
     }
-    const dupIds = [...duplicates.otherPhotos, ...duplicates.otherText];
+    if (duplicates.otherImei.length) {
+      record.decision = "needs_review";
+      record.reasons.push({ code: "duplicate_imei", note: "Такой IMEI уже есть в объявлении другого продавца" });
+    }
+    const dupIds = [...duplicates.otherPhotos, ...duplicates.otherText, ...duplicates.otherImei];
     if (dupIds.length) record.duplicates = [...new Set(dupIds)];
 
     if (!this.d.ai) return record;

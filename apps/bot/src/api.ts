@@ -122,6 +122,10 @@ export class ApiClient {
     return this.request<{ status: string }>(`/orders/${encodeURIComponent(orderId)}/${action}`, { method: "POST", user });
   }
 
+  offerAction(user: TgUser, offerId: string, action: "accept" | "decline") {
+    return this.request<{ status: string }>(`/offers/${encodeURIComponent(offerId)}/${action}`, { method: "POST", user });
+  }
+
   operatorStatus(user: TgUser, orderId: string, status: string) {
     return this.request<{ order: { status: string }; card: { text: string; buttons: CardButton[][] } }>(
       `/operator/orders/${encodeURIComponent(orderId)}/status`,

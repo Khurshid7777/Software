@@ -1,5 +1,7 @@
 import {
+  addToHomeScreen,
   backButton,
+  checkHomeScreenStatus,
   init,
   isTMA,
   miniApp,
@@ -79,6 +81,20 @@ export async function ensureWriteAccess(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** True when Telegram can pin the app to the phone's home screen and it is not pinned yet (Mini Apps 8.0+). */
+export async function canAddToHomeScreen(): Promise<boolean> {
+  if (!addToHomeScreen.isAvailable() || !checkHomeScreenStatus.isAvailable()) return false;
+  try {
+    return (await checkHomeScreenStatus()) === "missed";
+  } catch {
+    return false;
+  }
+}
+
+export function promptAddToHomeScreen() {
+  addToHomeScreen.ifAvailable();
 }
 
 export function setBackButton(onClick: (() => void) | null) {

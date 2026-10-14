@@ -101,6 +101,10 @@ class FakeApi {
     if (id.startsWith("00000000")) throw new ApiError(409, "bad_state", "Это действие уже недоступно для заказа");
     return { status: action === "confirm" ? "confirmed" : "cancelled" };
   }
+  async offerAction(u: { id: number }, id: string, action: string) {
+    this.calls.push(`offer:${u.id}:${action}:${id}`);
+    return { status: action === "accept" ? "accepted" : "declined" };
+  }
   async operatorStatus(u: { id: number }, id: string, status: string) {
     this.calls.push(`op:${u.id}:${status}:${id}`);
     return {
@@ -305,6 +309,15 @@ describe("stage 4 buttons", () => {
     expect(sent.some((s) => s.method === "editMessageReplyMarkup")).toBe(true);
     const answer = sent.find((s) => s.method === "answerCallbackQuery")!;
     expect(answer.payload.text).toContain("Подтверждён");
+  });
+
+  it("seller answers a price offer from the DM; buttons are removed", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate(callback(`offer:accept:${ORDER}`));
+    await bot.idle();
+    expect(api.calls).toContain(`offer:5:accept:${ORDER}`);
+    expect(sent.some((s) => s.method === "editMessageReplyMarkup")).toBe(true);
+    expect(sent.find((s) => s.method === "answerCallbackQuery")!.payload.text).toBe("Вы согласились");
   });
 
   it("API refusals are shown as an alert", async () => {

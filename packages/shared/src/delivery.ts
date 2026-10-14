@@ -179,6 +179,7 @@ export const MODERATION_REASONS = [
   "stock_photos",
   "duplicate_photos", // photos match another seller's listing
   "duplicate_text",
+  "duplicate_imei", // the same IMEI in another seller's listing
   "complaints", // hidden after user complaints
   "other",
 ] as const;
