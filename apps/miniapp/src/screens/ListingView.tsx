@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 import {
   COMPLAINT_REASONS,
+  OFFER_PENDING_HOURS,
   formatUzs,
   listingDescription,
   listingTitle,
+  minOffer,
   type CatalogItem,
   type ComplaintReason,
   type ListingDto,
+  type OfferDto,
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
+import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { useLang, useT } from "../i18n";
-import { ensureWriteAccess } from "../telegram";
+import { canShareStory, ensureWriteAccess, shareLink, shareToStory } from "../telegram";
 
 /** Public listing card (catalog, assistant, and the "Buy with delivery" button in seller channels). */
 export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; meId: string; onBuy: (l: ListingDto) => void }) {
@@ -25,12 +29,18 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [complaint, setComplaint] = useState<{ reason: ComplaintReason | null; text: string } | null>(null);
+  const [offer, setOffer] = useState<OfferDto | null>(null);
+  const [offering, setOffering] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .catalogItem(id)
       .then(setItem)
       .catch((e) => setError(e instanceof ApiError ? e.message : t("listing.not_found")));
+    api
+      .myOffer(id)
+      .then((r) => setOffer(r.offer))
+      .catch(() => undefined);
   }, [api, id]);
 
   if (error) return <p className="center hint">{error}</p>;
@@ -50,6 +60,35 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
       setToast(e instanceof ApiError ? e.message : t("common.error"));
     } finally {
       setSending(false);
+    }
+  }
+
+  async function sendOffer() {
+    const amount = Number((offering ?? "").replace(/\D/g, ""));
+    if (!amount || sending) return;
+    if (!(await ensureWriteAccess())) return setToast(t("listing.write_access"));
+    setSending(true);
+    try {
+      setOffer(await api.makeOffer(l.id, amount));
+      setOffering(null);
+      setToast(t("offer.sent"));
+    } catch (e) {
+      setToast(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function share(to: "chat" | "story") {
+    try {
+      const { url } = await api.shareLink(l.id);
+      if (!url) return setToast(t("common.error"));
+      const text = `${listingTitle(l, lang)}${l.price ? ` — ${formatUzs(l.price)}` : ""}`;
+      if (to === "chat") return shareLink(url, text);
+      const photo = l.photos[0];
+      if (photo) shareToStory(new URL(apiUrl(photo.url), window.location.href).href, text, url, t("share.story_link"));
+    } catch {
+      setToast(t("common.error"));
     }
   }
 
@@ -98,13 +137,43 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
           </button>
         )}
       </div>
-      {l.price && <p className="price">{formatUzs(l.price)}</p>}
+      {l.price && (
+        <p className="price">
+          {formatUzs(l.price)}
+          {l.previousPrice && (
+            <>
+              {" "}
+              <s className="old-price" data-testid="old-price">{formatUzs(l.previousPrice)}</s>{" "}
+              <span className="badge">📉 {t("listing.price_dropped")}</span>
+            </>
+          )}
+        </p>
+      )}
       <MarketBadge item={item} />
       <p className="hint">
         {l.condition && t(`condition.${l.condition}`)}
         {l.district && ` · 📍 ${t(`district.${l.district}`)}`}
       </p>
+      {l.verified && (
+        <p className="hint-card" data-testid="verified-badge">
+          ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
+        </p>
+      )}
+      <ChecklistView value={l.checklist} />
+      {l.imeiTail && <p className="hint-card" data-testid="imei-hint">🔐 {t("listing.imei", { tail: l.imeiTail })}</p>}
       <p className="description">{listingDescription(l, lang)}</p>
+      {["active", "reserved"].includes(l.status) && (
+        <div className="row wrap">
+          <button className="chip" onClick={() => share("chat")} data-testid="share-chat">
+            📤 {t("share.chat")}
+          </button>
+          {canShareStory() && l.photos.length > 0 && (
+            <button className="chip" onClick={() => share("story")} data-testid="share-story">
+              📸 {t("share.story")}
+            </button>
+          )}
+        </div>
+      )}
 
       {l.seller && (
         <section className="card stack">
@@ -123,6 +192,17 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
           )}
           <p className="hint">{t("listing.seller_since", { date: date(l.seller.registeredAt) })}</p>
           <p className="hint">{t("listing.sales", { n: l.seller.platformSales })}</p>
+          {l.seller.inspections.passed > 0 && (
+            <p className="hint">✅ {t("verified.seller", { n: l.seller.inspections.passed })}</p>
+          )}
+          {l.seller.responseMinutes != null && (
+            <p className="hint" data-testid="response-time">
+              ⚡️{" "}
+              {l.seller.responseMinutes < 60
+                ? t("listing.response_min", { n: l.seller.responseMinutes })
+                : t("listing.response_hours", { n: Math.round(l.seller.responseMinutes / 60) })}
+            </p>
+          )}
         </section>
       )}
 
@@ -173,6 +253,34 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
                 {t("listing.buy_delivery")}
               </button>
             )}
+            {offer && (
+              <p className={offer.status === "accepted" ? "hint-card center" : "hint center"} data-testid="offer-status">
+                {t(`offer.status.${offer.status}`, {
+                  amount: formatUzs(offer.amount),
+                  until: new Date(offer.expiresAt).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ", { dateStyle: "short", timeStyle: "short" }),
+                })}
+              </p>
+            )}
+            {l.price && offer?.status !== "pending" && offer?.status !== "accepted" &&
+              (offering === null ? (
+                <button className="link" onClick={() => setOffering("")} data-testid="offer-open">
+                  🤝 {t("offer.make")}
+                </button>
+              ) : (
+                <div className="card stack" data-testid="offer-form">
+                  <input
+                    inputMode="numeric"
+                    placeholder={t("offer.amount_placeholder")}
+                    value={offering}
+                    onChange={(e) => setOffering(e.target.value.replace(/\D/g, ""))}
+                    data-testid="offer-amount"
+                  />
+                  <p className="hint">{t("offer.hint", { min: formatUzs(minOffer(l.price)), hours: OFFER_PENDING_HOURS })}</p>
+                  <button className="secondary" onClick={sendOffer} disabled={!offering || sending} data-testid="offer-send">
+                    {t("offer.send")}
+                  </button>
+                </div>
+              ))}
           </>
         )
       )}

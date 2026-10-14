@@ -182,6 +182,28 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     }),
   );
 
+  // Seller: AI drafts three replies, each sent with one tap ("✍️" = write your own).
+  bot.callbackQuery(/^sugg:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      const conv = ctx.match[1]!;
+      await ctx.replyWithChatAction("typing").catch(() => undefined);
+      const { items } = await api.suggestReplies(user, conv);
+      const keyboard = new InlineKeyboard();
+      items.forEach((_, i) => keyboard.text(String(i + 1), `sr:${conv}:${i}`));
+      keyboard.row().text(t(lang, "suggest.own"), `reply:${conv}`);
+      await ctx.reply(`${t(lang, "suggest.title")}\n\n${items.map((s, i) => `${i + 1}. ${s}`).join("\n\n")}`, { reply_markup: keyboard });
+      return "";
+    }),
+  );
+
+  bot.callbackQuery(/^sr:([0-9a-f-]{36}):([0-2])$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      const res = await api.sendSuggestion(user, ctx.match[1]!, Number(ctx.match[2]));
+      await ctx.editMessageText(`${t(lang, "bot.reply_sent")}\n\n«${res.text}»`).catch(() => undefined);
+      return t(lang, "bot.reply_sent");
+    }),
+  );
+
   async function relayReply(ctx: Context, user: TgUser, text: string): Promise<boolean> {
     const pending = await api.takePendingReply(user).catch(() => ({}) as { conversationId?: string; expired?: boolean });
     if (!pending.conversationId && !pending.expired) return false;
@@ -223,6 +245,15 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
       const order = await api.orderAction(user, ctx.match[2]!, action);
       await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
       return t(lang, `order.status.${order.status}` as Parameters<typeof t>[1]);
+    }),
+  );
+
+  // Seller: answer a buyer's price offer.
+  bot.callbackQuery(/^offer:(accept|decline):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      const offer = await api.offerAction(user, ctx.match[2]!, ctx.match[1] as "accept" | "decline");
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, offer.status === "accepted" ? "offer.accepted_status" : "offer.declined_status");
     }),
   );
 

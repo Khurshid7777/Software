@@ -3,12 +3,15 @@ import {
   CONDITIONS,
   MVP_DELIVERY_MODES,
   FEE_PAYERS,
+  IMEI_CATEGORIES,
   TASHKENT_DISTRICTS,
   formatUzs,
+  isValidImei,
   type ListingDto,
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, compressImage, type Api, type ListingPatch } from "../api";
 import { useLang, useT } from "../i18n";
+import { ChecklistEditor } from "./Checklist";
 
 interface Props {
   api: Api;
@@ -25,6 +28,7 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
   const [draft, setDraft] = useState<ListingPatch>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [imei, setImei] = useState<string | null>(null);
   const v = { ...listing, ...draft };
 
   function save(patch: ListingPatch) {
@@ -152,6 +156,30 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           ))}
         </select>
       </label>
+
+      {(IMEI_CATEGORIES as readonly string[]).includes(listing.category) && (
+        <label className="field">
+          {t("sell.field.imei")}
+          <input
+            data-testid="imei"
+            inputMode="numeric"
+            maxLength={20}
+            placeholder="*#06#"
+            value={imei ?? listing.imei ?? ""}
+            onChange={(e) => setImei(e.target.value)}
+            onBlur={() => {
+              if (imei === null) return;
+              const clean = imei.replace(/[\s-]/g, "");
+              if (clean && !isValidImei(clean)) return setError(t("sell.imei_invalid"));
+              void save({ imei: clean || null }).then(() => setImei(null));
+            }}
+          />
+          <span className="hint">{t("sell.imei_hint")}</span>
+        </label>
+      )}
+      {(IMEI_CATEGORIES as readonly string[]).includes(listing.category) && (
+        <ChecklistEditor value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
+      )}
 
       <label className="field">
         {t("sell.field.district")}

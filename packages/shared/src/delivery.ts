@@ -1,5 +1,6 @@
 import type { ListingModeration } from "./schemas.js";
 import { DELIVERY_MODES, TASHKENT_DISTRICTS, type DeliveryMode, type District, type FeePayer } from "./listing.js";
+import type { Inspection } from "./market.js";
 
 // ---------- delivery orders ----------
 
@@ -114,6 +115,15 @@ export function quoteDelivery(opts: {
   };
 }
 
+/** Quote for a delivery with extra items of the same seller: the delivery fee is paid once. */
+export interface BundleQuote {
+  items: Array<{ listingId: string; quote: DeliveryQuote }>;
+  /** Primary item + all extras, what the buyer pays in total. */
+  buyerTotal: number;
+  /** Delivery fees saved compared with separate orders. */
+  saved: number;
+}
+
 export interface OrderEventDto {
   status: OrderStatus;
   at: string;
@@ -141,6 +151,10 @@ export interface OrderDto {
   canReview: boolean;
   /** Actions available to the viewer right now. */
   actions: Array<"confirm" | "decline" | "cancel" | "review">;
+  /** Courier's inspection at pickup («Проверено Ishonch»), once done. */
+  inspection: Inspection | null;
+  /** Several items of the seller in one delivery: the other orders of the bundle. */
+  bundle: Array<{ orderId: string; listingId: string; titleRu: string; titleUz: string; status: OrderStatus }>;
 }
 
 // ---------- reviews ----------
@@ -179,6 +193,7 @@ export const MODERATION_REASONS = [
   "stock_photos",
   "duplicate_photos", // photos match another seller's listing
   "duplicate_text",
+  "duplicate_imei", // the same IMEI in another seller's listing
   "complaints", // hidden after user complaints
   "other",
 ] as const;

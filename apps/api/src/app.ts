@@ -24,6 +24,7 @@ import { MetricsService } from "./modules/metrics/service.js";
 import { ModerationService } from "./modules/moderation/service.js";
 import { createCourierProvider, type CourierProvider } from "./modules/orders/courier.js";
 import { orderRoutes } from "./modules/orders/routes.js";
+import { ReplySuggestions } from "./modules/catalog/suggest.js";
 import { OrderService } from "./modules/orders/service.js";
 import { trustRoutes } from "./modules/trust/routes.js";
 import { TrustService } from "./modules/trust/service.js";
@@ -210,13 +211,13 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     requireAdmin: auth.requireRole("admin"),
   }, (actor, action, target, details) => repo.audit(actor, action, target, details));
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
-  catalogRoutes(app, catalog, assistant, {
+  catalogRoutes(app, catalog, assistant, new ReplySuggestions(repo, aiService, catalog), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
     optionalUser: auth.optionalUser,
   });
 
-  for (const kind of ["channel_posts", "saved_search_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+  for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
 
   app.decorate("services", {
     queue,

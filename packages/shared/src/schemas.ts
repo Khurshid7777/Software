@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CHECK_CATEGORIES, CURRENCIES } from "./types.js";
 import { CONDITIONS, DELIVERY_MODES, TASHKENT_DISTRICTS } from "./listing.js";
 import { COMPLAINT_REASONS, MODERATION_REASONS } from "./delivery.js";
+import { BIOMETRICS_STATES, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, REPAIR_KINDS } from "./market.js";
 
 /**
  * Every zod schema of the project (AI outputs, API inputs, settings). Kept apart from constants and
@@ -165,9 +166,37 @@ export const CreateOrderSchema = z.object({
   district: z.enum(TASHKENT_DISTRICTS),
   address: z.string().trim().min(5).max(300),
   comment: z.string().trim().max(300).optional(),
+  /** More items of the same seller in this delivery (one delivery fee). */
+  extraListingIds: z.array(z.string().uuid()).max(MAX_BUNDLE_EXTRA).optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
+
+const uniq = <T extends string>(a: T[]) => [...new Set(a)];
+
+export const ConditionChecklistSchema = z
+  .object({
+    batteryPct: z.number().int().min(1).max(100).optional(),
+    biometrics: z.enum(BIOMETRICS_STATES).optional(),
+    repairs: z.array(z.enum(REPAIR_KINDS)).max(REPAIR_KINDS.length).transform(uniq).optional(),
+    kit: z.array(z.enum(KIT_ITEMS)).max(KIT_ITEMS.length).transform(uniq).optional(),
+  })
+  .strict()
+  // "No repairs" together with a repair is a contradiction: the repair wins.
+  .transform((c) => (c.repairs && c.repairs.length > 1 ? { ...c, repairs: c.repairs.filter((r) => r !== "none") } : c));
+
+export const InspectionInputSchema = z.object({
+  checks: z.partialRecord(z.enum(INSPECTION_CHECKS), z.boolean()),
+  note: z.string().trim().max(300).optional(),
+});
+
+export const ReplySuggestionsSchema = z.object({
+  replies: z.array(z.string().describe("one ready-to-send message, ≤ 200 characters")).min(1).max(3),
+});
+
+export const OfferInputSchema = z.object({
+  amount: z.number().int().positive().max(10_000_000_000),
+});
 
 export const ReviewInputSchema = z.object({
   rating: z.number().int().min(1).max(5),

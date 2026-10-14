@@ -3,6 +3,7 @@ import {
   TASHKENT_DISTRICTS,
   formatUzs,
   listingTitle,
+  type BundleQuote,
   type DeliveryMode,
   type DeliveryQuote,
   type District,
@@ -28,7 +29,22 @@ export function Checkout({ api, listing, onDone }: Props) {
   const [district, setDistrict] = useState<District | "">("");
   const [address, setAddress] = useState("");
   const [comment, setComment] = useState("");
-  const [quote, setQuote] = useState<DeliveryQuote | null>(null);
+  const [quote, setQuote] = useState<(DeliveryQuote & { bundle: BundleQuote | null }) | null>(null);
+  const [candidates, setCandidates] = useState<ListingDto[]>([]);
+  const [extras, setExtras] = useState<string[]>([]);
+  const extraKey = extras.join(",");
+
+  useEffect(() => {
+    api
+      .bundleCandidates(listing.id)
+      .then(setCandidates)
+      .catch(() => undefined);
+  }, [api, listing.id]);
+  const fitting = candidates.filter((c) => c.allowedDeliveryModes.includes(mode));
+  // Items that can't travel with the chosen mode drop out of the bundle.
+  useEffect(() => {
+    setExtras((xs) => xs.filter((id) => fitting.some((c) => c.id === id)));
+  }, [mode, candidates]);
   const [error, setError] = useState<string | null>(null);
   const [needPhone, setNeedPhone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,13 +55,13 @@ export function Checkout({ api, listing, onDone }: Props) {
     setQuote(null);
     setError(null);
     api
-      .quote(listing.id, district, mode)
+      .quote(listing.id, district, mode, extras)
       .then((q) => current && setQuote(q))
       .catch((e) => current && setError(e instanceof ApiError ? e.message : t("common.error")));
     return () => {
       current = false;
     };
-  }, [api, listing.id, district, mode]);
+  }, [api, listing.id, district, mode, extraKey]);
 
   const mounted = useRef(true);
   useEffect(() => () => void (mounted.current = false), []);
@@ -59,7 +75,14 @@ export function Checkout({ api, listing, onDone }: Props) {
     try {
       // Status updates arrive from the bot; ask once so Telegram lets it write to the buyer.
       if (!(await ensureWriteAccess())) setWriteDenied(true);
-      const order = await api.createOrder({ listingId: listing.id, mode, district, address: address.trim(), comment: comment.trim() || undefined });
+      const order = await api.createOrder({
+        listingId: listing.id,
+        mode,
+        district,
+        address: address.trim(),
+        comment: comment.trim() || undefined,
+        ...(extras.length ? { extraListingIds: extras } : {}),
+      });
       onDone(order.id);
     } catch (e) {
       if (e instanceof ApiError && e.code === "phone_required") setNeedPhone(true);
@@ -82,7 +105,10 @@ export function Checkout({ api, listing, onDone }: Props) {
     if (r === "timeout") setError(t("phone.timeout"));
   }
 
-  const sellerPart = quote && quote.sellerFee > 0;
+  // With a bundle the breakdown sums every item; the delivery fee is in the first one only.
+  const all = quote ? [quote as DeliveryQuote, ...(quote.bundle?.items.map((i) => i.quote) ?? [])] : [];
+  const sum = (k: keyof DeliveryQuote) => all.reduce((s, q) => s + (q[k] as number), 0);
+  const sellerPart = quote && sum("sellerFee") > 0;
   return (
     <div className="stack" data-testid="checkout">
       <h1>{t("checkout.title")}</h1>
@@ -97,6 +123,27 @@ export function Checkout({ api, listing, onDone }: Props) {
           </label>
         ))}
       </section>
+
+      {fitting.length > 0 && (
+        <section className="card stack" data-testid="bundle-candidates">
+          <h3>🧺 {t("checkout.bundle_title")}</h3>
+          <p className="hint">{t("checkout.bundle_hint")}</p>
+          {fitting.map((c) => (
+            <label key={c.id} className="check-row">
+              <input
+                type="checkbox"
+                checked={extras.includes(c.id)}
+                disabled={!extras.includes(c.id) && extras.length >= 4}
+                onChange={(e) => setExtras((xs) => (e.target.checked ? [...xs, c.id] : xs.filter((x) => x !== c.id)))}
+                data-testid="bundle-add"
+              />
+              <span>
+                {listingTitle(c, lang)} <span className="hint">{c.price ? formatUzs(c.price) : ""}</span>
+              </span>
+            </label>
+          ))}
+        </section>
+      )}
 
       <label className="field">
         {t("checkout.district")}
@@ -128,27 +175,33 @@ export function Checkout({ api, listing, onDone }: Props) {
       {quote && (
         <section className="card stack" data-testid="checkout-quote">
           <div className="row between">
-            <span>{t("checkout.item")}</span>
-            <span>{formatUzs(quote.itemPrice)}</span>
+            <span>{all.length > 1 ? t("checkout.bundle_items", { n: all.length }) : t("checkout.item")}</span>
+            <span>{formatUzs(sum("itemPrice"))}</span>
           </div>
+          {listing.price != null && quote.itemPrice < listing.price && (
+            <p className="hint" data-testid="offer-applied">🤝 {t("checkout.offer_applied", { amount: formatUzs(quote.itemPrice) })}</p>
+          )}
           <div className="row between">
             <span>{t("checkout.delivery_fee")}</span>
             <span>{quote.tariffId ? formatUzs(quote.deliveryFee) : t("checkout.no_tariff")}</span>
           </div>
-          {quote.codFee > 0 && (
+          {sum("codFee") > 0 && (
             <div className="row between">
               <span>{t("checkout.cod_fee")}</span>
-              <span>{formatUzs(quote.codFee)}</span>
+              <span>{formatUzs(sum("codFee"))}</span>
             </div>
           )}
           {sellerPart && (
             <p className="hint">
-              {formatUzs(quote.sellerFee)} — {t("checkout.paid_by_seller")}
+              {formatUzs(sum("sellerFee"))} — {t("checkout.paid_by_seller")}
             </p>
+          )}
+          {quote.bundle && quote.bundle.saved > 0 && (
+            <p className="hint" data-testid="bundle-saved">🧺 {t("checkout.bundle_saved", { amount: formatUzs(quote.bundle.saved) })}</p>
           )}
           <div className="row between">
             <strong>{mode === "delivery_only" ? t("checkout.delivery_fee") : t("checkout.pay_courier")}</strong>
-            <strong data-testid="checkout-total">{formatUzs(mode === "delivery_only" ? quote.buyerFee : quote.buyerTotal)}</strong>
+            <strong data-testid="checkout-total">{formatUzs(mode === "delivery_only" ? sum("buyerFee") : sum("buyerTotal"))}</strong>
           </div>
           {mode === "delivery_only" && <p className="hint">{t("checkout.pay_direct")}</p>}
         </section>

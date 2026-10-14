@@ -13,6 +13,7 @@ import {
 import { AssistantRejected, type AssistantService } from "./assistant.js";
 import { CatalogRejected, type CatalogService } from "./service.js";
 import { ListingRejected } from "../listings/service.js";
+import type { ReplySuggestions } from "./suggest.js";
 
 const MESSAGES: Record<string, string> = {
   contact_limit: "listing.contact_limit",
@@ -22,6 +23,8 @@ const MESSAGES: Record<string, string> = {
   seller_unreachable: "bot.reply_failed",
   limit_reached: "assistant.limit",
   ai_unavailable: "check.ai_unavailable",
+  suggest_limit: "suggest.limit",
+  suggest_expired: "suggest.expired",
 };
 
 /** Query string → filters (conditions come as a comma-separated list). */
@@ -43,6 +46,7 @@ export function catalogRoutes(
   app: FastifyInstance,
   catalog: CatalogService,
   assistant: AssistantService,
+  suggestions: ReplySuggestions,
   auth: { requireUser: preHandlerHookHandler; requireInternal: preHandlerHookHandler; optionalUser: preHandlerHookHandler },
 ) {
   const { requireUser } = auth;
@@ -123,6 +127,26 @@ export function catalogRoutes(
         if (!text) return reply.code(400).send({ error: "bad_request" });
         await catalog.relay(req.params.id, req.user!, text);
         return { ok: true };
+      }),
+  );
+
+  // Seller's AI reply drafts (bot buttons "💡 Варианты ответа" → "1/2/3").
+  app.post<{ Params: { id: string } }>("/internal/conversations/:id/suggestions", { preHandler: auth.requireInternal }, (req, reply) =>
+    handle(req, reply, async () => {
+      if (!z.string().uuid().safeParse(req.params.id).success) return reply.code(404).send({ error: "not_found" });
+      return suggestions.suggest(req.user!, req.params.id);
+    }),
+  );
+  app.post<{ Params: { id: string; index: string } }>(
+    "/internal/conversations/:id/suggestions/:index/send",
+    { preHandler: auth.requireInternal },
+    (req, reply) =>
+      handle(req, reply, async () => {
+        const index = Number(req.params.index);
+        if (!z.string().uuid().safeParse(req.params.id).success || !Number.isInteger(index) || index < 0 || index > 2) {
+          return reply.code(404).send({ error: "not_found" });
+        }
+        return suggestions.send(req.user!, req.params.id, index);
       }),
   );
 

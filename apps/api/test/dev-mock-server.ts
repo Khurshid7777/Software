@@ -51,6 +51,13 @@ const ai = mockAiByPrompt({
   listing_analyze: listing.mock_analysis,
   listing_generate: listing.mock_text,
   listing_moderate: { decision: "approved", reasons: [], seller_message_ru: "", seller_message_uz: "" },
+  chat_suggest: {
+    replies: [
+      "Да, ещё в продаже. Состояние как на фото, без ремонтов.",
+      "Можно оформить доставку с осмотром через Ishonch — курьер привезёт, оплата после проверки.",
+      "Цена окончательная, но доставку могу оплатить пополам.",
+    ],
+  },
 });
 
 const app = await buildApp({

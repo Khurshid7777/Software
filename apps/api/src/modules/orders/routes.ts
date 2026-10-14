@@ -3,6 +3,9 @@ import { z } from "zod";
 import {
   CreateOrderSchema,
   DELIVERY_MODES,
+  InspectionInputSchema,
+  MAX_BUNDLE_EXTRA,
+  OfferInputSchema,
   ORDER_STATUSES,
   ReviewInputSchema,
   TASHKENT_DISTRICTS,
@@ -23,6 +26,11 @@ const MESSAGES: Record<string, string> = {
   bad_state: "order.err.bad_state",
   review_exists: "order.err.review_exists",
   too_many_attempts: "order.err.too_many_attempts",
+  offer_too_low: "offer.err.too_low",
+  offer_not_lower: "offer.err.not_lower",
+  offer_pending: "offer.err.pending",
+  too_many_offers: "offer.err.too_many",
+  bundle_invalid: "order.err.bundle_invalid",
 };
 
 const TariffSchema = z.object({
@@ -55,16 +63,33 @@ export function orderRoutes(
     }
   }
 
-  app.get<{ Querystring: { listingId?: string; district?: string; mode?: string } }>(
+  app.get<{ Querystring: { listingId?: string } }>("/orders/bundle-candidates", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const id = z.string().uuid().safeParse(req.query.listingId);
+      if (!id.success) return reply.code(400).send({ error: "bad_request" });
+      return svc.bundleCandidates(req.user!, id.data);
+    }),
+  );
+
+  app.get<{ Querystring: { listingId?: string; district?: string; mode?: string; extra?: string } }>(
     "/orders/quote",
     { preHandler: requireUser },
     (req, reply) =>
       handle(req, reply, async () => {
         const q = z
-          .object({ listingId: z.string().uuid(), district: z.enum(TASHKENT_DISTRICTS), mode: z.enum(DELIVERY_MODES) })
+          .object({
+            listingId: z.string().uuid(),
+            district: z.enum(TASHKENT_DISTRICTS),
+            mode: z.enum(DELIVERY_MODES),
+            extra: z
+              .string()
+              .optional()
+              .transform((s) => (s ? s.split(",") : []))
+              .pipe(z.array(z.string().uuid()).max(MAX_BUNDLE_EXTRA)),
+          })
           .safeParse(req.query);
         if (!q.success) return reply.code(400).send({ error: "bad_request" });
-        return svc.quote(q.data.listingId, q.data.district, q.data.mode);
+        return svc.quote(q.data.listingId, q.data.district, q.data.mode, req.user!.id, q.data.extra);
       }),
   );
 
@@ -73,6 +98,27 @@ export function orderRoutes(
       const parsed = CreateOrderSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request", details: parsed.error.issues });
       return svc.create(req.user!, parsed.data);
+    }),
+  );
+
+  // ---- price offers ("торг"): buyer offers, seller answers with bot buttons ----
+  const uuidParam = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
+  app.get<{ Params: { id: string } }>("/listings/:id/offers/mine", { preHandler: requireUser }, async (req, reply) => {
+    if (!uuidParam(req.params.id)) return reply.code(404).send({ error: "not_found" });
+    return { offer: await svc.myOffer(req.user!, req.params.id) };
+  });
+  app.post<{ Params: { id: string } }>("/listings/:id/offers", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = OfferInputSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.makeOffer(req.user!, req.params.id, parsed.data.amount);
+    }),
+  );
+  app.post<{ Params: { id: string; decision: string } }>("/offers/:id/:decision", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const { decision } = req.params;
+      if ((decision !== "accept" && decision !== "decline") || !uuidParam(req.params.id)) return reply.code(404).send({ error: "not_found" });
+      return svc.decideOffer(req.user!, req.params.id, decision);
     }),
   );
 
@@ -123,12 +169,23 @@ export function orderRoutes(
           note: z.string().trim().max(300).optional(),
           courierName: z.string().trim().max(100).optional(),
           courierPhone: z.string().trim().max(30).optional(),
+          wholeBundle: z.boolean().optional(),
         })
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       const { status, ...extra } = parsed.data;
       const res = await svc.operatorSetStatus(req.user!, req.params.id, status, extra);
       await audit(req.user!, `order.${status}`, req.params.id, extra);
+      return res;
+    }),
+  );
+
+  app.post<{ Params: { id: string } }>("/operator/orders/:id/inspection", { preHandler: auth.requireOperator }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = InspectionInputSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+      const res = await svc.inspect(req.user!, req.params.id, parsed.data);
+      await audit(req.user!, "order.inspection", req.params.id, { passed: res.inspection?.passed ?? null });
       return res;
     }),
   );

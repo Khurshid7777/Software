@@ -54,7 +54,10 @@ export class CatalogRejected extends Error {
       | "seller_unreachable"
       | "bad_request"
       | "too_many_searches"
-      | "message_limit",
+      | "message_limit"
+      | "suggest_limit"
+      | "suggest_expired"
+      | "ai_unavailable",
     public status: number,
   ) {
     super(code);
@@ -217,6 +220,8 @@ export class CatalogService {
       verifiedShop: !!s.shop?.verified,
       platformSales: s.platformSales,
       accountAgeDays: (Date.now() - new Date(s.registeredAt).getTime()) / DAY,
+      rating: s.rating,
+      inspections: s.inspections,
     });
   }
 
@@ -474,6 +479,8 @@ export class CatalogService {
     const title = listingTitle(l, lang);
     const key = fromBuyer ? (n === 0 ? "bot.msg_from_buyer" : "bot.msg_from_buyer_again") : "bot.msg_from_seller";
     const buttons: NotifyButton[][] = [[{ text: t(lang, "bot.reply"), callbackData: `reply:${conversationId}` }]];
+    // The seller can let the AI draft the answer (three options, sent with one tap).
+    if (fromBuyer) buttons[0]!.push({ text: t(lang, "suggest.button"), callbackData: `sugg:${conversationId}` });
     if (!fromBuyer) buttons.push([{ text: t(lang, "bot.open_listing"), url: await this.notifier.miniAppLink(`listing_${l.id}`) }]);
     try {
       await this.notifier.send(recipient.telegramId, t(lang, key, { title, text }), buttons);

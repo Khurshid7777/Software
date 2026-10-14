@@ -153,6 +153,13 @@ export function listingRoutes(
     }),
   );
 
+  app.get<{ Params: { id: string } }>("/listings/:id/share", (req, reply) =>
+    handle(req, reply, () => {
+      if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) throw new ListingRejected("not_found", 404);
+      return svc.shareLink(req.params.id);
+    }),
+  );
+
   // Signed URLs so that <img> tags work without auth headers.
   app.get<{ Params: { id: string }; Querystring: { s?: string } }>("/photos/:id", async (req, reply) => {
     const data = await svc.readPhoto(Number(req.params.id), req.query.s ?? "");

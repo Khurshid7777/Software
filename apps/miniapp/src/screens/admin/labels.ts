@@ -69,6 +69,7 @@ export const REASON_LABEL: Record<string, string> = {
   stock_photos: "Фото из интернета",
   duplicate_photos: "Фото как у другого продавца",
   duplicate_text: "Текст как у другого продавца",
+  duplicate_imei: "IMEI как у другого продавца",
   complaints: "Жалобы",
   other: "Другое",
   scam: "Мошенничество",
@@ -76,4 +77,13 @@ export const REASON_LABEL: Record<string, string> = {
   wrong_info: "Неверное описание",
   duplicate: "Дубликат",
   sold: "Уже продано",
+};
+
+export const INSPECTION_LABEL: Record<string, string> = {
+  matches_description: "Соответствует описанию",
+  screen: "Экран без дефектов",
+  camera: "Камеры работают",
+  biometrics: "Face ID / отпечаток",
+  imei_match: "IMEI совпадает (*#06#)",
+  battery: "Аккумулятор как в объявлении",
 };

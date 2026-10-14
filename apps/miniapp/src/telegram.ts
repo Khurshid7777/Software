@@ -1,11 +1,15 @@
 import {
+  addToHomeScreen,
   backButton,
+  checkHomeScreenStatus,
   init,
   isTMA,
   miniApp,
   requestPhoneAccess,
   requestWriteAccess,
   retrieveRawInitData,
+  shareStory,
+  shareURL,
   retrieveLaunchParams,
   themeParams,
 } from "@telegram-apps/sdk-react";
@@ -79,6 +83,35 @@ export async function ensureWriteAccess(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** True when Telegram can pin the app to the phone's home screen and it is not pinned yet (Mini Apps 8.0+). */
+export async function canAddToHomeScreen(): Promise<boolean> {
+  if (!addToHomeScreen.isAvailable() || !checkHomeScreenStatus.isAvailable()) return false;
+  try {
+    return (await checkHomeScreenStatus()) === "missed";
+  } catch {
+    return false;
+  }
+}
+
+export function promptAddToHomeScreen() {
+  addToHomeScreen.ifAvailable();
+}
+
+/** Telegram's "share to chat" sheet; outside Telegram the browser share sheet or a t.me/share link. */
+export function shareLink(url: string, text: string) {
+  if (shareURL.isAvailable()) return shareURL(url, text);
+  const web = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+  if (navigator.share) return void navigator.share({ url, text }).catch(() => undefined);
+  window.open(web, "_blank");
+}
+
+export const canShareStory = () => shareStory.isAvailable();
+
+/** Story with the listing photo and a link back to the listing (the link widget needs Telegram Premium). */
+export function shareToStory(photoUrl: string, text: string, link: string, linkName: string) {
+  shareStory.ifAvailable(photoUrl, { text: text.slice(0, 200), widgetLink: { url: link, name: linkName.slice(0, 48) } });
 }
 
 export function setBackButton(onClick: (() => void) | null) {

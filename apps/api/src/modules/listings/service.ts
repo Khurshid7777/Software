@@ -4,21 +4,29 @@ import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
   CONDITIONS,
+  ConditionChecklistSchema,
   DELIVERY_MODES,
   EXPIRY_REMINDER_DAYS,
   FEE_PAYERS,
   LISTING_TTL_DAYS,
   MVP_DELIVERY_MODES,
+  PRICE_DROP_BADGE_DAYS,
+  VERIFIED_BADGE_DAYS,
+  PRICE_DROP_MIN_PCT,
   PRIVATE_SELLER_ACTIVE_LIMIT,
   TASHKENT_DISTRICTS,
   formatUzs,
+  isValidImei,
   listingDescription,
   listingTitle,
+  normalizeImei,
   suggestPrice,
   t,
   type Condition,
+  type ConditionChecklist,
   type DeliveryMode,
   type District,
+  type Inspection,
   type FeePayer,
   type Lang,
   type ListingAnalysis,
@@ -28,7 +36,20 @@ import {
   type PriceSuggestion,
 } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { channels, complaints, listingPhotos, listings, reviews, shops, users, type Listing, type User } from "../../db/schema.js";
+import {
+  channels,
+  complaints,
+  conversations,
+  favorites,
+  listingPhotos,
+  listings,
+  orders,
+  reviews,
+  shops,
+  users,
+  type Listing,
+  type User,
+} from "../../db/schema.js";
 import { AiLimitExceededError, AiOutputError, type AiService } from "../../ai/aiService.js";
 import { processImage } from "../../storage/images.js";
 import type { Storage } from "../../storage/storage.js";
@@ -88,9 +109,23 @@ export const ListingPatchSchema = z
     district: z.enum(TASHKENT_DISTRICTS).nullable(),
     allowedDeliveryModes: z.array(z.enum(DELIVERY_MODES)).min(1),
     feePayer: z.enum(FEE_PAYERS),
+    imei: z
+      .string()
+      .transform(normalizeImei)
+      .refine(isValidImei, "invalid IMEI")
+      .nullable(),
+    checklist: ConditionChecklistSchema,
   })
   .partial();
 export type ListingPatch = z.infer<typeof ListingPatchSchema>;
+
+/** "Battery 87%" answered to the AI's question pre-fills the checklist unless the seller set it. */
+function withBatteryAnswer(checklist: ConditionChecklist, answers: Record<string, string>): ConditionChecklist {
+  if (checklist.batteryPct != null) return checklist;
+  const raw = Object.entries(answers).find(([k]) => /battery|batar|аккум/i.test(k))?.[1];
+  const pct = Number(raw?.match(/\d{2,3}/)?.[0]);
+  return pct >= 50 && pct <= 100 ? { ...checklist, batteryPct: pct } : checklist;
+}
 
 export interface UploadedFile {
   data: Buffer;
@@ -259,6 +294,7 @@ export class ListingService {
         descriptionUz: text.description_uz,
         aiDraft: { ...draft, answers: merged },
         priceSuggestion,
+        checklist: withBatteryAnswer(l.checklist as ConditionChecklist, merged),
         // Keep a price the seller typed; otherwise follow the (possibly refreshed) suggestion.
         price: l.price == null || l.price === oldMarket ? (priceSuggestion?.market ?? l.price) : l.price,
         updatedAt: new Date(),
@@ -275,17 +311,35 @@ export class ListingService {
     const textChanged = (["titleRu", "titleUz", "descriptionRu", "descriptionUz"] as const).some(
       (k) => patch[k] !== undefined && patch[k] !== l[k],
     );
+    const imeiChanged = patch.imei !== undefined && patch.imei !== l.imei;
     // A reserved item is being delivered: what the buyer ordered must not change under them.
-    if (l.status === "reserved" && (textChanged || patch.price !== undefined)) throw new ListingRejected("bad_state", 409);
+    if (l.status === "reserved" && (textChanged || imeiChanged || patch.price !== undefined || patch.checklist !== undefined)) throw new ListingRejected("bad_state", 409);
     if (patch.price === null && l.status !== "draft") throw new ListingRejected("fill_required", 400);
     if (textChanged && l.status !== "draft" && hasContactInfo({ ...l, ...patch })) throw new ListingRejected("contact_info", 400);
+    const now = new Date();
+    const priceChange = l.status === "active" && patch.price != null && l.price != null && patch.price !== l.price ? this.priceChange(l, patch.price, now) : {};
     await this.db
       .update(listings)
-      .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), updatedAt: new Date() })
+      .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, updatedAt: now })
       .where(eq(listings.id, id));
-    // A live listing whose text changed goes through moderation again (it could be swapped for something else).
-    if (textChanged && l.status === "active") await this.remoderate(id);
+    // A live listing whose text or IMEI changed goes through moderation again (it could be swapped for something else).
+    if ((textChanged || imeiChanged) && l.status === "active") await this.remoderate(id);
+    if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.price! - patch.price! >= (l.price! * PRICE_DROP_MIN_PCT) / 100) {
+      await this.schedule("price_drop_alerts", { listingId: id, price: patch.price });
+    }
     return this.dto(id, user.id);
+  }
+
+  /**
+   * Bookkeeping for the crossed-out old price: a reduction remembers the highest price of the current badge
+   * period (several small cuts read as one), a raise back to or above it clears the badge.
+   */
+  private priceChange(l: Listing, price: number, now: Date) {
+    const badgeLive = l.previousPrice != null && l.priceDroppedAt != null && now.getTime() - l.priceDroppedAt.getTime() < PRICE_DROP_BADGE_DAYS * DAY;
+    const reference = badgeLive ? Math.max(l.previousPrice!, l.price!) : l.price!;
+    if (price < l.price!) return { previousPrice: reference, priceDroppedAt: now };
+    if (price >= reference) return { previousPrice: null, priceDroppedAt: null };
+    return {}; // raised, but still below the old price: the badge stays
   }
 
   private async remoderate(id: string) {
@@ -431,6 +485,7 @@ export class ListingService {
   /** Job handlers (also used directly when there is no queue). */
   async runJob(kind: string, payload: Record<string, unknown>) {
     if (kind === "saved_search_alerts") return this.d.onPublished?.(String(payload.listingId));
+    if (kind === "price_drop_alerts") return this.priceDropAlerts(String(payload.listingId), Number(payload.price));
     if (kind === "channel_posts") {
       const id = String(payload.listingId);
       const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
@@ -476,6 +531,40 @@ export class ListingService {
     }
     if (opts.notifySeller !== false) await this.notifySeller(l, status === "pending" ? "moderation.hidden" : "moderation.rejected", record);
     return true;
+  }
+
+  /**
+   * "Цена снижена" for everyone who saved the listing (Vinted / Mercari / Avito do the same): one alert per
+   * user and listing per day, only while the listing is still active at that price.
+   */
+  async priceDropAlerts(listingId: string, price: number) {
+    if (!this.d.notifier) return;
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.status !== "active" || l.price !== price || !l.previousPrice) return;
+    const fans = await this.db
+      .select({ id: users.id, telegramId: users.telegramId, language: users.language })
+      .from(favorites)
+      .innerJoin(users, eq(users.id, favorites.userId))
+      .where(
+        and(
+          eq(favorites.listingId, listingId),
+          sql`${users.id} <> ${l.sellerUserId}`,
+          sql`${users.bannedAt} is null`,
+          sql`not exists (select 1 from events e where e.user_id = ${users.id} and e.name = 'price_drop_alert'
+                and e.props->>'listingId' = ${listingId} and e.created_at > now() - interval '24 hours')`,
+        ),
+      );
+    if (!fans.length) return;
+    const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${listingId}`).catch(() => null) : null;
+    for (const u of fans) {
+      const lang = u.language as Lang;
+      const text = t(lang, "favorites.price_drop", { title: listingTitle(l, lang), old: formatUzs(l.previousPrice), price: formatUzs(price) });
+      const sent = await this.d.notifier
+        .send(u.telegramId, text, url ? [[{ text: t(lang, "favorites.open"), url }]] : [])
+        .then(() => true)
+        .catch((err) => (console.error("price drop alert failed", err), false));
+      if (sent) await this.d.repo.event(u.id, "price_drop_alert", { listingId });
+    }
   }
 
   /** Seller DM about a moderation outcome; the AI's own advice is appended when present. */
@@ -693,6 +782,14 @@ export class ListingService {
     return this.dto(id, viewer?.id ?? null, { withSeller: true });
   }
 
+  /** Deep link into the Mini App for "share to chat / story"; only for listings buyers can open. */
+  async shareLink(id: string): Promise<{ url: string | null }> {
+    const [l] = await this.db.select({ status: listings.status }).from(listings).where(eq(listings.id, id));
+    if (!l || !["active", "reserved"].includes(l.status)) throw new ListingRejected("not_found", 404);
+    const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${id}`).catch(() => null) : null;
+    return { url };
+  }
+
   async deleteDraft(user: User, id: string) {
     const l = await this.own(user, id);
     if (l.status !== "draft") throw new ListingRejected("bad_state", 409);
@@ -745,6 +842,25 @@ export class ListingService {
   }
 
 
+  /**
+   * Typical reply time (Avito shows "отвечает в течение часа"): median minutes from the buyer's first message
+   * to the seller's first answer, over chats of the last 60 days; null with fewer than 3 answered chats.
+   */
+  private async responseMinutes(sellerIds: string[]): Promise<Map<string, number>> {
+    const rows = (await this.db.execute(sql`
+      select c.seller_user_id as seller,
+             percentile_cont(0.5) within group (order by extract(epoch from (r.at - b.at)) / 60) as minutes
+      from ${conversations} c
+      cross join lateral (select min(m.created_at) as at from conversation_messages m
+                          where m.conversation_id = c.id and m.sender_user_id = c.buyer_user_id) b
+      cross join lateral (select min(m.created_at) as at from conversation_messages m
+                          where m.conversation_id = c.id and m.sender_user_id = c.seller_user_id and m.created_at > b.at) r
+      where c.seller_user_id in ${sellerIds} and c.created_at > now() - interval '60 days' and r.at is not null
+      group by c.seller_user_id
+      having count(*) >= 3`)) as unknown as Array<{ seller: string; minutes: number | string }>;
+    return new Map(rows.map((r) => [r.seller, Math.max(1, Math.round(Number(r.minutes)))]));
+  }
+
   async dto(id: string, viewerId: string | null, opts: { withSeller?: boolean } = {}): Promise<ListingDto> {
     const [dto] = await this.dtos([id], viewerId, opts);
     if (!dto) throw new ListingRejected("not_found", 404);
@@ -774,6 +890,8 @@ export class ListingService {
     let shopOf = new Map<string, typeof shops.$inferSelect>();
     let salesOf = new Map<string, number>();
     let ratingOf = new Map<string, { avg: number | null; count: number }>();
+    let responseOf = new Map<string, number>();
+    let inspectionsOf = new Map<string, { passed: number; failed: number }>();
     if (opts.withSeller && sellerIds.length) {
       const shopRows = await this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds));
       shopOf = new Map(shopRows.map((s) => [s.ownerUserId, s]));
@@ -789,6 +907,17 @@ export class ListingService {
         .where(inArray(reviews.sellerUserId, sellerIds))
         .groupBy(reviews.sellerUserId);
       ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
+      responseOf = await this.responseMinutes(sellerIds);
+      const insp = await this.db
+        .select({
+          seller: orders.sellerUserId,
+          passed: sql<number>`count(*) filter (where (${orders.inspection}->>'passed')::boolean)::int`,
+          failed: sql<number>`count(*) filter (where not (${orders.inspection}->>'passed')::boolean)::int`,
+        })
+        .from(orders)
+        .where(and(inArray(orders.sellerUserId, sellerIds), sql`${orders.inspection} is not null`))
+        .groupBy(orders.sellerUserId);
+      inspectionsOf = new Map(insp.map((r) => [r.seller, { passed: r.passed, failed: r.failed }]));
     }
 
     const out: ListingDto[] = [];
@@ -809,7 +938,20 @@ export class ListingService {
         attributes: { brand: attrs.brand ?? null, model: attrs.model ?? null, modelKey: attrs.modelKey ?? null, specs: attrs.specs ?? [] },
         condition: (l.condition as Condition | null) ?? null,
         price: l.price,
+        previousPrice:
+          l.previousPrice != null &&
+          l.price != null &&
+          l.previousPrice > l.price &&
+          l.priceDroppedAt &&
+          Date.now() - l.priceDroppedAt.getTime() < PRICE_DROP_BADGE_DAYS * DAY
+            ? l.previousPrice
+            : null,
         currency: "UZS",
+        ...(isOwner ? { imei: l.imei } : {}),
+        imeiTail: l.imei ? l.imei.slice(-4) : null,
+        checklist: (l.checklist as ConditionChecklist) ?? {},
+        verified:
+          l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,
         // Modes switched off by the feature flag are never offered to buyers.
         allowedDeliveryModes: (l.allowedDeliveryModes as DeliveryMode[]).filter(
@@ -843,6 +985,8 @@ export class ListingService {
           platformSales: salesOf.get(l.sellerUserId) ?? 0,
           rating: ratingOf.get(l.sellerUserId) ?? { avg: null, count: 0 },
           shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
+          responseMinutes: responseOf.get(l.sellerUserId) ?? null,
+          inspections: inspectionsOf.get(l.sellerUserId) ?? { passed: 0, failed: 0 },
         };
       }
       out.push(dto);
