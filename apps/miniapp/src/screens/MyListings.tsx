@@ -3,6 +3,7 @@ import { EXPIRY_REMINDER_DAYS, formatUzs, listingPlainText, listingTitle, type L
 import { photoUrl, ApiError, type Api } from "../api";
 import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
+import { Insights } from "../components/Insights";
 import { LoadError } from "../components/LoadError";
 import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
@@ -29,6 +30,7 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
   const [items, setItems] = useState<ListingDto[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [soldFor, setSoldFor] = useState<string | null>(null);
+  const [insightsFor, setInsightsFor] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   const begin = useLatest();
@@ -141,6 +143,13 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
                   <button className="chip" onClick={() => setSoldFor(l.id)}>✅ {t("my.sold")}</button>
                   <button className="chip" onClick={() => onEdit(l)}>✏️ {t("my.edit")}</button>
                   <button
+                    className={insightsFor === l.id ? "chip active" : "chip"}
+                    onClick={() => setInsightsFor(insightsFor === l.id ? null : l.id)}
+                    data-testid="insights-open"
+                  >
+                    💡 {t("insights.button")}
+                  </button>
+                  <button
                     className="chip"
                     onClick={() =>
                       navigator.clipboard
@@ -181,6 +190,14 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
                 <button className="chip" onClick={() => act(() => api.publish(l.id, []))}>↩️ {t("my.restore")}</button>
               )}
             </div>
+          )}
+          {insightsFor === l.id && (
+            <Insights
+              api={api}
+              listingId={l.id}
+              onEdit={() => onEdit(l)}
+              onBump={() => act(() => api.bump(l.id), t("my.bumped"))}
+            />
           )}
         </article>
       ))}

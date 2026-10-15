@@ -79,6 +79,30 @@ export function catalogRoutes(
     return page;
   });
 
+  // ---- discovery: similar listings, recently viewed, seller page, seller insights ----
+  const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
+  app.get<{ Querystring: { ids?: string } }>("/catalog/batch", { preHandler: auth.optionalUser }, (req) =>
+    catalog.batch((req.query.ids ?? "").split(",").filter(Boolean), req.user ?? null),
+  );
+  app.get<{ Params: { id: string } }>("/catalog/:id/similar", { preHandler: auth.optionalUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      if (!isUuid(req.params.id)) return reply.code(404).send({ error: "not_found" });
+      return catalog.similar(req.params.id, req.user ?? null);
+    }),
+  );
+  app.get<{ Params: { id: string } }>("/sellers/:id/page", { preHandler: auth.optionalUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      if (!isUuid(req.params.id)) return reply.code(404).send({ error: "not_found" });
+      return catalog.sellerPage(req.params.id, req.user ?? null);
+    }),
+  );
+  app.get<{ Params: { id: string } }>("/listings/:id/insights", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      if (!isUuid(req.params.id)) return reply.code(404).send({ error: "not_found" });
+      return catalog.insights(req.user!, req.params.id);
+    }),
+  );
+
   app.get<{ Params: { id: string } }>("/catalog/:id", { preHandler: auth.optionalUser }, async (req, reply) => {
     if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return reply.code(404).send({ error: "not_found" });
     try {

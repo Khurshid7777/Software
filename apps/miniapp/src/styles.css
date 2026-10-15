@@ -329,3 +329,17 @@ button:active:not(:disabled), .mini-card:active, .menu-row:active { opacity: 0.7
 .item-skeleton { display: flex; gap: 12px; }
 .sk-photo { width: 96px; height: 96px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg2) 25%, color-mix(in srgb, var(--hint) 15%, var(--bg2)) 50%, var(--bg2) 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 .sk-text { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+/* ---- seller page, insights, recently viewed ---- */
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.fact { display: flex; flex-direction: column; align-items: center; text-align: center; background: var(--bg2); border-radius: 10px; padding: 8px 4px; }
+.fact strong { font-size: 16px; }
+.fact .hint { font-size: 11px; line-height: 1.2; }
+.recent-strip { display: flex; gap: 10px; padding-bottom: 2px; }
+.recent-item { flex: 0 0 140px; }
+.recent-item .mini-card { width: 140px; }
+.insights { border-top: 1px solid color-mix(in srgb, var(--hint) 15%, transparent); padding-top: 10px; }
+.tips { gap: 8px; }
+.tip { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; border-left: 3px solid var(--hint); padding-left: 10px; font-size: 14px; }
+.tip-high { border-left-color: var(--high); }
+.tip-medium { border-left-color: var(--medium); }
+.tip-low { border-left-color: var(--low); }

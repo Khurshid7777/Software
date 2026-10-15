@@ -17,6 +17,7 @@ import { Sell } from "./screens/Sell";
 import { Shop } from "./screens/Shop";
 import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
+import { SellerPage } from "./screens/SellerPage";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
 import { setBackButton, type TelegramEnv } from "./telegram";
@@ -34,6 +35,7 @@ type Screen =
   | { name: "checkout"; listing: ListingDto }
   | { name: "orders"; focusId?: string }
   | { name: "profile" }
+  | { name: "seller"; id: string }
   | { name: "admin" };
 
 /** A navigation entry: screens below the top stay mounted (state, loaded lists) and remember their scroll. */
@@ -68,6 +70,8 @@ const Admin = lazy(() => import("./screens/admin/Admin").then((m) => ({ default:
 function initialScreen(startParam?: string): Screen {
   const m = startParam?.match(/^listing_([0-9a-f-]{36})$/i);
   if (m) return { name: "listing", id: m[1]! };
+  const sp = startParam?.match(/^seller_([0-9a-f-]{36})$/i);
+  if (sp) return { name: "seller", id: sp[1]! };
   const o = startParam?.match(/^order_([0-9a-f-]{36})$/i);
   if (o) return { name: "orders", focusId: o[1]! };
   if (startParam === "screen_orders") return { name: "orders" };
@@ -282,6 +286,8 @@ export function App({ env }: { env: TelegramEnv }) {
             meId={me.id}
             onBuy={(listing) => go({ name: "checkout", listing })}
             onEdit={(listing) => go({ name: "sell", existing: listing })}
+            onOpen={(id) => go({ name: "listing", id })}
+            onSeller={(id) => go({ name: "seller", id })}
           />
         );
         break;
@@ -332,6 +338,9 @@ export function App({ env }: { env: TelegramEnv }) {
             onCatalog={() => go({ name: "catalog" })}
           />
         );
+        break;
+      case "seller":
+        body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;
         break;
       case "profile":
         body = (

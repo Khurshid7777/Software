@@ -2,6 +2,8 @@ import { and, asc, count, desc, eq, gte, inArray, lt, sql, type SQL } from "driz
 import {
   canonicalQuery,
   canonicalWord,
+  IMEI_CATEGORIES,
+  SELLER_PAGE_LIMIT,
   formatUzs,
   listingTitle,
   priceVerdict,
@@ -12,7 +14,9 @@ import {
   type CatalogItem,
   type CatalogPage,
   type CatalogSort,
+  type ConditionChecklist,
   type Lang,
+  type ListingInsights,
   type ListingDto,
   type MarketRange,
   type PriceSource,
@@ -267,6 +271,97 @@ export class CatalogService {
       .sort((a, b) => a - b);
     if (prices.length < 3) return null;
     return { min: quantile(prices, 0.2), median: quantile(prices, 0.5), max: quantile(prices, 0.8) };
+  }
+
+  // ---------- discovery ----------
+  /**
+   * "Похожие объявления": live listings of the same category, the same model first (trigram match on the
+   * model key), then the closest price within −50…+60 %.
+   */
+  async similar(id: string, viewer: User | null): Promise<CatalogItem[]> {
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
+    if (!l) throw new CatalogRejected("not_found", 404);
+    const key = ((l.attributes as { modelKey?: string | null }).modelKey ?? "").trim();
+    const conds: SQL[] = [...this.conditions({}), sql`${listings.id} <> ${id}`, eq(listings.category, l.category)];
+    if (l.price) conds.push(sql`${listings.price} between ${Math.round(l.price * 0.5)} and ${Math.round(l.price * 1.6)}`);
+    const sameModel = key ? sql`case when coalesce(${listings.attributes}->>'modelKey', '') % ${key} then 0 else 1 end` : sql`0`;
+    const rows = await this.db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(and(...conds))
+      .orderBy(sameModel, l.price ? sql`abs(${listings.price} - ${l.price})` : desc(listings.bumpedAt))
+      .limit(6);
+    return this.items(
+      rows.map((r) => r.id),
+      viewer,
+    );
+  }
+
+  /** Cards by id, in the given order (the Mini App's "recently viewed" list); non-public ones are skipped. */
+  async batch(ids: string[], viewer: User | null): Promise<CatalogItem[]> {
+    const unique = [...new Set(ids)].filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 20);
+    const items = await this.items(unique, viewer);
+    const byId = new Map(items.map((i) => [i.listing.id, i]));
+    return unique.map((x) => byId.get(x)).filter((i): i is CatalogItem => !!i && i.listing.status === "active");
+  }
+
+  /** Public seller page: the seller's facts (trust, rating, reply time…) and their live listings. */
+  async sellerPage(sellerId: string, viewer: User | null) {
+    const seller = await this.listingsSvc.sellerProfile(sellerId);
+    if (!seller) throw new CatalogRejected("not_found", 404);
+    const ids = await this.searchIds({}, "newest", 0, SELLER_PAGE_LIMIT, [eq(listings.sellerUserId, sellerId)]);
+    const items = await this.items(ids, viewer);
+    const trust = sellerTrust({
+      verifiedShop: !!seller.shop?.verified,
+      platformSales: seller.platformSales,
+      accountAgeDays: (Date.now() - new Date(seller.registeredAt).getTime()) / DAY,
+      rating: seller.rating,
+      inspections: seller.inspections,
+    });
+    return { seller, trust, items };
+  }
+
+  /**
+   * "Почему не продаётся": numbers for the seller's own listing and concrete tips, most important first.
+   * Deterministic rules (no AI): cheap, instant and explainable.
+   */
+  async insights(user: User, id: string): Promise<ListingInsights> {
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
+    if (!l || l.sellerUserId !== user.id) throw new CatalogRejected("not_found", 404);
+    const dto = (await this.listingsSvc.dtos([id], user.id))[0]!;
+    const days = l.publishedAt ? Math.max(1, Math.floor((Date.now() - l.publishedAt.getTime()) / DAY)) : 0;
+    const viewsPerDay = days ? Math.round((l.views / days) * 10) / 10 : 0;
+    const [cat] = (await this.db.execute(sql`
+      select avg(views / greatest(1, extract(epoch from now() - published_at) / 86400))::float as avg, count(*)::int as n
+      from ${listings}
+      where status = 'active' and category = ${l.category} and id <> ${id} and published_at is not null`)) as unknown as Array<{
+      avg: number | null;
+      n: number;
+    }>;
+    const categoryViewsPerDay = cat && cat.n >= 3 && cat.avg != null ? Math.round(cat.avg * 10) / 10 : null;
+    const verdict = await this.market(dto);
+    const market =
+      verdict?.range && l.price ? { median: verdict.range.median, diffPct: Math.round(((l.price - verdict.range.median) / verdict.range.median) * 100) } : null;
+
+    const tips: ListingInsights["tips"] = [];
+    const phone = (IMEI_CATEGORIES as readonly string[]).includes(l.category);
+    const checklist = (l.checklist ?? {}) as ConditionChecklist;
+    if (market && market.diffPct >= 10) tips.push({ code: "price_above_market", severity: "high", params: { pct: market.diffPct, median: formatUzs(market.median) } });
+    if (l.favoritesCount >= 3 && l.requestsCount === 0) tips.push({ code: "favorites_no_requests", severity: "high", params: { n: l.favoritesCount } });
+    if (days >= 3 && categoryViewsPerDay && viewsPerDay < categoryViewsPerDay * 0.5) {
+      tips.push({ code: "low_views", severity: "medium", params: { mine: viewsPerDay, avg: categoryViewsPerDay } });
+    }
+    if (days >= 14 && l.requestsCount === 0) tips.push({ code: "stale", severity: "medium", params: { days } });
+    if (dto.photos.length < 3) tips.push({ code: "few_photos", severity: "medium", params: { n: dto.photos.length } });
+    if ((l.descriptionRu || l.descriptionUz).trim().length < 120) tips.push({ code: "short_description", severity: "low", params: {} });
+    if (phone && checklist.batteryPct == null && !checklist.repairs?.length) tips.push({ code: "no_checklist", severity: "medium", params: {} });
+    if (phone && !l.imei) tips.push({ code: "no_imei", severity: "low", params: {} });
+    if (!(l.allowedDeliveryModes as string[]).includes("cod_seller")) tips.push({ code: "no_cod", severity: "low", params: {} });
+    return {
+      stats: { daysOnSale: days, views: l.views, viewsPerDay, categoryViewsPerDay, favorites: l.favoritesCount, requests: l.requestsCount },
+      market,
+      tips,
+    };
   }
 
   logSearch(userId: string, f: CatalogFilters, results: number) {

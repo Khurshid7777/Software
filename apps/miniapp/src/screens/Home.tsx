@@ -3,6 +3,7 @@ import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonc
 import type { Api } from "../api";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { useT } from "../i18n";
+import { readRecent } from "../prefs";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
 /** Category chips on the storefront (the catch-all ones live in the catalog filters). */
@@ -38,6 +39,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
   const [failed, setFailed] = useState(false);
   const [query, setQuery] = useState("");
   const [homeScreen, setHomeScreen] = useState(false);
+  const [recent, setRecent] = useState<CatalogItem[]>([]);
 
   useEffect(() => {
     let current = true;
@@ -46,6 +48,10 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
       .then((p) => current && setFresh(p.items.slice(0, 6)))
       .catch(() => current && (setFresh([]), setFailed(true)));
     canAddToHomeScreen().then((v) => current && setHomeScreen(v));
+    api
+      .catalogBatch(readRecent())
+      .then((items) => current && setRecent(items))
+      .catch(() => undefined);
     return () => {
       current = false;
     };
@@ -114,6 +120,19 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
           <span className="hint">{t("home.quick.favorites_desc")}</span>
         </button>
       </div>
+
+      {recent.length > 0 && (
+        <section className="stack-tight" data-testid="recently-viewed">
+          <h2>{t("home.recent")}</h2>
+          <div className="recent-strip scroll-x">
+            {recent.map((i) => (
+              <div key={i.listing.id} className="recent-item">
+                <MiniCard item={i} onOpen={() => onListing(i.listing.id)} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="stack-tight">
         <div className="row between">

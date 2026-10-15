@@ -47,6 +47,8 @@ const EnvSchema = z.object({
     .transform((v) => v !== "false"),
   // How long a Mini App launch stays valid; a leaked initData can be replayed only within this window.
   INIT_DATA_MAX_AGE_SEC: z.coerce.number().default(4 * 3600),
+  /** Shown by /health (set to the git commit or release tag at deploy). */
+  APP_VERSION: z.string().default("dev"),
   // Per-user request limits (off in tests unless set explicitly).
   RATE_LIMITS: z.enum(["on", "off"]).optional(),
   // Behind nginx: take the client IP from X-Forwarded-For.

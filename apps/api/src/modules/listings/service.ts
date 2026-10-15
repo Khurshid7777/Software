@@ -31,6 +31,7 @@ import {
   type Lang,
   type ListingAnalysis,
   type ListingDto,
+  type ListingSeller,
   type ListingStatus,
   type ModerationRecord,
   type PriceSuggestion,
@@ -886,6 +887,68 @@ export class ListingService {
 
 
   /**
+   * Public facts about sellers (shop, platform sales, rating, reply time, courier inspections), batched:
+   * a fixed number of queries for any number of sellers. Listing cards and the seller page use it.
+   */
+  async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt">>): Promise<Map<string, ListingSeller>> {
+    const sellerIds = sellers.map((u) => u.id);
+    if (!sellerIds.length) return new Map();
+    const [shopRows, sales, ratings, responseOf, insp] = await Promise.all([
+      this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds)),
+      // Platform sales = orders actually delivered by an Ishonch courier. The seller's own "sold on Ishonch"
+      // mark is not counted: anyone could set it and get the "high trust" badge without a single sale.
+      this.db
+        .select({ seller: orders.sellerUserId, n: count() })
+        .from(orders)
+        .where(and(inArray(orders.sellerUserId, sellerIds), eq(orders.status, "delivered")))
+        .groupBy(orders.sellerUserId),
+      this.db
+        .select({ seller: reviews.sellerUserId, avg: avg(reviews.rating), n: count() })
+        .from(reviews)
+        .where(inArray(reviews.sellerUserId, sellerIds))
+        .groupBy(reviews.sellerUserId),
+      this.responseMinutes(sellerIds),
+      this.db
+        .select({
+          seller: orders.sellerUserId,
+          passed: sql<number>`count(*) filter (where (${orders.inspection}->>'passed')::boolean)::int`,
+          failed: sql<number>`count(*) filter (where not (${orders.inspection}->>'passed')::boolean)::int`,
+        })
+        .from(orders)
+        .where(and(inArray(orders.sellerUserId, sellerIds), sql`${orders.inspection} is not null`))
+        .groupBy(orders.sellerUserId),
+    ]);
+    const shopOf = new Map(shopRows.map((sh) => [sh.ownerUserId, sh]));
+    const salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
+    const ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
+    const inspOf = new Map(insp.map((r) => [r.seller, { passed: r.passed, failed: r.failed }]));
+    return new Map(
+      sellers.map((u) => {
+        const shop = shopOf.get(u.id);
+        return [
+          u.id,
+          {
+            id: u.id,
+            registeredAt: u.createdAt.toISOString(),
+            platformSales: salesOf.get(u.id) ?? 0,
+            rating: ratingOf.get(u.id) ?? { avg: null, count: 0 },
+            shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
+            responseMinutes: responseOf.get(u.id) ?? null,
+            inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
+          },
+        ];
+      }),
+    );
+  }
+
+  /** The seller's public card (seller page), or null for an unknown or banned user. */
+  async sellerProfile(sellerId: string): Promise<ListingSeller | null> {
+    const [u] = await this.db.select().from(users).where(eq(users.id, sellerId));
+    if (!u || u.bannedAt) return null;
+    return (await this.sellerInfos([u])).get(u.id) ?? null;
+  }
+
+  /**
    * Typical reply time (Avito shows "отвечает в течение часа"): median minutes from the buyer's first message
    * to the seller's first answer, over chats of the last 60 days; null with fewer than 3 answered chats.
    */
@@ -959,40 +1022,7 @@ export class ListingService {
     const needSellers = opts.withSeller || rows.some((r) => r.sellerUserId === viewerId && r.moderationReason);
     const sellers = needSellers && sellerIds.length ? await this.db.select().from(users).where(inArray(users.id, sellerIds)) : [];
     const sellerOf = new Map(sellers.map((u) => [u.id, u]));
-    let shopOf = new Map<string, typeof shops.$inferSelect>();
-    let salesOf = new Map<string, number>();
-    let ratingOf = new Map<string, { avg: number | null; count: number }>();
-    let responseOf = new Map<string, number>();
-    let inspectionsOf = new Map<string, { passed: number; failed: number }>();
-    if (opts.withSeller && sellerIds.length) {
-      const shopRows = await this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds));
-      shopOf = new Map(shopRows.map((s) => [s.ownerUserId, s]));
-      // Platform sales = orders actually delivered by an Ishonch courier. The seller's own "sold on Ishonch"
-      // mark is not counted: anyone could set it and get the "high trust" badge without a single sale.
-      const sales = await this.db
-        .select({ seller: orders.sellerUserId, n: count() })
-        .from(orders)
-        .where(and(inArray(orders.sellerUserId, sellerIds), eq(orders.status, "delivered")))
-        .groupBy(orders.sellerUserId);
-      salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
-      const ratings = await this.db
-        .select({ seller: reviews.sellerUserId, avg: avg(reviews.rating), n: count() })
-        .from(reviews)
-        .where(inArray(reviews.sellerUserId, sellerIds))
-        .groupBy(reviews.sellerUserId);
-      ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
-      responseOf = await this.responseMinutes(sellerIds);
-      const insp = await this.db
-        .select({
-          seller: orders.sellerUserId,
-          passed: sql<number>`count(*) filter (where (${orders.inspection}->>'passed')::boolean)::int`,
-          failed: sql<number>`count(*) filter (where not (${orders.inspection}->>'passed')::boolean)::int`,
-        })
-        .from(orders)
-        .where(and(inArray(orders.sellerUserId, sellerIds), sql`${orders.inspection} is not null`))
-        .groupBy(orders.sellerUserId);
-      inspectionsOf = new Map(insp.map((r) => [r.seller, { passed: r.passed, failed: r.failed }]));
-    }
+    const sellerInfo = opts.withSeller && sellerIds.length ? await this.sellerInfos(sellers) : new Map<string, ListingSeller>();
 
     const out: ListingDto[] = [];
     for (const id of ids) {
@@ -1051,16 +1081,14 @@ export class ListingService {
         dto.moderation = { reason: l.moderationReason, message: record?.sellerMessage?.[lang] ?? null };
       }
       if (opts.withSeller) {
-        const seller = sellerOf.get(l.sellerUserId);
-        const shop = shopOf.get(l.sellerUserId);
-        dto.seller = {
+        dto.seller = sellerInfo.get(l.sellerUserId) ?? {
           id: l.sellerUserId,
-          registeredAt: (seller?.createdAt ?? l.createdAt).toISOString(),
-          platformSales: salesOf.get(l.sellerUserId) ?? 0,
-          rating: ratingOf.get(l.sellerUserId) ?? { avg: null, count: 0 },
-          shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
-          responseMinutes: responseOf.get(l.sellerUserId) ?? null,
-          inspections: inspectionsOf.get(l.sellerUserId) ?? { passed: 0, failed: 0 },
+          registeredAt: l.createdAt.toISOString(),
+          platformSales: 0,
+          rating: { avg: null, count: 0 },
+          shop: null,
+          responseMinutes: null,
+          inspections: { passed: 0, failed: 0 },
         };
       }
       out.push(dto);

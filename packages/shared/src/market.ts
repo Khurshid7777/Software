@@ -97,3 +97,36 @@ export const REVIEW_REMINDER_MAX_DAYS = 7;
 // ---------- bundles ----------
 /** Extra items of the same seller in one delivery. */
 export const MAX_BUNDLE_EXTRA = 4;
+
+// ---------- seller insights ("почему не продаётся") ----------
+export const INSIGHT_TIPS = [
+  "price_above_market",
+  "favorites_no_requests",
+  "low_views",
+  "stale",
+  "few_photos",
+  "short_description",
+  "no_checklist",
+  "no_imei",
+  "no_cod",
+] as const;
+export type InsightTip = (typeof INSIGHT_TIPS)[number];
+
+export interface ListingInsights {
+  stats: {
+    daysOnSale: number;
+    views: number;
+    viewsPerDay: number;
+    /** Average views per day of live listings in the same category (null: too few to compare). */
+    categoryViewsPerDay: number | null;
+    favorites: number;
+    requests: number;
+  };
+  /** Market price for the model (median) and how far the listing is from it, %. */
+  market: { median: number; diffPct: number } | null;
+  /** Most important first. */
+  tips: Array<{ code: InsightTip; severity: "high" | "medium" | "low"; params: Record<string, string | number> }>;
+}
+
+/** Public seller page: profile facts + live listings. */
+export const SELLER_PAGE_LIMIT = 30;

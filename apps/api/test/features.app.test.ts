@@ -407,7 +407,7 @@ describe.skipIf(!reachable)("reviews reminder, share, checklist, inspection, rep
     const l = await liveListing(SELLER);
     const big = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: { r: 200, g: 50, b: 50 } } }).jpeg().toBuffer();
     const key = `test/${l.id}.jpg`;
-    await new FsStorage(storageDir).put(key, big, "image/jpeg");
+    await new FsStorage(storageDir).put(key, big);
     const [p] = await db.insert(listingPhotos).values({ listingId: l.id, storageKey: key, position: 0 }).returning();
     const url = app.services.listings.photoUrl(p!.id, key);
     const small = await app.inject({ url: `${url}&w=240` });

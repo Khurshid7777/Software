@@ -44,4 +44,6 @@ export interface AdminMetrics {
     byFeature: Array<{ feature: string; calls: number; usd: number }>;
   };
   daily: Array<{ date: string; newUsers: number; checks: number; published: number; orders: number; delivered: number; aiUsd: number }>;
+  /** Background jobs: waiting now, and given up after all retries (need a look). */
+  system: { queuedJobs: number; failedJobs: number };
 }

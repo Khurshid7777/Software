@@ -40,3 +40,42 @@ jobs:
         run: pnpm test
       - name: Mini App build
         run: pnpm --filter @ishonch/miniapp build
+
+  e2e:
+    # The Mini App in a real browser against the dev API (real PostgreSQL, AI from fixtures).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ishonch
+          POSTGRES_PASSWORD: ishonch
+          POSTGRES_DB: ishonch
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ishonch" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://ishonch:ishonch@localhost:5432/ishonch
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Browser
+        run: pnpm --filter @ishonch/e2e exec playwright install --with-deps chromium
+      - name: Migrations and seed
+        run: pnpm db:migrate && pnpm db:seed
+      - name: End-to-end tests
+        run: pnpm e2e
+      - name: Report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/e2e/playwright-report
+          retention-days: 7

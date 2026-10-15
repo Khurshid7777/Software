@@ -53,8 +53,14 @@ describe.skipIf(!reachable)("API (integration)", () => {
     await close();
   });
 
-  it("health", async () => {
-    expect((await app.inject("/health")).json()).toEqual({ ok: true });
+  it("health: database check, version, uptime; every response carries a request id", async () => {
+    const res = await app.inject("/health");
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, db: { ok: true }, version: "dev" });
+    expect(res.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/);
+    // An upstream id (nginx, the bot) is kept, so one id follows the request across services.
+    const traced = await app.inject({ url: "/health/live", headers: { "x-request-id": "req-from-nginx-42" } });
+    expect(traced.headers["x-request-id"]).toBe("req-from-nginx-42");
   });
 
   it("rejects requests without a valid signature", async () => {

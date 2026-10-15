@@ -14,7 +14,8 @@ import {
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { Gallery } from "../components/Gallery";
-import { digitsOnly, groupDigits } from "../prefs";
+import { MiniCard } from "../components/MiniCard";
+import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
@@ -28,9 +29,11 @@ interface Props {
   meId: string;
   onBuy: (l: ListingDto) => void;
   onEdit?: (l: ListingDto) => void;
+  onOpen?: (id: string) => void;
+  onSeller?: (sellerId: string) => void;
 }
 
-export function ListingView({ api, id, meId, onBuy, onEdit }: Props) {
+export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: Props) {
   const t = useT();
   const lang = useLang();
   const [item, setItem] = useState<CatalogItem | null>(null);
@@ -43,6 +46,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit }: Props) {
   const [offer, setOffer] = useState<OfferDto | null>(null);
   const [offering, setOffering] = useState<string | null>(null);
   const [reviews, setReviews] = useState<ReviewDto[] | null>(null);
+  const [similar, setSimilar] = useState<CatalogItem[]>([]);
 
   useEffect(() => {
     api
@@ -53,7 +57,15 @@ export function ListingView({ api, id, meId, onBuy, onEdit }: Props) {
       .myOffer(id)
       .then((r) => setOffer(r.offer))
       .catch(() => undefined);
+    api
+      .similar(id)
+      .then(setSimilar)
+      .catch(() => undefined);
   }, [api, id]);
+  // "Recently viewed" on the storefront (own listings are not worth remembering).
+  useEffect(() => {
+    if (item && item.listing.seller?.id !== meId && item.listing.status === "active") rememberViewed(item.listing.id);
+  }, [item, meId]);
 
   if (error) return <p className="center hint">{error}</p>;
   if (!item) return <p className="center hint">{t("common.loading")}</p>;
@@ -226,6 +238,11 @@ export function ListingView({ api, id, meId, onBuy, onEdit }: Props) {
           )}
           <p className="hint">{t("listing.seller_since", { date: date(l.seller.registeredAt) })}</p>
           <p className="hint">{t("listing.sales", { n: l.seller.platformSales })}</p>
+          {onSeller && !own && (
+            <button className="link" onClick={() => onSeller(l.seller!.id)} data-testid="open-seller">
+              {t("listing.seller_all")} →
+            </button>
+          )}
           {l.seller.inspections.passed > 0 && (
             <p className="hint">✅ {t("verified.seller", { n: l.seller.inspections.passed })}</p>
           )}
@@ -326,6 +343,17 @@ export function ListingView({ api, id, meId, onBuy, onEdit }: Props) {
               ))}
           </>
         )
+      )}
+
+      {similar.length > 0 && onOpen && (
+        <section className="stack-tight" data-testid="similar">
+          <h2>{t("listing.similar")}</h2>
+          <div className="mini-grid">
+            {similar.map((i) => (
+              <MiniCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} />
+            ))}
+          </div>
+        </section>
       )}
 
       {!own && ["active", "reserved"].includes(l.status) && (
