@@ -17,10 +17,15 @@ export function Assistant({ api, onOpen }: { api: Api; onOpen: (id: string) => v
   const [comparison, setComparison] = useState<CompareResponse | null>(null);
   const [saved, setSaved] = useState(false);
 
-  async function send() {
-    const text = input.trim();
+  const [failedText, setFailedText] = useState<string | null>(null);
+
+  async function send(retry?: string) {
+    const text = (retry ?? input).trim();
     if (!text || busy) return;
-    const next: Turn[] = [...turns, { role: "user", content: text }];
+    // A retry re-sends the same message instead of adding it twice.
+    const base = retry ? turns.slice(0, -1) : turns;
+    const next: Turn[] = [...base, { role: "user", content: text }];
+    setFailedText(null);
     setTurns(next);
     setInput("");
     setBusy(true);
@@ -35,6 +40,7 @@ export function Assistant({ api, onOpen }: { api: Api; onOpen: (id: string) => v
       setTurns([...next, { role: "assistant", content, response: res }]);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t("common.error"));
+      setFailedText(text);
     } finally {
       setBusy(false);
     }
@@ -53,16 +59,33 @@ export function Assistant({ api, onOpen }: { api: Api; onOpen: (id: string) => v
   }
 
   async function subscribe(filters: CatalogFilters) {
-    await api.saveSearch(filters).catch(() => undefined);
-    setSaved(true);
+    try {
+      await api.saveSearch(filters);
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : t("common.error"));
+    }
   }
+
+  const examples = [t("assistant.example1"), t("assistant.example2"), t("assistant.example3")];
 
   const last = [...turns].reverse().find((m) => m.role === "assistant") as Extract<Turn, { role: "assistant" }> | undefined;
 
   return (
     <div className="stack">
       <h1>🤖 {t("assistant.title")}</h1>
-      {turns.length === 0 && <p className="card">{t("assistant.intro")}</p>}
+      {turns.length === 0 && (
+        <>
+          <p className="card">{t("assistant.intro")}</p>
+          <div className="chips">
+            {examples.map((x) => (
+              <button key={x} className="chip" onClick={() => setInput(x)}>
+                {x}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {turns.map((m, i) => (
         <div key={i} className={`bubble ${m.role}`}>
@@ -149,7 +172,16 @@ export function Assistant({ api, onOpen }: { api: Api; onOpen: (id: string) => v
       )}
 
       {busy && <p className="hint center">{t("assistant.thinking")}</p>}
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <div className="row between">
+          <p className="error">{error}</p>
+          {failedText && (
+            <button className="chip" onClick={() => void send(failedText)}>
+              ↻ {t("common.retry")}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="composer">
         <textarea
@@ -157,9 +189,17 @@ export function Assistant({ api, onOpen }: { api: Api; onOpen: (id: string) => v
           placeholder={t("assistant.placeholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter sends, Shift+Enter is a new line (desktop Telegram); phones use the button.
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          enterKeyHint="send"
           data-testid="assistant-input"
         />
-        <button className="primary" onClick={send} disabled={busy || !input.trim()} data-testid="assistant-send">
+        <button className="primary" onClick={() => void send()} disabled={busy || !input.trim()} data-testid="assistant-send">
           ➤
         </button>
       </div>

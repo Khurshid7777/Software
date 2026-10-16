@@ -96,5 +96,13 @@ export class JobQueue {
   /** Done jobs are kept a week for debugging, then removed. */
   async cleanup(days = 7) {
     await this.db.execute(sql`delete from ${jobs} where done_at < now() - make_interval(days => ${days})`);
+    // Jobs that gave up after MAX_ATTEMPTS: kept a month for investigation (last_error), then removed.
+    await this.db.execute(sql`delete from ${jobs} where done_at is null and attempts >= ${MAX_ATTEMPTS} and created_at < now() - interval '30 days'`);
+  }
+
+  /** Jobs that gave up (for the admin dashboard and the morning digest). */
+  async failedCount(): Promise<number> {
+    const rows = (await this.db.execute(sql`select count(*)::int as n from ${jobs} where done_at is null and attempts >= ${MAX_ATTEMPTS}`)) as unknown as Array<{ n: number }>;
+    return rows[0]?.n ?? 0;
   }
 }

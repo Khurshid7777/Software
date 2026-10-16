@@ -9,7 +9,9 @@ import {
   isValidImei,
   type ListingDto,
 } from "@ishonch/shared/client";
-import { ApiError, apiUrl, compressImage, type Api, type ListingPatch } from "../api";
+import { photoUrl, ApiError, compressImage, type Api, type ListingPatch } from "../api";
+import { confirmDialog } from "../dialogs";
+import { digitsOnly, groupDigits } from "../prefs";
 import { useLang, useT } from "../i18n";
 import { ChecklistEditor } from "./Checklist";
 
@@ -18,7 +20,7 @@ interface Props {
   listing: ListingDto;
   onChange: (l: ListingDto) => void;
   /** Lets the parent wait for an in-flight save (e.g. Publish tapped right after editing a field). */
-  onSaving?: (p: Promise<unknown>) => void;
+  onSaving?: (p: Promise<boolean>) => void;
 }
 
 /** Edit form shared by the sell wizard and "My listings → Edit". Saves on blur / change. */
@@ -36,6 +38,7 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
     const p = (async () => {
       try {
         onChange(await api.updateListing(listing.id, patch));
+        return true;
         // Drop only what was saved: text typed meanwhile in another field stays.
         setDraft((d) => {
           const rest = { ...d };
@@ -44,6 +47,7 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
         });
       } catch (e) {
         setError(e instanceof ApiError ? e.message : t("common.error"));
+        return false;
       }
     })();
     onSaving?.(p);
@@ -76,15 +80,20 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           <button
             key={p.id}
             className="thumb"
-            aria-label="remove photo"
-            onClick={() =>
+            aria-label={t("sell.photo_remove")}
+            onClick={async () => {
+              // Deleting is permanent (the file is removed on the server): ask first.
+              if (!(await confirmDialog(t("sell.photo_remove_confirm")))) return;
               api
                 .deletePhoto(listing.id, p.id)
                 .then(onChange)
-                .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")))
-            }
+                .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")));
+            }}
           >
-            <img src={apiUrl(p.url)} alt="" />
+            <img src={photoUrl(p.url, 240)} alt="" />
+            <span className="thumb-x" aria-hidden>
+              ✕
+            </span>
           </button>
         ))}
         {listing.photos.length < 10 && (
@@ -128,8 +137,8 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
         <input
           data-testid="price"
           inputMode="numeric"
-          value={v.price ? String(v.price) : ""}
-          onChange={(e) => setDraft((d) => ({ ...d, price: Number(e.target.value.replace(/\D/g, "")) || null }))}
+          value={v.price ? groupDigits(String(v.price)) : ""}
+          onChange={(e) => setDraft((d) => ({ ...d, price: Number(digitsOnly(e.target.value)) || null }))}
           onBlur={() => draft.price !== undefined && save({ price: draft.price })}
         />
       </label>
@@ -177,9 +186,7 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           <span className="hint">{t("sell.imei_hint")}</span>
         </label>
       )}
-      {(IMEI_CATEGORIES as readonly string[]).includes(listing.category) && (
-        <ChecklistEditor value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
-      )}
+      <ChecklistEditor category={listing.category} value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
 
       <label className="field">
         {t("sell.field.district")}

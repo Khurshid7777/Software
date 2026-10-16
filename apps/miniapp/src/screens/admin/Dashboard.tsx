@@ -70,6 +70,12 @@ export function Dashboard({ api }: { api: Api }) {
             />
           </div>
 
+          {m.system.failedJobs > 0 && (
+            <p className="card kpi-alert" data-testid="failed-jobs">
+              🧯 Фоновых задач с ошибкой: {m.system.failedJobs} (посты в каналы, уведомления). В очереди: {m.system.queuedJobs}. Причины —
+              в таблице jobs (last_error).
+            </p>
+          )}
           <Funnel title="Воронка покупателя" steps={m.buyerFunnel} />
           <Funnel title="Воронка продавца" steps={m.sellerFunnel} />
 

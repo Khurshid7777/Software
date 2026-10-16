@@ -97,8 +97,9 @@ export class ReplySuggestions {
     if (!conv || !s || s.userId !== user.id) throw new CatalogRejected("not_found", 404);
     const text = s.items[index];
     if (!text || Date.now() - new Date(s.at).getTime() > SUGGESTION_TTL_MS) throw new CatalogRejected("suggest_expired", 410);
-    await this.db.update(conversations).set({ suggestions: null }).where(eq(conversations.id, conversationId));
+    // Relay first: if delivery fails the drafts stay and the seller can tap again.
     await this.catalog.relay(conversationId, user, text);
+    await this.db.update(conversations).set({ suggestions: null }).where(eq(conversations.id, conversationId));
     await this.repo.event(user.id, "reply_suggestion_sent", { conversationId, index });
     return { ok: true, text };
   }

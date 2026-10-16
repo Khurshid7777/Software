@@ -1,3 +1,4 @@
+import { t } from "@ishonch/shared/client";
 import type {
   AssistantMessage,
   AssistantResponse,
@@ -16,7 +17,10 @@ import type {
   InspectionCheck,
   Lang,
   ListingDto,
+  ListingInsights,
+  ListingSeller,
   ListingStatus,
+  TrustLevel,
   AdminMetrics,
   AdminSettings,
   CourierTariff,
@@ -84,6 +88,8 @@ export type ListingPatch = Partial<
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
 export const apiUrl = (path: string) => `${BASE}${path}`;
+/** A signed photo URL at a smaller width (240 / 480 / 960) for cards and thumbnails. */
+export const photoUrl = (path: string, width: 240 | 480 | 960) => `${BASE}${path}${path.includes("?") ? "&" : "?"}w=${width}`;
 
 export interface QueueItem {
   listing: ListingDto;
@@ -122,17 +128,39 @@ export interface PriceRow {
 export type OperatorOrder = OrderDto & {
   contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null };
   imei: string | null;
+  category: string;
 };
+
+/** The UI language, for messages the API did not localize (rate limits, validation, network). */
+let uiLang: Lang = "ru";
+export const setApiLang = (l: Lang) => void (uiLang = l);
+
+function fallbackMessage(status: number, code: string) {
+  if (status === 429) return t(uiLang, "common.too_many");
+  if (status === 404 || code === "not_found") return t(uiLang, "common.not_found");
+  if (status === 400 || code === "bad_request") return t(uiLang, "common.bad_request");
+  return t(uiLang, "common.error");
+}
 
 export function createApi(initData: string | null) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: { ...(initData ? { authorization: `tma ${initData}` } : {}), ...init.headers },
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: { ...(initData ? { authorization: `tma ${initData}` } : {}), ...init.headers },
+      });
+    } catch {
+      throw new ApiError(0, "network", t(uiLang, "common.load_error"));
+    }
     const body = await res.json().catch(() => ({}));
     if (res.status === 401 && initData) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-    if (!res.ok) throw new ApiError(res.status, body.error ?? "error", body.message ?? res.statusText, body.params);
+    if (!res.ok) {
+      const code = typeof body.error === "string" ? body.error : "error";
+      // Localized messages come from the API; anything else (rate limit, validation) gets a friendly text.
+      const message = typeof body.message === "string" && body.message && res.status !== 429 && code !== "bad_request" ? body.message : fallbackMessage(res.status, code);
+      throw new ApiError(res.status, code, message, body.params);
+    }
     return body as T;
   }
   const json = (method: string, data: unknown): RequestInit => ({
@@ -197,6 +225,10 @@ export function createApi(initData: string | null) {
     // ---- catalog & buyer tools ----
     catalog: (f: CatalogFilters, sort: CatalogSort, offset = 0) => request<CatalogPage>(`/catalog?${filtersToQuery(f, sort, offset)}`),
     catalogItem: (id: string) => request<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
+    similar: (listingId: string) => request<CatalogItem[]>(`/catalog/${listingId}/similar`),
+    catalogBatch: (ids: string[]) => (ids.length ? request<CatalogItem[]>(`/catalog/batch?ids=${ids.join(",")}`) : Promise.resolve([])),
+    sellerPage: (sellerId: string) => request<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[] }>(`/sellers/${sellerId}/page`),
+    insights: (listingId: string) => request<ListingInsights>(`/listings/${listingId}/insights`),
     shareLink: (listingId: string) => request<{ url: string | null }>(`/listings/${listingId}/share`),
     myOffer: (listingId: string) => request<{ offer: OfferDto | null }>(`/listings/${listingId}/offers/mine`),
     makeOffer: (listingId: string, amount: number) => request<OfferDto>(`/listings/${listingId}/offers`, json("POST", { amount })),

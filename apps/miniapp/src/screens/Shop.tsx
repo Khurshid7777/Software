@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError, apiUrl, compressImage, type Api, type ShopInfo } from "../api";
+import { confirmDialog } from "../dialogs";
+import { LoadError } from "../components/LoadError";
+import { Toast } from "../components/Toast";
 import { useT } from "../i18n";
 
 export function Shop({ api }: { api: Api }) {
@@ -10,24 +13,36 @@ export function Shop({ api }: { api: Api }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [photoVersion, setPhotoVersion] = useState(0);
 
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    api.shop().then((s) => {
-      setInfo(s);
-      setName(s.shop?.name ?? "");
-      setLocation(s.shop?.marketLocation ?? "");
-    });
-  }, [api]);
+    setFailed(false);
+    api
+      .shop()
+      .then((s) => {
+        setInfo(s);
+        setName(s.shop?.name ?? "");
+        setLocation(s.shop?.marketLocation ?? "");
+      })
+      .catch(() => setFailed(true));
+  }, [api, attempt]);
 
+  const [busy, setBusy] = useState(false);
   async function save() {
+    if (busy) return;
+    setBusy(true);
     try {
       const shop = await api.saveShop(name, location);
       setInfo((i) => (i ? { ...i, shop } : i));
       setMsg(t("shop.saved"));
     } catch (e) {
       setMsg(e instanceof ApiError ? e.message : t("common.error"));
+    } finally {
+      setBusy(false);
     }
   }
 
+  if (failed) return <LoadError onRetry={() => setAttempt((a) => a + 1)} />;
   if (!info) return <p className="hint center">{t("common.loading")}</p>;
   const shop = info.shop;
   return (
@@ -51,18 +66,27 @@ export function Shop({ api }: { api: Api }) {
           <input
             type="file"
             accept="image/*"
+            disabled={busy}
             onChange={async (e) => {
               const f = e.target.files?.[0];
               if (!f) return;
-              const s = await api.shopPhoto(await compressImage(f));
-              setInfo((i) => (i ? { ...i, shop: s } : i));
-              setPhotoVersion((v) => v + 1);
+              setBusy(true);
+              try {
+                const s = await api.shopPhoto(await compressImage(f));
+                setInfo((i) => (i ? { ...i, shop: s } : i));
+                setPhotoVersion((v) => v + 1);
+                setMsg(t("common.saved"));
+              } catch (err) {
+                setMsg(err instanceof ApiError ? err.message : t("common.error"));
+              } finally {
+                setBusy(false);
+              }
             }}
           />
         </label>
       )}
-      {msg && <p className="toast">{msg}</p>}
-      <button className="primary" onClick={save} disabled={name.trim().length < 2}>
+      {msg && <Toast text={msg} onClose={() => setMsg(null)} />}
+      <button className="primary" onClick={save} disabled={busy || name.trim().length < 2}>
         {t("shop.save")}
       </button>
 
@@ -74,9 +98,15 @@ export function Shop({ api }: { api: Api }) {
             <span>📣 {c.title}</span>
             <button
               className="link danger"
+              aria-label={t("shop.unlink")}
               onClick={async () => {
-                await api.unlinkChannel(c.id);
-                setInfo({ ...info, channels: info.channels.filter((x) => x.id !== c.id) });
+                if (!(await confirmDialog(t("shop.unlink_confirm", { title: c.title })))) return;
+                try {
+                  await api.unlinkChannel(c.id);
+                  setInfo((i) => (i ? { ...i, channels: i.channels.filter((x) => x.id !== c.id) } : i));
+                } catch (err) {
+                  setMsg(err instanceof ApiError ? err.message : t("common.error"));
+                }
               }}
             >
               ✕

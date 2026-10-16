@@ -14,7 +14,8 @@
     "db:generate": "pnpm --filter @ishonch/api db:generate",
     "db:migrate": "pnpm --filter @ishonch/api db:migrate",
     "db:seed": "pnpm --filter @ishonch/api db:seed",
-    "check:i18n": "tsx scripts/check-i18n.ts"
+    "check:i18n": "tsx scripts/check-i18n.ts",
+    "e2e": "pnpm --filter @ishonch/e2e test"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

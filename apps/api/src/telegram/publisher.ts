@@ -59,7 +59,14 @@ export class BotApiPublisher implements ChannelPublisher, Notifier {
 
   async miniAppLink(startParam: string) {
     if (this.miniAppLinkBase) return `${this.miniAppLinkBase}?startapp=${encodeURIComponent(startParam)}`;
-    this.username ??= this.api.getMe().then((me) => me.username);
+    // A failed getMe is not cached: the next call tries again instead of failing until a restart.
+    this.username ??= this.api.getMe().then(
+      (me) => me.username,
+      (err) => {
+        this.username = null;
+        throw err;
+      },
+    );
     return `https://t.me/${await this.username}?startapp=${encodeURIComponent(startParam)}`;
   }
 }

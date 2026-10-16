@@ -9,7 +9,12 @@ import {
   type CatalogSort,
 } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
+import { Empty } from "../components/Empty";
 import { ItemCard } from "../components/ItemCard";
+import { LoadError } from "../components/LoadError";
+import { Toast } from "../components/Toast";
+import { digitsOnly, groupDigits } from "../prefs";
+import { haptic } from "../telegram";
 import { useT } from "../i18n";
 
 interface Props {
@@ -29,6 +34,7 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
   const [next, setNext] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   // Only the latest request may update the list: a slow page for old filters must not land on new results.
   const seq = useRef(0);
@@ -36,14 +42,18 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
   const load = useCallback(
     async (offset = 0) => {
       const id = ++seq.current;
-      if (offset === 0) setItems(null);
-      else setLoadingMore(true);
+      if (offset === 0) {
+        setItems(null);
+        setFailed(false);
+      } else setLoadingMore(true);
       const page = await api.catalog(filters, sort, offset).catch(() => null);
       if (id !== seq.current) return;
       setLoadingMore(false);
       if (!page) {
-        if (offset === 0) setItems([]);
-        setToast(t("common.error"));
+        if (offset === 0) {
+          setItems([]);
+          setFailed(true);
+        } else setToast(t("common.load_error"));
         return;
       }
       setItems((prev) => (offset === 0 ? page.items : [...(prev ?? []), ...page.items.filter((i) => !prev?.some((p) => p.listing.id === i.listing.id))]));
@@ -61,9 +71,17 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
     return () => clearTimeout(id);
   }, [query]);
 
+  // Optimistic heart: flips at once, flips back if the request failed.
   async function favorite(item: CatalogItem, on: boolean) {
-    await api.setFavorite(item.listing.id, on).catch(() => undefined);
-    setItems((list) => list?.map((i) => (i.listing.id === item.listing.id ? { ...i, favorite: on } : i)) ?? null);
+    const set = (v: boolean) => setItems((list) => list?.map((i) => (i.listing.id === item.listing.id ? { ...i, favorite: v } : i)) ?? null);
+    set(on);
+    haptic("light");
+    try {
+      await api.setFavorite(item.listing.id, on);
+    } catch (e) {
+      set(!on);
+      setToast(e instanceof ApiError ? e.message : t("common.error"));
+    }
   }
 
   async function saveSearch() {
@@ -89,8 +107,14 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           data-testid="catalog-search"
         />
-        <button className="chip" onClick={() => setShowFilters(!showFilters)} data-testid="catalog-filters">
-          ⚙️ {activeFilters ? activeFilters : ""}
+        <button
+          className={activeFilters ? "chip active" : "chip"}
+          onClick={() => setShowFilters(!showFilters)}
+          aria-expanded={showFilters}
+          data-testid="catalog-filters"
+        >
+          ⚙️ {t("catalog.filters")}
+          {activeFilters ? ` · ${activeFilters}` : ""}
         </button>
       </div>
 
@@ -111,14 +135,14 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
             <input
               inputMode="numeric"
               placeholder={t("catalog.price_from")}
-              value={draft.priceMin ?? ""}
-              onChange={(e) => setDraft({ ...draft, priceMin: Number(e.target.value.replace(/\D/g, "")) || undefined })}
+              value={draft.priceMin ? groupDigits(String(draft.priceMin)) : ""}
+              onChange={(e) => setDraft({ ...draft, priceMin: Number(digitsOnly(e.target.value)) || undefined })}
             />
             <input
               inputMode="numeric"
               placeholder={t("catalog.price_to")}
-              value={draft.priceMax ?? ""}
-              onChange={(e) => setDraft({ ...draft, priceMax: Number(e.target.value.replace(/\D/g, "")) || undefined })}
+              value={draft.priceMax ? groupDigits(String(draft.priceMax)) : ""}
+              onChange={(e) => setDraft({ ...draft, priceMax: Number(digitsOnly(e.target.value)) || undefined })}
             />
           </div>
           <div className="chips">
@@ -156,13 +180,6 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
             />
             ✔️ {t("catalog.verified_only")}
           </label>
-          <select value={sort} onChange={(e) => setSort(e.target.value as CatalogSort)}>
-            {CATALOG_SORTS.map((s) => (
-              <option key={s} value={s}>
-                {t(`catalog.sort.${s}`)}
-              </option>
-            ))}
-          </select>
           <div className="row">
             <button
               className="secondary"
@@ -187,13 +204,32 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
         </div>
       )}
 
-      {toast && (
-        <p className="toast" onClick={() => setToast(null)}>
-          {toast}
-        </p>
-      )}
-      {items === null && <p className="hint center">{t("common.loading")}</p>}
-      {items?.length === 0 && <p className="hint center">{t("catalog.empty")}</p>}
+      {/* Sorting is visible and applies at once (it used to hide inside the filters panel). */}
+      <div className="row between">
+        <span className="hint">{items && items.length > 0 ? t("catalog.found", { n: items.length + (next !== null ? "+" : "") }) : ""}</span>
+        <select className="sort-select" aria-label={t("catalog.sort_label")} value={sort} onChange={(e) => setSort(e.target.value as CatalogSort)}>
+          {CATALOG_SORTS.map((s) => (
+            <option key={s} value={s}>
+              {t(`catalog.sort.${s}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {toast && <Toast text={toast} onClose={() => setToast(null)} />}
+      {items === null &&
+        Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="card item-skeleton" aria-hidden>
+            <span className="sk-photo" />
+            <span className="sk-text">
+              <span className="sk-line" />
+              <span className="sk-line short" />
+              <span className="sk-line short" />
+            </span>
+          </div>
+        ))}
+      {failed && <LoadError onRetry={() => void load(0)} />}
+      {items?.length === 0 && !failed && <Empty icon="🔍" title={t("catalog.nothing")} text={t("catalog.empty")} />}
       {items?.map((i) => (
         <ItemCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
       ))}
@@ -202,9 +238,12 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
           {t("catalog.load_more")}
         </button>
       )}
-      <button className="secondary" onClick={saveSearch} data-testid="save-search">
-        {t("catalog.save_search")}
-      </button>
+      {/* A subscription makes sense for a concrete search, not for "everything". */}
+      {(filters.q || activeFilters > 0 || filters.category) && (
+        <button className="secondary" onClick={saveSearch} data-testid="save-search">
+          {t("catalog.save_search")}
+        </button>
+      )}
     </div>
   );
 }

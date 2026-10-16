@@ -161,8 +161,8 @@ export function listingRoutes(
   );
 
   // Signed URLs so that <img> tags work without auth headers.
-  app.get<{ Params: { id: string }; Querystring: { s?: string } }>("/photos/:id", async (req, reply) => {
-    const data = await svc.readPhoto(Number(req.params.id), req.query.s ?? "");
+  app.get<{ Params: { id: string }; Querystring: { s?: string; w?: string } }>("/photos/:id", async (req, reply) => {
+    const data = await svc.readPhoto(Number(req.params.id), req.query.s ?? "", req.query.w ? Number(req.query.w) : undefined);
     if (!data) return reply.code(404).send({ error: "not_found" });
     return reply.header("content-type", "image/jpeg").header("cache-control", "public, max-age=31536000, immutable").send(data);
   });

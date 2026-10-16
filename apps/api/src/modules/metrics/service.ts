@@ -1,3 +1,4 @@
+import { MAX_ATTEMPTS } from "../../jobs/queue.js";
 import { sql, type SQL } from "drizzle-orm";
 import { formatUzs, type AdminMetrics, type FunnelStep } from "@ishonch/shared";
 import { startOfMonthUtc, startOfTashkentDay, type Repo } from "../../db/repo.js";
@@ -153,6 +154,10 @@ export class MetricsService {
     const delivered = num(orders.delivered);
     const returned = num(orders.returned);
     const decisions = Object.fromEntries(moderation.map((r) => [String(r.decision), num(r.n)]));
+    const system = await this.one(sql`
+      select count(*) filter (where done_at is null and attempts < ${MAX_ATTEMPTS}) as queued,
+             count(*) filter (where done_at is null and attempts >= ${MAX_ATTEMPTS}) as failed
+      from jobs`);
     return {
       period: { from: from.toISOString(), to: to.toISOString(), days },
       users: {
@@ -206,6 +211,7 @@ export class MetricsService {
         monthlyLimitUsd: limit,
         byFeature: ai.map((r) => ({ feature: String(r.feature), calls: num(r.calls), usd: round4(num(r.usd)) })),
       },
+      system: { queuedJobs: num(system.queued), failedJobs: num(system.failed) },
       daily: daily.map((r) => ({
         date: String(r.day),
         newUsers: num(r.new_users),
@@ -265,7 +271,8 @@ export class MetricsService {
         (select count(*) from listings where status = 'pending') as pending,
         (select count(*) from complaints where resolved_at is null) as complaints,
         (select count(*) from orders where status in ('new', 'confirmed', 'courier_assigned', 'picked_up')
-           and updated_at < now() - interval '24 hours') as stuck`);
+           and updated_at < now() - interval '24 hours') as stuck,
+        (select count(*) from jobs where done_at is null and attempts >= ${MAX_ATTEMPTS}) as failed_jobs`);
     const month = await this.repo.aiSpendSince(startOfMonthUtc(now));
     const limit = await this.repo.getSetting("ai_monthly_limit_usd", 50);
     const pct = limit ? Math.round((month / limit) * 100) : 0;
@@ -275,6 +282,7 @@ export class MetricsService {
       num(y.complaints) && `⚠️ открытых жалоб: ${num(y.complaints)}`,
       num(y.stuck) && `⏳ заказов без движения > 24 ч: ${num(y.stuck)}`,
       pct >= 80 && `💸 AI: ${pct}% месячного лимита`,
+      num(y.failed_jobs) && `🧯 фоновых задач с ошибкой: ${num(y.failed_jobs)} (посты в каналы, уведомления)`,
     ].filter(Boolean);
     return [
       `📊 Ishonch за ${date}`,

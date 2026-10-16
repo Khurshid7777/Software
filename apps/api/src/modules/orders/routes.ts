@@ -31,6 +31,7 @@ const MESSAGES: Record<string, string> = {
   offer_pending: "offer.err.pending",
   too_many_offers: "offer.err.too_many",
   bundle_invalid: "order.err.bundle_invalid",
+  no_tariff: "order.err.no_tariff",
 };
 
 const TariffSchema = z.object({

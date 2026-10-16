@@ -218,7 +218,8 @@ describe.skipIf(!reachable)("seller cabinet (integration)", () => {
     const sold = await app.inject({ method: "POST", url: `/listings/${d.id}/sold`, headers: tma(SELLER), payload: { via: "platform" } });
     expect(sold.json()).toMatchObject({ status: "sold", soldVia: "platform" });
     const card = (await app.inject({ url: `/listings/${d.id}`, headers: tma(BUYER) })).json() as ListingDto;
-    expect(card.seller?.platformSales).toBe(1);
+    // Only orders delivered by an Ishonch courier count; the seller's own mark is just a note.
+    expect(card.seller?.platformSales).toBe(0);
   });
 
   it("private sellers are limited to 10 active listings; only verified shops are not", async () => {

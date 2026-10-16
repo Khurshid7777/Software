@@ -1,38 +1,62 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatUzs, listingTitle, type OrderDto } from "@ishonch/shared/client";
-import { ApiError, apiUrl, type Api } from "../api";
+import { photoUrl, ApiError, type Api } from "../api";
+import { Empty } from "../components/Empty";
+import { LoadError } from "../components/LoadError";
+import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
 import { confirmDialog } from "../dialogs";
 import { useLatest } from "../useLatest";
+import { useOnShow } from "../leave";
 
 interface Props {
   api: Api;
+  /** Top of the navigation stack: lists refresh when the user comes back (an edit, an order changed). */
+  visible?: boolean;
   /** Opened from a bot notification (startapp=order_<id>). */
   focusId?: string;
   onOpenListing: (id: string) => void;
+  onCatalog: () => void;
 }
 
-export function Orders({ api, focusId, onOpenListing }: Props) {
+export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog }: Props) {
   const t = useT();
-  const [role, setRole] = useState<"buyer" | "seller">("buyer");
+  // A notification link: the order's side (buyer/seller) is resolved before the first load (no flash).
+  const [role, setRole] = useState<"buyer" | "seller" | null>(focusId ? null : "buyer");
   const [items, setItems] = useState<OrderDto[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   // Notifications about sales open the seller tab.
   useEffect(() => {
-    if (focusId) api.order(focusId).then((o) => o.role === "seller" && setRole("seller")).catch(() => undefined);
+    if (focusId)
+      api
+        .order(focusId)
+        .then((o) => setRole(o.role === "seller" ? "seller" : "buyer"))
+        .catch(() => setRole("buyer"));
   }, [api, focusId]);
 
   const begin = useLatest();
   const load = useCallback(() => {
+    if (!role) return;
     const isCurrent = begin();
     setItems(null);
+    setFailed(false);
     api
       .myOrders(role)
       .then((list) => isCurrent() && setItems(list))
-      .catch(() => isCurrent() && (setItems([]), setToast(t("common.error"))));
+      .catch(() => isCurrent() && (setItems([]), setFailed(true)));
   }, [api, role, begin]);
   useEffect(load, [load]);
+  // Bring the order from the notification into view once the list is there.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (!focusId || !items || scrolled.current) return;
+    scrolled.current = true;
+    document.getElementById(`order-${focusId}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [items, focusId]);
+  const shown = useRef(false);
+  useOnShow(visible, () => (shown.current ? load() : (shown.current = true)));
 
   const [busy, setBusy] = useState(false);
   async function act(fn: () => Promise<unknown>, ok?: string) {
@@ -59,13 +83,23 @@ export function Orders({ api, focusId, onOpenListing }: Props) {
           </button>
         ))}
       </div>
-      {toast && (
-        <p className="toast" onClick={() => setToast(null)}>
-          {toast}
-        </p>
-      )}
+      {toast && <Toast text={toast} onClose={() => setToast(null)} />}
       {items === null && <p className="hint center">{t("common.loading")}</p>}
-      {items?.length === 0 && <p className="hint center">{t("orders.empty")}</p>}
+      {failed && <LoadError onRetry={load} />}
+      {items?.length === 0 && !failed && (
+        <Empty
+          icon={role === "buyer" ? "🛍️" : "📦"}
+          title={t("orders.empty")}
+          text={t(role === "buyer" ? "orders.empty_buyer" : "orders.empty_seller")}
+          action={
+            role === "buyer" ? (
+              <button className="primary" onClick={onCatalog}>
+                {t("common.to_catalog")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
       {items?.map((o) => (
         <OrderCard
           key={o.id}
@@ -102,9 +136,9 @@ function OrderCard({
   const q = o.quote;
 
   return (
-    <article className={`card stack${highlighted ? " highlighted" : ""}`} data-testid="order-card">
+    <article id={`order-${o.id}`} className={`card stack${highlighted ? " highlighted" : ""}`} data-testid="order-card">
       <button className="listing-main" onClick={onOpenListing}>
-        {o.listing.photoUrl ? <img src={apiUrl(o.listing.photoUrl)} alt="" /> : <div className="no-photo">📦</div>}
+        {o.listing.photoUrl ? <img src={photoUrl(o.listing.photoUrl, 240)} alt="" loading="lazy" /> : <div className="no-photo">📦</div>}
         <span>
           <strong>{listingTitle(o.listing, lang) || "—"}</strong>
           <span className={`badge order-${o.status}`}>{t(`order.status.${o.status}`)}</span>
@@ -155,12 +189,12 @@ function OrderCard({
             </button>
           )}
           {o.actions.includes("decline") && (
-            <button className="chip" onClick={() => onAction("decline")}>
+            <button className="chip" onClick={async () => (await confirmDialog(t("orders.decline_confirm"))) && onAction("decline")}>
               ✖️ {t("orders.decline")}
             </button>
           )}
           {o.actions.includes("cancel") && (
-            <button className="chip" onClick={async () => (await confirmDialog(t("orders.cancel") + "?")) && onAction(o.role === "seller" ? "decline" : "cancel")}>
+            <button className="chip" onClick={async () => (await confirmDialog(t("orders.cancel_confirm"))) && onAction(o.role === "seller" ? "decline" : "cancel")}>
               ✖️ {t("orders.cancel")}
             </button>
           )}

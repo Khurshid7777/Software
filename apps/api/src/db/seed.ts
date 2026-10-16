@@ -17,6 +17,10 @@ const CATEGORY_SEED = [
   { slug: "console", nameRu: "Игровые приставки", nameUz: "O'yin pristavkalari", parent: "electronics" },
   { slug: "tv", nameRu: "Телевизоры", nameUz: "Televizorlar", parent: "electronics" },
   { slug: "camera", nameRu: "Фототехника", nameUz: "Fototexnika", parent: "electronics" },
+  { slug: "pc_parts", nameRu: "Комплектующие ПК", nameUz: "Kompyuter qismlari", parent: "electronics" },
+  { slug: "monitor", nameRu: "Мониторы", nameUz: "Monitorlar", parent: "electronics" },
+  { slug: "home", nameRu: "Для дома", nameUz: "Uy uchun", parent: null },
+  { slug: "home_appliance", nameRu: "Техника для дома", nameUz: "Uy texnikasi", parent: "home" },
 ] as const;
 
 // Indicative used-market prices in Tashkent, UZS. Starting point only — the admin maintains them.
@@ -42,6 +46,23 @@ const PRICE_SEED: Array<[string, string, number, number, number]> = [
   ["tablet", "apple ipad 9 64gb", 2.8 * M, 3.2 * M, 3.7 * M],
   ["headphones", "apple airpods pro 2", 2.2 * M, 2.55 * M, 2.9 * M],
   ["console", "sony playstation 5", 5.5 * M, 6.3 * M, 7.0 * M],
+  ["pc_parts", "nvidia geforce rtx 3060 12gb", 2.6 * M, 3.0 * M, 3.5 * M],
+  ["pc_parts", "nvidia geforce rtx 3070 8gb", 3.5 * M, 4.1 * M, 4.7 * M],
+  ["pc_parts", "nvidia geforce rtx 4060 8gb", 3.4 * M, 3.8 * M, 4.3 * M],
+  ["pc_parts", "nvidia geforce rtx 4070 12gb", 6.0 * M, 6.8 * M, 7.6 * M],
+  ["pc_parts", "amd radeon rx 6600 8gb", 1.9 * M, 2.3 * M, 2.7 * M],
+  ["pc_parts", "amd ryzen 5 5600", 1.0 * M, 1.2 * M, 1.45 * M],
+  ["pc_parts", "intel core i5 12400f", 1.1 * M, 1.3 * M, 1.55 * M],
+  ["pc_parts", "samsung 980 1tb", 0.7 * M, 0.85 * M, 1.0 * M],
+  ["monitor", "samsung odyssey g5 27", 2.4 * M, 2.8 * M, 3.2 * M],
+  ["monitor", "lg ultragear 27gp850", 3.0 * M, 3.5 * M, 4.0 * M],
+  ["monitor", "dell p2422h", 1.3 * M, 1.6 * M, 1.9 * M],
+  ["monitor", "xiaomi mi 2k gaming monitor 27", 1.9 * M, 2.2 * M, 2.6 * M],
+  ["home_appliance", "dyson v11", 3.5 * M, 4.2 * M, 5.0 * M],
+  ["home_appliance", "xiaomi robot vacuum s10", 1.6 * M, 1.9 * M, 2.3 * M],
+  ["home_appliance", "delonghi magnifica s", 2.5 * M, 3.0 * M, 3.6 * M],
+  ["home_appliance", "philips airfryer xl hd9270", 0.9 * M, 1.1 * M, 1.3 * M],
+  ["home_appliance", "samsung ms23k3513", 0.6 * M, 0.75 * M, 0.9 * M],
 ];
 
 const catIds = new Map<string, number>();
@@ -54,9 +75,14 @@ for (const c of CATEGORY_SEED) {
   catIds.set(c.slug, row!.id);
 }
 
-// Only into an empty table: rows an admin deleted or edited are not brought back on every API start.
-const [{ refs }] = (await db.execute(dsql`select count(*)::int as refs from price_reference`)) as unknown as [{ refs: number }];
-for (const [cat, modelKey, min, med, max] of refs > 0 ? [] : PRICE_SEED) {
+// Only for categories without any reference yet: rows an admin deleted or edited are not brought back on
+// every API start, while a newly added category still gets its starting prices.
+const seeded = new Set(
+  ((await db.execute(dsql`select distinct category_id from price_reference where category_id is not null`)) as unknown as Array<{ category_id: number }>).map(
+    (r) => r.category_id,
+  ),
+);
+for (const [cat, modelKey, min, med, max] of PRICE_SEED.filter(([cat]) => !seeded.has(catIds.get(cat)!))) {
   await db
     .insert(priceReference)
     .values({

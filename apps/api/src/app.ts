@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
@@ -76,8 +78,21 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     },
     bodyLimit: 1024 * 1024,
     trustProxy: config.TRUST_PROXY,
+    // One id per request in every log line and in the response header: a user's "something failed" report
+    // or an nginx log line leads straight to the server log. An upstream id (nginx, the bot) is kept.
+    requestIdHeader: "x-request-id",
+    genReqId: () => randomUUID(),
   });
-  if ((config.RATE_LIMITS ?? (config.NODE_ENV === "test" ? "off" : "on")) === "on") await registerRateLimits(app);
+  app.addHook("onSend", async (req, reply) => {
+    reply.header("x-request-id", req.id);
+  });
+  if ((config.RATE_LIMITS ?? (config.NODE_ENV === "test" ? "off" : "on")) === "on") {
+    await registerRateLimits(app, {
+      botToken: config.BOT_TOKEN,
+      internalToken: config.INTERNAL_API_TOKEN,
+      maxAgeSec: config.INIT_DATA_MAX_AGE_SEC,
+    });
+  }
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {
     limits: { ...multipartLimits, files: 12, fileSize: Math.max(multipartLimits.fileSize, MAX_UPLOAD_BYTES) },
@@ -90,7 +105,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     // Client errors keep their status (plugins such as rate-limit throw plain objects, not Errors).
     if (status && status < 500) return reply.code(status).send(err);
     req.log.error({ err }, "unhandled error");
-    return reply.code(500).send({ error: "internal" });
+    return reply.code(500).send({ error: "internal", requestId: req.id });
   });
   app.addContentTypeParser("text/csv", { parseAs: "string" }, (_req, body, done) => done(null, body));
 
@@ -174,10 +189,27 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     staff,
     courier: courier ?? createCourierProvider(config.COURIER_PROVIDER),
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
+    // `trust` is created below; the hook only runs later, on an order cancelled or returned.
+    onListingRestored: (id) => trust.holdIfComplained(id),
   });
   const trust = new TrustService({ repo, listings: listingsSvc, onBanned: (id) => ordersSvc.cancelAllFor(id) });
 
-  app.get("/health", async () => ({ ok: true }));
+  // Liveness (process up) and readiness (database answers) for docker / uptime monitors.
+  const startedAt = Date.now();
+  app.get("/health/live", async () => ({ ok: true }));
+  app.get("/health", async (_req, reply) => {
+    const t0 = Date.now();
+    const dbOk = await db
+      .execute(sql`select 1`)
+      .then(() => true)
+      .catch(() => false);
+    return reply.code(dbOk ? 200 : 503).send({
+      ok: dbOk,
+      db: { ok: dbOk, ms: Date.now() - t0 },
+      version: config.APP_VERSION,
+      uptimeSec: Math.round((Date.now() - startedAt) / 1000),
+    });
+  });
   userRoutes(app, repo, checks, auth.requireUser);
   checkRoutes(app, checks, auth.requireUser);
   const metrics = new MetricsService(repo);

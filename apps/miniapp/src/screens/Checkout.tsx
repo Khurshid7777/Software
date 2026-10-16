@@ -12,7 +12,9 @@ import {
 import { ApiError, type Api } from "../api";
 import { useLang, useT } from "../i18n";
 import { sharePhoneAndWait } from "../phone";
-import { ensureWriteAccess } from "../telegram";
+import { useLeaveGuard } from "../leave";
+import { readPref, writePref } from "../prefs";
+import { ensureWriteAccess, haptic } from "../telegram";
 
 interface Props {
   api: Api;
@@ -26,8 +28,10 @@ export function Checkout({ api, listing, onDone }: Props) {
   const lang = useLang();
   const modes = listing.allowedDeliveryModes;
   const [mode, setMode] = useState<DeliveryMode>(modes.includes("cod_seller") ? "cod_seller" : modes[0]!);
-  const [district, setDistrict] = useState<District | "">("");
-  const [address, setAddress] = useState("");
+  // The last address is remembered on this device: repeat buyers don't type it again.
+  const [district, setDistrict] = useState<District | "">(() => (readPref("district") as District | null) ?? "");
+  const [address, setAddress] = useState(() => readPref("address") ?? "");
+  const initialAddress = useRef(address);
   const [comment, setComment] = useState("");
   const [quote, setQuote] = useState<(DeliveryQuote & { bundle: BundleQuote | null }) | null>(null);
   const [candidates, setCandidates] = useState<ListingDto[]>([]);
@@ -48,6 +52,8 @@ export function Checkout({ api, listing, onDone }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [needPhone, setNeedPhone] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [placed, setPlaced] = useState(false);
+  useLeaveGuard(!placed && ((address.trim().length > 0 && address !== initialAddress.current) || comment.trim().length > 0), t("checkout.leave_confirm"));
 
   useEffect(() => {
     if (!district) return;
@@ -83,6 +89,10 @@ export function Checkout({ api, listing, onDone }: Props) {
         comment: comment.trim() || undefined,
         ...(extras.length ? { extraListingIds: extras } : {}),
       });
+      setPlaced(true);
+      haptic("success");
+      writePref("district", district);
+      writePref("address", address.trim());
       onDone(order.id);
     } catch (e) {
       if (e instanceof ApiError && e.code === "phone_required") setNeedPhone(true);
@@ -207,6 +217,7 @@ export function Checkout({ api, listing, onDone }: Props) {
         </section>
       )}
 
+      {district && !quote && !error && <p className="hint center">⏳ {t("checkout.calculating")}</p>}
       <p className="hint-card">🔍 {t("checkout.inspection")}</p>
 
       {needPhone && (
@@ -229,8 +240,14 @@ export function Checkout({ api, listing, onDone }: Props) {
         onClick={submit}
         data-testid="checkout-submit"
       >
-        {t("checkout.submit")}
+        {busy ? t("common.loading") : t("checkout.submit")}
       </button>
+      {/* Why the button is disabled, instead of a silent grey button. */}
+      {!busy && (!district || address.trim().length < 5) && (
+        <p className="hint center" data-testid="checkout-missing">
+          {!district ? t("checkout.need_district") : t("checkout.need_address")}
+        </p>
+      )}
     </div>
   );
 }

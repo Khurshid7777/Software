@@ -56,16 +56,22 @@ export class AssistantService {
   }
 
   /** One unit of the daily assistant quota (questions and comparisons share it), reserved before any AI call. */
-  private async reserve(user: User) {
+  private async reserve(user: User): Promise<number> {
     const perDay = await this.repo.getSetting("assistant_per_day", this.defaults.perDay);
-    if ((await this.repo.reserveDaily(user.id, "assistant_query", perDay)) === null) throw new AssistantRejected("limit_reached", 429);
+    const id = await this.repo.reserveDaily(user.id, "assistant_query", perDay);
+    if (id === null) throw new AssistantRejected("limit_reached", 429);
+    return id;
   }
 
-  private async withAi<T>(fn: () => Promise<T>) {
+  /** An AI failure is not the user's fault: the reserved quota unit is given back. */
+  private async withAi<T>(fn: () => Promise<T>, reservation: number) {
     try {
       return await fn();
     } catch (err) {
-      if (err instanceof AiLimitExceededError || err instanceof AiOutputError) throw new AssistantRejected("ai_unavailable", 503);
+      if (err instanceof AiLimitExceededError || err instanceof AiOutputError) {
+        await this.repo.refundDaily(reservation);
+        throw new AssistantRejected("ai_unavailable", 503);
+      }
       throw err;
     }
   }
@@ -73,7 +79,7 @@ export class AssistantService {
   async ask(user: User, lang: Lang, messages: AssistantMessage[]): Promise<AssistantResponse> {
     const history = messages.slice(-10);
     if (!history.length || history.at(-1)!.role !== "user") throw new AssistantRejected("bad_request", 400);
-    await this.reserve(user);
+    const reservation = await this.reserve(user);
 
     // Count questions the assistant has already asked (each assistant turn with "?" lines).
     const asked = history
@@ -88,8 +94,7 @@ export class AssistantService {
         vars: { lang_name: LANG_NAME[lang], usd_rate: this.defaults.usdRate, asked: Math.min(asked, MAX_QUESTIONS) },
         content: [{ type: "text", text: history.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n") }],
         schema: AssistantQuerySchema,
-      }),
-    );
+      }), reservation);
     const parsed = q.data;
     const base = { remainingToday: await this.remaining(user) };
 
@@ -149,8 +154,7 @@ export class AssistantService {
         vars: { lang_name: LANG_NAME[lang] },
         content: [{ type: "text", text: JSON.stringify({ buyer_needs: parsed.needs, request: history.at(-1)!.content, candidates: context }) }],
         schema: AssistantRecommendSchema,
-      }),
-    );
+      }), reservation);
 
     // Never show a listing the model made up: keep only ids from the candidate set.
     const byId = new Map(candidates.map((c) => [c.listing.id, c]));
@@ -169,7 +173,7 @@ export class AssistantService {
     if (unique.length < 2 || unique.length > 3) throw new AssistantRejected("bad_request", 400);
     const items = await this.catalog.items(unique, user);
     if (items.length !== unique.length) throw new AssistantRejected("bad_request", 400);
-    await this.reserve(user);
+    const reservation = await this.reserve(user);
 
     // The table is built from data, not by the AI.
     const rows: CompareResponse["rows"] = [
@@ -207,8 +211,7 @@ export class AssistantService {
           },
         ],
         schema: AssistantCompareSchema,
-      }),
-    );
+      }), reservation);
     const bestFor: Record<string, string> = {};
     for (const v of res.data.verdicts) if (unique.includes(v.listing_id)) bestFor[v.listing_id] = v.best_for;
     return { rows, items, summary: res.data.summary, bestFor };

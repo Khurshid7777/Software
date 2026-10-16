@@ -1,5 +1,7 @@
+import { timingSafeEqual } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { validateInitData } from "./auth/telegram.js";
 
 /** Per-route limits per user and minute; everything else gets the global limit. */
 export const ROUTE_LIMITS: Record<string, number> = {
@@ -20,32 +22,39 @@ export const ROUTE_LIMITS: Record<string, number> = {
 };
 export const GLOBAL_LIMIT = 300;
 
+export interface RateKeySecrets {
+  botToken: string;
+  internalToken: string;
+  maxAgeSec: number;
+}
+
 /**
  * The bucket is the Telegram user, not the IP: all bot traffic comes from one container and many users
- * share mobile carrier IPs. The id is read without verification here (auth runs later); a forged id only
- * changes the bucket of a request that will then be rejected as unauthorized.
+ * share mobile carrier IPs. Only a verified identity picks the bucket: the bot's header with the internal
+ * token, or initData with a valid signature. Anything else (a forged id, a random user per request)
+ * falls back to the IP, so a client cannot get a fresh bucket per request.
  */
-export function rateKey(req: FastifyRequest): string {
-  const raw = req.headers["x-telegram-user"];
-  if (typeof raw === "string") {
-    const id = raw.match(/"id"\s*:\s*(\d+)/)?.[1];
-    if (id) return `tg:${id}`;
-  }
-  const auth = req.headers.authorization ?? "";
-  if (auth.startsWith("tma ")) {
-    try {
-      const user = new URLSearchParams(auth.slice(4)).get("user");
-      const id = user ? (JSON.parse(user) as { id?: number }).id : undefined;
-      if (id) return `tg:${id}`;
-    } catch {
-      /* fall through to the IP */
+export function makeRateKey(secrets: RateKeySecrets) {
+  const internal = Buffer.from(`Internal ${secrets.internalToken}`);
+  return (req: FastifyRequest): string => {
+    const auth = req.headers.authorization ?? "";
+    if (auth.startsWith("Internal ")) {
+      const given = Buffer.from(auth);
+      const raw = req.headers["x-telegram-user"];
+      if (given.length === internal.length && timingSafeEqual(given, internal) && typeof raw === "string") {
+        const id = raw.match(/"id"\s*:\s*(\d+)/)?.[1];
+        if (id) return `tg:${id}`;
+      }
+    } else if (auth.startsWith("tma ")) {
+      const res = validateInitData(auth.slice(4), secrets.botToken, secrets.maxAgeSec);
+      if (res.ok) return `tg:${res.user.id}`;
     }
-  }
-  return `ip:${req.ip}`;
+    return `ip:${req.ip}`;
+  };
 }
 
 /** Must be registered before routes: limits are attached in the onRoute hook. In-memory store per instance. */
-export async function registerRateLimits(app: FastifyInstance) {
+export async function registerRateLimits(app: FastifyInstance, secrets: RateKeySecrets) {
   app.addHook("onRoute", (route) => {
     const methods = Array.isArray(route.method) ? route.method : [route.method];
     const max = methods.map((m) => ROUTE_LIMITS[`${m} ${route.url}`]).find((x) => x !== undefined);
@@ -55,7 +64,7 @@ export async function registerRateLimits(app: FastifyInstance) {
     global: true,
     max: GLOBAL_LIMIT,
     timeWindow: "1 minute",
-    keyGenerator: rateKey,
+    keyGenerator: makeRateKey(secrets),
     errorResponseBuilder: (_req, ctx) => ({
       statusCode: 429,
       error: "rate_limited",

@@ -194,6 +194,8 @@ export const listings = pgTable(
     index("listings_status_bumped_idx").on(t.status, t.bumpedAt),
     index("listings_status_expires_idx").on(t.status, t.expiresAt),
     index("listings_imei_idx").on(t.imei).where(sql`${t.imei} is not null`),
+    // Duplicate-description check at publication (`%` prefilter, then similarity()).
+    index("listings_description_trgm_idx").using("gin", sql`(coalesce(nullif(${t.descriptionRu}, ''), ${t.descriptionUz})) gin_trgm_ops`),
   ],
 );
 
@@ -386,6 +388,14 @@ export const orders = pgTable(
     index("orders_listing_status_idx").on(t.listingId, t.status),
     index("orders_status_idx").on(t.status, t.updatedAt),
     index("orders_bundle_idx").on(t.bundleId).where(sql`${t.bundleId} is not null`),
+    // Race-safe invariants the code relies on (unique violation → "already_ordered" / "not_available"):
+    // one open order per buyer and listing, one reservation (confirmed order) per listing.
+    uniqueIndex("orders_one_open_per_buyer_uq")
+      .on(t.listingId, t.buyerUserId)
+      .where(sql`${t.status} in ('new', 'confirmed', 'courier_assigned', 'picked_up')`),
+    uniqueIndex("orders_one_reservation_per_listing_uq")
+      .on(t.listingId)
+      .where(sql`${t.status} in ('confirmed', 'courier_assigned', 'picked_up')`),
   ],
 );
 

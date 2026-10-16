@@ -92,19 +92,28 @@ export function Check({ api, remaining, onDone, onSimilar }: Props) {
       {previews.length > 0 && (
         <div className="thumbs">
           {previews.map((src, i) => (
-            <button key={src} className="thumb" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label="remove">
+            <button key={src} className="thumb" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={t("sell.photo_remove")}>
               <img src={src} alt="" />
+              <span className="thumb-x" aria-hidden>
+                ✕
+              </span>
             </button>
           ))}
         </div>
       )}
 
       {error && <p className="error" role="alert">{error}</p>}
-      <p className="hint">{t("check.remaining", { n: remaining })}</p>
+      <p className="hint">{remaining > 0 ? t("check.remaining", { n: remaining }) : t("check.limit_tomorrow")}</p>
 
       <button className="primary" onClick={submit} disabled={busy || remaining <= 0} data-testid="check-submit">
-        {busy ? t("common.loading") : t("check.submit")}
+        {busy ? t("check.analyzing") : t("check.submit")}
       </button>
+      {busy && (
+        <div className="stack center">
+          <div className="spinner" />
+          <p className="hint">{t("check.analyzing_hint")}</p>
+        </div>
+      )}
       <p className="disclaimer">{t("ai.disclaimer")}</p>
     </div>
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { AiLimitExceededError, AiService, type AiServiceDeps } from "../src/ai/aiService.js";
+import { AiLimitExceededError, AiOutputError, AiService, AiUnavailableError, type AiServiceDeps } from "../src/ai/aiService.js";
 
 /** A fake Anthropic client that returns a fixed parsed output and token usage. */
 function fakeClient(calls: string[]) {
@@ -44,6 +44,20 @@ describe("AI budget", () => {
     await expect(ai.structured(call("assistant_recommend"))).rejects.toBeInstanceOf(AiLimitExceededError);
     await ai.structured(call("check_extract"));
     expect(calls).toEqual(["claude-haiku-5-5"]);
+  });
+
+  it("a provider outage becomes 'AI unavailable' (handled like bad output), not a crash", async () => {
+    const ai = new AiService({
+      client: { messages: { parse: async () => Promise.reject(new Error("529 overloaded")) } } as unknown as AiServiceDeps["client"],
+      models: { fast: "claude-haiku-5-5", strong: "claude-opus-5-5" },
+      recordUsage: async () => undefined,
+      monthlySpend: async () => ({ fast: 0, strong: 0 }),
+      addSpend: async () => undefined,
+      monthlyLimitUsd: async () => 50,
+    });
+    const err = await ai.structured(call("check_extract")).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AiUnavailableError);
+    expect(err).toBeInstanceOf(AiOutputError);
   });
 
   it("the total limit stops everything", async () => {

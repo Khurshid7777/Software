@@ -67,6 +67,19 @@ describe.skipIf(!reachable)("rate limits, chat and order limits, audit, auth har
     expect((await app.inject({ method: "POST", url: "/checks", headers: tma(OTHER), payload: {} })).statusCode).not.toBe(429);
   });
 
+  it("a forged identity never gives a fresh rate-limit bucket (falls back to the IP)", async () => {
+    // Without the internal token, or with a made-up initData, every request lands in the same IP bucket.
+    const codes: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      const forged = { authorization: "Internal wrong-token", "x-telegram-user": JSON.stringify({ id: 1_000_000 + i }) };
+      codes.push((await app.inject({ method: "POST", url: "/orders", headers: forged, payload: {} })).statusCode);
+    }
+    expect(codes.slice(0, 6).every((c) => c !== 429)).toBe(true);
+    expect(codes[6]).toBe(429);
+    const badSig = { authorization: `tma ${buildInitData({ id: 2_000_001 }, "999:OTHER-BOT")}` };
+    expect((await app.inject({ method: "POST", url: "/orders", headers: badSig, payload: {} })).statusCode).toBe(429);
+  });
+
   it("the bot may only assert a numeric Telegram id and a language", async () => {
     for (const bad of [{ id: "5" }, { id: -1 }, { id: 1.5 }, { name: "x" }]) {
       expect((await app.inject({ url: "/me", headers: internal(bad) })).statusCode).toBe(401);

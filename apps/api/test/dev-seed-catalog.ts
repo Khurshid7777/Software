@@ -55,5 +55,96 @@ for (const [i, f] of catalog.entries()) {
   await storage.put(key, img.full, "image/jpeg");
   await db.insert(listingPhotos).values({ listingId: row!.id, storageKey: key, phash: img.phash, width: img.width, height: img.height });
 }
-console.log(`seeded ${catalog.length} demo listings`);
+// The newer categories (not in the assistant fixture, whose cases count its items): a shop's stock, older than
+// the fixture items so the storefront order stays the same.
+const extra = [
+  {
+    category: "pc_parts",
+    titleRu: "Видеокарта RTX 3060 12 ГБ, без майнинга",
+    titleUz: "RTX 3060 12 GB videokarta, mayningsiz",
+    descriptionRu: "MSI Ventus 2X, куплена в 2023 для игр. Не майнила, BIOS родной, температуры под нагрузкой до 70°. Коробка и чек есть.",
+    descriptionUz: "MSI Ventus 2X, 2023-yilda o'yinlar uchun olingan. Mayningda ishlamagan, BIOS asl, yuklamada 70° gacha. Qutisi va cheki bor.",
+    modelKey: "nvidia geforce rtx 3060 12gb",
+    price: 2_900_000,
+    condition: "good",
+    district: "yunusobod",
+    checklist: { mining: "never", ageYears: 2, repairs: ["none"], kit: ["box", "receipt"] },
+  },
+  {
+    category: "pc_parts",
+    titleRu: "Процессор Ryzen 5 5600, BOX",
+    titleUz: "Ryzen 5 5600 protsessor, BOX",
+    descriptionRu: "Ryzen 5 5600 с боксовым кулером, работал в офисном ПК. Разгон не делал, термопасту менял раз в год.",
+    descriptionUz: "Ryzen 5 5600, box kuleri bilan, ofis kompyuterida ishlagan. Razgon qilinmagan, termopasta yilda bir marta almashtirilgan.",
+    modelKey: "amd ryzen 5 5600",
+    price: 1_150_000,
+    condition: "good",
+    district: "chilonzor",
+    checklist: { ageYears: 2, repairs: ["none"], kit: ["box"] },
+  },
+  {
+    category: "monitor",
+    titleRu: "Монитор Samsung Odyssey G5 27\" 144 Гц",
+    titleUz: "Samsung Odyssey G5 27\" 144 Hz monitor",
+    descriptionRu: "Изогнутый 27\", 2K, 144 Гц. Битых пикселей нет, засветов почти нет. Подставка, кабель DP и блок питания в комплекте.",
+    descriptionUz: "Egilgan 27\", 2K, 144 Hz. Singan piksellar yo'q, yorug'lik oqishi deyarli yo'q. Tagligi, DP kabeli va quvvat bloki bilan.",
+    modelKey: "samsung odyssey g5 27",
+    price: 2_750_000,
+    condition: "like_new",
+    district: "mirzo_ulugbek",
+    checklist: { deadPixels: "none", ageYears: 1, repairs: ["none"], kit: ["box"] },
+  },
+  {
+    category: "home_appliance",
+    titleRu: "Робот-пылесос Xiaomi S10",
+    titleUz: "Xiaomi S10 robot-changyutgich",
+    descriptionRu: "Сухая и влажная уборка, лидар, работает с приложением Mi Home. Щётки и фильтр новые, аккумулятор держит около 2 часов.",
+    descriptionUz: "Quruq va ho'l tozalash, lidar, Mi Home ilovasi bilan ishlaydi. Cho'tka va filtr yangi, batareya taxminan 2 soat ishlaydi.",
+    modelKey: "xiaomi robot vacuum s10",
+    price: 1_850_000,
+    condition: "good",
+    district: "yakkasaroy",
+    checklist: { ageYears: 1, repairs: ["none"], kit: ["box", "warranty"] },
+  },
+  {
+    category: "home_appliance",
+    titleRu: "Кофемашина DeLonghi Magnifica S",
+    titleUz: "DeLonghi Magnifica S kofemashina",
+    descriptionRu: "Автоматическая, встроенная кофемолка и капучинатор. Регулярно делали декальцинацию, протечек нет.",
+    descriptionUz: "Avtomatik, ichki kofe tegirmoni va kapuchinator bilan. Muntazam dekalsinatsiya qilingan, oqish yo'q.",
+    modelKey: "delonghi magnifica s",
+    price: 3_100_000,
+    condition: "good",
+    district: "mirobod",
+    checklist: { ageYears: 3, repairs: ["none"], kit: ["receipt"] },
+  },
+];
+for (const [i, f] of extra.entries()) {
+  const [row] = await db
+    .insert(listings)
+    .values({
+      sellerUserId: shopOwner.id,
+      shopId: shop!.id,
+      category: f.category,
+      titleRu: f.titleRu,
+      titleUz: f.titleUz,
+      descriptionRu: f.descriptionRu,
+      descriptionUz: f.descriptionUz,
+      attributes: { brand: null, model: null, modelKey: f.modelKey, specs: [] },
+      condition: f.condition,
+      price: f.price,
+      district: f.district,
+      checklist: f.checklist,
+      status: "active",
+      publishedAt: new Date(),
+      bumpedAt: new Date(Date.now() - (catalog.length + i) * 60_000),
+      expiresAt: new Date(Date.now() + 30 * 864e5),
+    })
+    .returning();
+  const img = await processImage(await testPhoto(catalog.length + i + 2));
+  const key = `listings/${row!.id}/demo.jpg`;
+  await storage.put(key, img.full, "image/jpeg");
+  await db.insert(listingPhotos).values({ listingId: row!.id, storageKey: key, phash: img.phash, width: img.width, height: img.height });
+}
+console.log(`seeded ${catalog.length + extra.length} demo listings`);
 await sql.end();

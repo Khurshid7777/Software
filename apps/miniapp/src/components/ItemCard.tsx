@@ -1,5 +1,5 @@
 import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared/client";
-import { apiUrl } from "../api";
+import { photoUrl } from "../api";
 import { useLang, useT } from "../i18n";
 
 export function MarketBadge({ item }: { item: CatalogItem }) {
@@ -39,7 +39,7 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props
   return (
     <article className="card item-card" data-testid="item-card">
       <button className="item-main" onClick={onOpen}>
-        {l.photos[0] ? <img src={apiUrl(l.photos[0].url)} alt="" loading="lazy" /> : <div className="no-photo">📦</div>}
+        {l.photos[0] ? <img src={photoUrl(l.photos[0].url, 240)} alt="" loading="lazy" width={96} height={96} /> : <div className="no-photo">📦</div>}
         <span className="item-body">
           <strong>{listingTitle(l, lang)}</strong>
           {l.price && (

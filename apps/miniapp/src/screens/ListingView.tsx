@@ -10,20 +10,34 @@ import {
   type ComplaintReason,
   type ListingDto,
   type OfferDto,
+  type ReviewDto,
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
+import { Gallery } from "../components/Gallery";
+import { MiniCard } from "../components/MiniCard";
+import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
+import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
-import { canShareStory, ensureWriteAccess, shareLink, shareToStory } from "../telegram";
+import { canShareStory, ensureWriteAccess, haptic, shareLink, shareToStory } from "../telegram";
 
 /** Public listing card (catalog, assistant, and the "Buy with delivery" button in seller channels). */
-export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; meId: string; onBuy: (l: ListingDto) => void }) {
+interface Props {
+  api: Api;
+  id: string;
+  meId: string;
+  onBuy: (l: ListingDto) => void;
+  onEdit?: (l: ListingDto) => void;
+  onOpen?: (id: string) => void;
+  onSeller?: (sellerId: string) => void;
+}
+
+export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: Props) {
   const t = useT();
   const lang = useLang();
   const [item, setItem] = useState<CatalogItem | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [photo, setPhoto] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [message, setMessage] = useState("");
@@ -31,6 +45,8 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
   const [complaint, setComplaint] = useState<{ reason: ComplaintReason | null; text: string } | null>(null);
   const [offer, setOffer] = useState<OfferDto | null>(null);
   const [offering, setOffering] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<ReviewDto[] | null>(null);
+  const [similar, setSimilar] = useState<CatalogItem[]>([]);
 
   useEffect(() => {
     api
@@ -41,7 +57,15 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
       .myOffer(id)
       .then((r) => setOffer(r.offer))
       .catch(() => undefined);
+    api
+      .similar(id)
+      .then(setSimilar)
+      .catch(() => undefined);
   }, [api, id]);
+  // "Recently viewed" on the storefront (own listings are not worth remembering).
+  useEffect(() => {
+    if (item && item.listing.seller?.id !== meId && item.listing.status === "active") rememberViewed(item.listing.id);
+  }, [item, meId]);
 
   if (error) return <p className="center hint">{error}</p>;
   if (!item) return <p className="center hint">{t("common.loading")}</p>;
@@ -60,6 +84,16 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
       setToast(e instanceof ApiError ? e.message : t("common.error"));
     } finally {
       setSending(false);
+    }
+  }
+
+  async function toggleReviews() {
+    if (reviews) return setReviews(null);
+    if (!l.seller) return;
+    try {
+      setReviews((await api.sellerReviews(l.seller.id)).reviews);
+    } catch (e) {
+      setToast(e instanceof ApiError ? e.message : t("common.error"));
     }
   }
 
@@ -109,19 +143,8 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
   }
 
   return (
-    <div className="stack" data-testid="listing-view">
-      {l.photos.length > 0 && (
-        <div className="gallery">
-          <img src={apiUrl(l.photos[photo]!.url)} alt="" />
-          {l.photos.length > 1 && (
-            <div className="dots">
-              {l.photos.map((p, i) => (
-                <button key={p.id} className={i === photo ? "active" : ""} onClick={() => setPhoto(i)} aria-label={`photo ${i + 1}`} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+    <div className={!own && l.status === "active" && l.allowedDeliveryModes.length > 0 ? "stack with-action-bar" : "stack"} data-testid="listing-view">
+      <Gallery photos={l.photos} />
       <div className="row between">
         <h1>{listingTitle(l, lang)}</h1>
         {!own && (
@@ -129,8 +152,16 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
             className="icon-btn"
             aria-label={item.favorite ? t("listing.favorite_remove") : t("listing.favorite_add")}
             onClick={async () => {
-              await api.setFavorite(l.id, !item.favorite).catch(() => undefined);
-              setItem({ ...item, favorite: !item.favorite });
+              const on = !item.favorite;
+              setItem({ ...item, favorite: on });
+              haptic("light");
+              try {
+                await api.setFavorite(l.id, on);
+                if (on) setToast(t("listing.favorite_added"));
+              } catch (e) {
+                setItem({ ...item, favorite: !on });
+                setToast(e instanceof ApiError ? e.message : t("common.error"));
+              }
             }}
           >
             {item.favorite ? "❤️" : "🤍"}
@@ -159,7 +190,7 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
         </p>
       )}
-      <ChecklistView value={l.checklist} />
+      <ChecklistView category={l.category} value={l.checklist} />
       {l.imeiTail && <p className="hint-card" data-testid="imei-hint">🔐 {t("listing.imei", { tail: l.imeiTail })}</p>}
       <p className="description">{listingDescription(l, lang)}</p>
       {["active", "reserved"].includes(l.status) && (
@@ -179,11 +210,26 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
         <section className="card stack">
           <h3>{t("listing.seller")}</h3>
           <TrustBadge item={item} />
-          <p className="hint" data-testid="seller-rating">
-            {l.seller.rating.count > 0
-              ? t("listing.rating", { avg: l.seller.rating.avg ?? "—", n: l.seller.rating.count })
-              : t("listing.no_reviews")}
-          </p>
+          {l.seller.rating.count > 0 ? (
+            <button className="link" onClick={toggleReviews} data-testid="seller-rating">
+              {t("listing.rating", { avg: l.seller.rating.avg ?? "—", n: l.seller.rating.count })} ·{" "}
+              {reviews ? t("listing.reviews_hide") : t("listing.reviews_show")}
+            </button>
+          ) : (
+            <p className="hint" data-testid="seller-rating">
+              {t("listing.no_reviews")}
+            </p>
+          )}
+          {reviews && (
+            <div className="reviews" data-testid="seller-reviews">
+              {reviews.map((r) => (
+                <div key={r.id} className="review">
+                  <span>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</span> <span className="hint">{date(r.createdAt)}</span>
+                  {r.text && <p>{r.text}</p>}
+                </div>
+              ))}
+            </div>
+          )}
           {l.seller.shop && (
             <p>
               🏪 {l.seller.shop.name} {l.seller.shop.verified && <span className="badge">{t("shop.verified")}</span>}
@@ -192,6 +238,11 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
           )}
           <p className="hint">{t("listing.seller_since", { date: date(l.seller.registeredAt) })}</p>
           <p className="hint">{t("listing.sales", { n: l.seller.platformSales })}</p>
+          {onSeller && !own && (
+            <button className="link" onClick={() => onSeller(l.seller!.id)} data-testid="open-seller">
+              {t("listing.seller_all")} →
+            </button>
+          )}
           {l.seller.inspections.passed > 0 && (
             <p className="hint">✅ {t("verified.seller", { n: l.seller.inspections.passed })}</p>
           )}
@@ -216,16 +267,19 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
         <p className="hint">{t(`fee_payer.${l.feePayer}`)}</p>
       </section>
 
-      {toast && (
-        <p className="toast" onClick={() => setToast(null)}>
-          {toast}
-        </p>
-      )}
+      {toast && <Toast text={toast} onClose={() => setToast(null)} />}
 
       {l.status === "reserved" && <p className="hint-card center">{t("listing.reserved")}</p>}
 
       {own ? (
-        <p className="hint center">{t("listing.own")}</p>
+        <>
+          <p className="hint center">{t("listing.own")}</p>
+          {onEdit && ["active", "pending", "rejected", "draft"].includes(l.status) && (
+            <button className="secondary" onClick={() => onEdit(l)} data-testid="edit-own">
+              ✏️ {t("listing.edit_own")}
+            </button>
+          )}
+        </>
       ) : (
         l.status === "active" && (
           <>
@@ -249,9 +303,15 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
               </button>
             )}
             {l.allowedDeliveryModes.length > 0 && (
-              <button className="primary" onClick={() => onBuy(l)} data-testid="buy-delivery">
-                {t("listing.buy_delivery")}
-              </button>
+              // Always at hand: the main action does not scroll away with the description.
+              <div className="action-bar">
+                <div className="action-bar-inner">
+                  {l.price && <span className="price-small">{formatUzs(l.price)}</span>}
+                  <button className="primary" onClick={() => onBuy(l)} data-testid="buy-delivery">
+                    {t("listing.buy_delivery")}
+                  </button>
+                </div>
+              </div>
             )}
             {offer && (
               <p className={offer.status === "accepted" ? "hint-card center" : "hint center"} data-testid="offer-status">
@@ -271,8 +331,8 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
                   <input
                     inputMode="numeric"
                     placeholder={t("offer.amount_placeholder")}
-                    value={offering}
-                    onChange={(e) => setOffering(e.target.value.replace(/\D/g, ""))}
+                    value={groupDigits(offering)}
+                    onChange={(e) => setOffering(digitsOnly(e.target.value))}
                     data-testid="offer-amount"
                   />
                   <p className="hint">{t("offer.hint", { min: formatUzs(minOffer(l.price)), hours: OFFER_PENDING_HOURS })}</p>
@@ -283,6 +343,17 @@ export function ListingView({ api, id, meId, onBuy }: { api: Api; id: string; me
               ))}
           </>
         )
+      )}
+
+      {similar.length > 0 && onOpen && (
+        <section className="stack-tight" data-testid="similar">
+          <h2>{t("listing.similar")}</h2>
+          <div className="mini-grid">
+            {similar.map((i) => (
+              <MiniCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} />
+            ))}
+          </div>
+        </section>
       )}
 
       {!own && ["active", "reserved"].includes(l.status) && (
