@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { TASHKENT_DISTRICTS, formatUzs, type AdminSettings, type CourierTariff, type District } from "@ishonch/shared/client";
+import { TASHKENT_DISTRICTS, formatUzs, type AdminSettings, type CourierTariff, type District, type Vehicle } from "@ishonch/shared/client";
 import { ApiError, type AdminUser, type Api, type PriceRow } from "../../api";
 import { confirmDialog } from "../../dialogs";
 import { districtName } from "./labels";
@@ -142,11 +142,18 @@ export function References({ api }: { api: Api }) {
 
       <section className="card stack">
         <h3>Тарифы доставки</h3>
-        <p className="hint">Выбирается самая точная строка: пара районов → «куда» → «откуда» → по умолчанию (оба поля «любой»).</p>
+        <p className="hint">
+          Выбирается самая точная строка: пара районов → «куда» → «откуда» → по умолчанию (оба поля «любой»). Крупная техника
+          считается только по строкам «🚚 Грузовое такси», остальные товары — по строкам «Курьер».
+        </p>
         {tariffs.map((t, i) => (
           <div key={i} className="stack tariff-row">
             <div className="row">
               <input value={t.name} onChange={(e) => setT(i, { name: e.target.value })} placeholder="Название" />
+              <select value={t.vehicle} onChange={(e) => setT(i, { vehicle: e.target.value as Vehicle })} data-testid="tariff-vehicle">
+                <option value="courier">Курьер</option>
+                <option value="cargo">🚚 Грузовое такси</option>
+              </select>
               <label className="check-row">
                 <input type="checkbox" checked={t.active} onChange={(e) => setT(i, { active: e.target.checked })} />
                 вкл
@@ -165,6 +172,12 @@ export function References({ api }: { api: Api }) {
                 % за наличные
                 <input type="number" step="0.5" value={t.codFeePct} onChange={(e) => setT(i, { codFeePct: Number(e.target.value) })} />
               </label>
+              {t.vehicle === "cargo" && (
+                <label className="field">
+                  Подъём без лифта, сум/этаж
+                  <input type="number" value={t.liftPerFloor} onChange={(e) => setT(i, { liftPerFloor: Number(e.target.value) })} />
+                </label>
+              )}
               <button className="link danger" onClick={() => setTariffs(tariffs.filter((_, j) => j !== i))} aria-label="Удалить">
                 ✕
               </button>
@@ -173,7 +186,7 @@ export function References({ api }: { api: Api }) {
         ))}
         <button
           className="link"
-          onClick={() => setTariffs([...tariffs, { name: "Новый", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, active: true }])}
+          onClick={() => setTariffs([...tariffs, { name: "Новый", vehicle: "courier", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, liftPerFloor: 0, active: true }])}
         >
           + строка
         </button>

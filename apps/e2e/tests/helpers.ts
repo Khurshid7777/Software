@@ -45,7 +45,10 @@ export async function asBot<T = unknown>(method: string, path: string, user: num
 
 /** Fresh demo catalog + users who accepted the terms and shared a phone. */
 export async function resetDemo() {
-  execSync("pnpm --filter @ishonch/api dev:seed-catalog", { stdio: "ignore", cwd: new URL("../../..", import.meta.url).pathname });
+  const root = new URL("../../..", import.meta.url).pathname;
+  // Reference data first (idempotent): integration tests on a shared local database replace the tariff table.
+  execSync("pnpm --filter @ishonch/api db:seed", { stdio: "ignore", cwd: root });
+  execSync("pnpm --filter @ishonch/api dev:seed-catalog", { stdio: "ignore", cwd: root });
   for (const u of [BUYER, PRIVATE_SELLER, SHOP_OWNER, OPERATOR]) {
     await asBot("POST", "/me/accept-terms", u, {});
     await asBot("POST", "/internal/phone", u, { phone: `+99890${String(u).slice(-7)}` }).catch(() => undefined);

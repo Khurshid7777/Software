@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CHECK_CATEGORIES, CURRENCIES } from "./types.js";
 import { CONDITIONS, DELIVERY_MODES, TASHKENT_DISTRICTS } from "./listing.js";
-import { COMPLAINT_REASONS, MODERATION_REASONS } from "./delivery.js";
+import { COMPLAINT_REASONS, MAX_FLOOR, MODERATION_REASONS } from "./delivery.js";
 import { BIOMETRICS_STATES, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, MINING_STATES, PIXEL_STATES, REPAIR_KINDS } from "./market.js";
 
 /**
@@ -168,6 +168,9 @@ export const CreateOrderSchema = z.object({
   comment: z.string().trim().max(300).optional(),
   /** More items of the same seller in this delivery (one delivery fee). */
   extraListingIds: z.array(z.string().uuid()).max(MAX_BUNDLE_EXTRA).optional(),
+  /** Cargo delivery: where the movers carry the item (ignored for a courier). */
+  floor: z.number().int().min(1).max(MAX_FLOOR).optional(),
+  elevator: z.boolean().optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;

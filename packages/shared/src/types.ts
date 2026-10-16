@@ -17,6 +17,7 @@ export const CHECK_CATEGORIES = [
   "pc_parts",
   "monitor",
   "home_appliance",
+  "large_appliance",
   "other_electronics",
   "other",
 ] as const;

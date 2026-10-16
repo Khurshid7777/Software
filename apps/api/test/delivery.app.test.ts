@@ -10,7 +10,7 @@ import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { complaints, listings, users } from "../src/db/schema.js";
+import { complaints, listings, orders, users } from "../src/db/schema.js";
 import type { CourierProvider, ShipmentRequest } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPost, ChannelPublisher, Notifier, NotifyButton } from "../src/telegram/publisher.js";
@@ -148,9 +148,10 @@ describe.skipIf(!reachable)("delivery, moderation, complaints, expiry, bans (int
     // Isolate from live listings left by other test files or dev seeds: duplicate-photo checks see every live listing.
     await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved')`);
     await app.services.orders.replaceTariffs([
-      { name: "default", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, active: true },
-      { name: "sergeli", fromDistrict: null, toDistrict: "sergeli", price: 40_000, codFeePct: 1, active: true },
-      { name: "chilonzor inside", fromDistrict: "chilonzor", toDistrict: "chilonzor", price: 20_000, codFeePct: 1, active: true },
+      { name: "default", vehicle: "courier", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, liftPerFloor: 0, active: true },
+      { name: "sergeli", vehicle: "courier", fromDistrict: null, toDistrict: "sergeli", price: 40_000, codFeePct: 1, liftPerFloor: 0, active: true },
+      { name: "chilonzor inside", vehicle: "courier", fromDistrict: "chilonzor", toDistrict: "chilonzor", price: 20_000, codFeePct: 1, liftPerFloor: 0, active: true },
+      { name: "cargo", vehicle: "cargo", fromDistrict: null, toDistrict: null, price: 150_000, codFeePct: 1, liftPerFloor: 15_000, active: true },
     ]);
   });
 
@@ -191,6 +192,40 @@ describe.skipIf(!reachable)("delivery, moderation, complaints, expiry, bans (int
 
     const off = await app.inject({ url: `/orders/quote?listingId=${l.id}&district=yunusobod&mode=cod_platform`, headers: tma(BUYER) });
     expect(off.statusCode).toBe(400);
+  });
+
+  it("large appliances: cargo tariff, movers' lift fee, the whole bundle rides the cargo taxi", async () => {
+    const fridge = await liveListing(SELLER, { category: "large_appliance", titleRu: "Холодильник Samsung RB37", price: 5_000_000, feePayer: "buyer" });
+    const kettle = await liveListing(SELLER, { category: "home_appliance", titleRu: "Чайник", price: 200_000, feePayer: "buyer" });
+    const quote = async (id: string, extra = "") =>
+      (await app.inject({ url: `/orders/quote?listingId=${id}&district=chilonzor&mode=cod_seller${extra}`, headers: tma(BUYER) })).json() as DeliveryQuote & {
+        bundle: { items: Array<{ quote: DeliveryQuote }> } | null;
+      };
+
+    // The courier's local chilonzor tariff does not apply: a fridge goes by the cargo default.
+    const ground = await quote(fridge.id);
+    expect(ground).toMatchObject({ vehicle: "cargo", deliveryFee: 150_000, liftFee: 0, codFee: 50_000 });
+    const fifth = await quote(fridge.id, "&floor=5&elevator=0");
+    expect(fifth).toMatchObject({ liftFee: 60_000, buyerFee: 260_000, lift: { floor: 5, elevator: false } });
+    expect((await quote(fridge.id, "&floor=5&elevator=1")).liftFee).toBe(0);
+    expect((await app.inject({ url: `/orders/quote?listingId=${fridge.id}&district=chilonzor&mode=cod_seller&floor=99`, headers: tma(BUYER) })).statusCode).toBe(400);
+
+    // An ordinary item stays with the courier, but riding along with the fridge it goes by cargo (fees once).
+    expect((await quote(kettle.id, "&floor=5&elevator=0")).vehicle).toBe("courier");
+    const bundle = await quote(kettle.id, `&extra=${fridge.id}&floor=5&elevator=0`);
+    expect(bundle).toMatchObject({ vehicle: "cargo", deliveryFee: 150_000, liftFee: 60_000 });
+    expect(bundle.bundle!.items[0]!.quote).toMatchObject({ deliveryFee: 0, liftFee: 0 });
+
+    // The order keeps the floor; the seller and the operators are told it is a cargo trip.
+    const res = await order(BUYER, { listingId: fridge.id, mode: "cod_seller", district: "chilonzor", address: "Bunyodkor 12, kv 40", floor: 7, elevator: false });
+    expect(res.statusCode).toBe(200);
+    const dto = res.json() as OrderDto;
+    expect(dto.quote).toMatchObject({ vehicle: "cargo", liftFee: 90_000, lift: { floor: 7, elevator: false } });
+    expect(dmsTo(SELLER).at(-1)!.text).toContain("грузовое такси");
+    const [row] = await db.select().from(orders).where(eq(orders.id, dto.id));
+    const card = await app.services.orders.operatorCard(row!);
+    expect(card.text).toContain("ГРУЗОВОЕ ТАКСИ");
+    expect(card.text).toContain("7 этаж, без лифта");
   });
 
   it("full flow: request → seller confirms (listing reserved, rival request closed) → operator → delivered → review", async () => {
@@ -523,9 +558,12 @@ describe.skipIf(!reachable)("delivery, moderation, complaints, expiry, bans (int
 
   it("tariffs are admin-only", async () => {
     expect((await app.inject({ url: "/admin/tariffs", headers: tma(BUYER) })).statusCode).toBe(403);
-    expect((await app.inject({ url: "/admin/tariffs", headers: tma(ADMIN) })).json()).toHaveLength(3);
+    const list = (await app.inject({ url: "/admin/tariffs", headers: tma(ADMIN) })).json() as Array<{ vehicle: string }>;
+    expect(list.map((t) => t.vehicle)).toEqual(["courier", "courier", "courier", "cargo"]);
     const bad = await app.inject({ method: "PUT", url: "/admin/tariffs", headers: tma(ADMIN), payload: [{ name: "x", price: -1 }] });
     expect(bad.statusCode).toBe(400);
+    const truck = { name: "x", vehicle: "truck", fromDistrict: null, toDistrict: null, price: 1, codFeePct: 0 };
+    expect((await app.inject({ method: "PUT", url: "/admin/tariffs", headers: tma(ADMIN), payload: [truck] })).statusCode).toBe(400);
     expect((await app.inject({ url: "/operator/orders", headers: tma(OPERATOR) })).statusCode).toBe(200);
   });
 });

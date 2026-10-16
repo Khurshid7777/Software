@@ -21,6 +21,7 @@ const CATEGORY_SEED = [
   { slug: "monitor", nameRu: "Мониторы", nameUz: "Monitorlar", parent: "electronics" },
   { slug: "home", nameRu: "Для дома", nameUz: "Uy uchun", parent: null },
   { slug: "home_appliance", nameRu: "Техника для дома", nameUz: "Uy texnikasi", parent: "home" },
+  { slug: "large_appliance", nameRu: "Крупная техника", nameUz: "Yirik texnika", parent: "home" },
 ] as const;
 
 // Indicative used-market prices in Tashkent, UZS. Starting point only — the admin maintains them.
@@ -63,6 +64,15 @@ const PRICE_SEED: Array<[string, string, number, number, number]> = [
   ["home_appliance", "delonghi magnifica s", 2.5 * M, 3.0 * M, 3.6 * M],
   ["home_appliance", "philips airfryer xl hd9270", 0.9 * M, 1.1 * M, 1.3 * M],
   ["home_appliance", "samsung ms23k3513", 0.6 * M, 0.75 * M, 0.9 * M],
+  ["large_appliance", "samsung ww60j4210 6kg", 2.0 * M, 2.5 * M, 3.0 * M],
+  ["large_appliance", "lg f2j3hs0w 7kg", 2.3 * M, 2.8 * M, 3.3 * M],
+  ["large_appliance", "artel tg60", 1.4 * M, 1.8 * M, 2.2 * M],
+  ["large_appliance", "samsung rb37", 4.5 * M, 5.3 * M, 6.2 * M],
+  ["large_appliance", "lg ga-b459", 4.0 * M, 4.8 * M, 5.6 * M],
+  ["large_appliance", "artel hd 455", 2.2 * M, 2.7 * M, 3.2 * M],
+  ["large_appliance", "midea msag 12000 btu", 2.4 * M, 2.9 * M, 3.4 * M],
+  ["large_appliance", "artel shahrisabz 12000 btu", 2.0 * M, 2.5 * M, 3.0 * M],
+  ["large_appliance", "bosch sms25", 3.0 * M, 3.6 * M, 4.3 * M],
 ];
 
 const catIds = new Map<string, number>();
@@ -97,13 +107,25 @@ for (const [cat, modelKey, min, med, max] of PRICE_SEED.filter(([cat]) => !seede
 }
 
 // Starting courier prices in Tashkent (UZS). The most specific row wins; the admin edits them via /admin/tariffs.
-const [{ tariffs }] = (await db.execute(dsql`select count(*)::int as tariffs from courier_tariffs`)) as unknown as [{ tariffs: number }];
-if (tariffs === 0) {
+// Each vehicle is seeded only while it has no rows, so a database from before cargo delivery gets cargo rows too.
+const vehicles = new Set(
+  ((await db.execute(dsql`select distinct vehicle from courier_tariffs`)) as unknown as Array<{ vehicle: string }>).map((r) => r.vehicle),
+);
+if (!vehicles.has("courier")) {
   await db.insert(courierTariffs).values([
     { name: "Ташкент (по умолчанию)", price: 30_000, codFeePct: 1 },
     { name: "Окраины: Бектемир", toDistrict: "bektemir", price: 40_000, codFeePct: 1 },
     { name: "Окраины: Сергели", toDistrict: "sergeli", price: 40_000, codFeePct: 1 },
     { name: "Окраины: Янгихаёт", toDistrict: "yangihayot", price: 40_000, codFeePct: 1 },
+  ]);
+}
+if (!vehicles.has("cargo")) {
+  // Cargo taxi (Labo / Damas) with two movers; carrying up the stairs is paid per floor above the first.
+  await db.insert(courierTariffs).values([
+    { name: "Грузовое такси (по умолчанию)", vehicle: "cargo", price: 150_000, codFeePct: 1, liftPerFloor: 15_000 },
+    { name: "Грузовое такси: Бектемир", vehicle: "cargo", toDistrict: "bektemir", price: 200_000, codFeePct: 1, liftPerFloor: 15_000 },
+    { name: "Грузовое такси: Сергели", vehicle: "cargo", toDistrict: "sergeli", price: 200_000, codFeePct: 1, liftPerFloor: 15_000 },
+    { name: "Грузовое такси: Янгихаёт", vehicle: "cargo", toDistrict: "yangihayot", price: 200_000, codFeePct: 1, liftPerFloor: 15_000 },
   ]);
 }
 

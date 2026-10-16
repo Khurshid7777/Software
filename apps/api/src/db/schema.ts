@@ -338,10 +338,14 @@ export const offers = pgTable(
 export const courierTariffs = pgTable("courier_tariffs", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  /** courier | cargo (big appliances: cargo taxi with movers). */
+  vehicle: text("vehicle").notNull().default("courier"),
   fromDistrict: text("from_district"),
   toDistrict: text("to_district"),
   price: bigint("price", { mode: "number" }).notNull(),
   codFeePct: numeric("cod_fee_pct", { precision: 5, scale: 2, mode: "number" }).notNull().default(0),
+  /** Cargo: movers' fee per floor above the first when there is no lift. */
+  liftPerFloor: bigint("lift_per_floor", { mode: "number" }).notNull().default(0),
   active: boolean("active").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

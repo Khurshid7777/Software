@@ -19,6 +19,7 @@ export const CATEGORY_ICONS: Record<string, string> = {
   pc_parts: "🧩",
   monitor: "🖥️",
   home_appliance: "🏠",
+  large_appliance: "🧊",
 };
 const CATEGORIES = CHECK_CATEGORIES.filter((c) => c in CATEGORY_ICONS);
 

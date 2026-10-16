@@ -101,7 +101,7 @@ describe.skipIf(!reachable)("offers, price drops, IMEI, reply time (integration)
     close = () => created.sql.end();
     app = await buildApp({ config, db, ai, storage: new FsStorage(storageDir), publisher: gateway, courier });
     await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved')`);
-    await app.services.orders.replaceTariffs([{ name: "default", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, active: true }]);
+    await app.services.orders.replaceTariffs([{ name: "default", vehicle: "courier", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, liftPerFloor: 0, active: true }]);
   });
 
   beforeEach(async () => {

@@ -15,6 +15,8 @@ import {
   listingTitle,
   minOffer,
   operatorNextStatuses,
+  isCargo,
+  normalizeQuote,
   pickTariff,
   quoteDelivery,
   scrubPii,
@@ -27,6 +29,8 @@ import {
   type District,
   inspectionChecks,
   type Inspection,
+  type LiftInfo,
+  type Vehicle,
   type InspectionCheck,
   type FeePayer,
   type Lang,
@@ -105,10 +109,12 @@ export class OrderService {
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
+      vehicle: r.vehicle as Vehicle,
       fromDistrict: (r.fromDistrict as District | null) ?? null,
       toDistrict: (r.toDistrict as District | null) ?? null,
       price: r.price,
       codFeePct: r.codFeePct,
+      liftPerFloor: r.liftPerFloor,
       active: r.active,
     }));
   }
@@ -136,6 +142,7 @@ export class OrderService {
   /**
    * `buyerId`: a price the seller accepted for this buyer replaces the asking price (never above it).
    * `extraIds`: more items of the same seller in this delivery — no second delivery fee, only the COD fee.
+   * A big appliance anywhere in the delivery makes it a cargo trip (cargo tariff, movers' lift fee by `lift`).
    */
   async quote(
     listingId: string,
@@ -143,30 +150,36 @@ export class OrderService {
     mode: DeliveryMode,
     buyerId?: string,
     extraIds: string[] = [],
+    lift: LiftInfo | null = null,
   ): Promise<DeliveryQuote & { modes: DeliveryMode[]; offerId: string | null; bundle: BundleQuote | null }> {
     const l = await this.availableListing(listingId);
     const modes = this.allowedModes(l);
     if (!modes.includes(mode)) throw new OrderRejected("mode_not_allowed", 400);
-    const tariff = pickTariff(await this.tariffs(), (l.district as District | null) ?? null, district);
+    const extras = [];
+    for (const id of [...new Set(extraIds)].filter((id) => id !== l.id)) {
+      const x = await this.availableListing(id).catch(() => {
+        throw new OrderRejected("bundle_invalid", 409);
+      });
+      if (x.sellerUserId !== l.sellerUserId || !this.allowedModes(x).includes(mode)) throw new OrderRejected("bundle_invalid", 409);
+      extras.push(x);
+    }
+    const vehicle: Vehicle = [l, ...extras].some((x) => isCargo(x.category)) ? "cargo" : "courier";
+    const tariff = pickTariff(await this.tariffs(), (l.district as District | null) ?? null, district, vehicle);
     // No tariff for the route would mean a free courier trip: refuse (operators fix the tariff table).
     if (!tariff) throw new OrderRejected("no_tariff", 409);
     const offer = buyerId ? await this.acceptedOffer(l.id, buyerId) : null;
     const itemPrice = offer ? Math.min(offer.amount, l.price!) : l.price!;
-    const main = quoteDelivery({ tariff, itemPrice, mode, feePayer: l.feePayer as FeePayer });
+    const main = quoteDelivery({ tariff, itemPrice, mode, feePayer: l.feePayer as FeePayer, lift });
 
     let bundle: BundleQuote | null = null;
-    const extras = [...new Set(extraIds)].filter((id) => id !== l.id);
     if (extras.length) {
       const items: BundleQuote["items"] = [];
-      for (const id of extras) {
-        const x = await this.availableListing(id).catch(() => {
-          throw new OrderRejected("bundle_invalid", 409);
-        });
-        if (x.sellerUserId !== l.sellerUserId || !this.allowedModes(x).includes(mode)) throw new OrderRejected("bundle_invalid", 409);
+      // One trip: the delivery and lift fees are in the main item, the extras pay only their COD fee.
+      const xTariff = { ...tariff, price: 0, liftPerFloor: 0 };
+      for (const x of extras) {
         const xOffer = buyerId ? await this.acceptedOffer(x.id, buyerId) : null;
         const xPrice = xOffer ? Math.min(xOffer.amount, x.price!) : x.price!;
-        const xTariff = tariff ? { ...tariff, price: 0 } : null; // one courier trip: the delivery fee is in the main item
-        items.push({ listingId: x.id, quote: quoteDelivery({ tariff: xTariff, itemPrice: xPrice, mode, feePayer: x.feePayer as FeePayer }) });
+        items.push({ listingId: x.id, quote: quoteDelivery({ tariff: xTariff, itemPrice: xPrice, mode, feePayer: x.feePayer as FeePayer, lift }) });
       }
       bundle = {
         items,
@@ -361,7 +374,8 @@ export class OrderService {
     ];
     if (recent >= 3) throw new OrderRejected("too_many_attempts", 429);
 
-    const { modes: _m, offerId, bundle, ...quote } = await this.quote(l.id, input.district, input.mode, buyer.id, extraIds);
+    const lift = input.floor ? { floor: input.floor, elevator: input.elevator ?? false } : null;
+    const { modes: _m, offerId, bundle, ...quote } = await this.quote(l.id, input.district, input.mode, buyer.id, extraIds, lift);
     // A bundle shares the first order's id; every order of it is created or none.
     const id = randomUUID();
     const base = {
@@ -410,7 +424,7 @@ export class OrderService {
         mode: t(lang, `delivery.${input.mode}`),
         district: t(lang, `district.${input.district}`),
         receives: formatUzs(receives),
-      }) + (bundle ? `\n${t(lang, "order.bundle_note", { n: titles.length })}` : ""), [
+      }) + (bundle ? `\n${t(lang, "order.bundle_note", { n: titles.length })}` : "") + (quote.vehicle === "cargo" ? `\n${t(lang, "order.cargo_for_seller")}` : ""), [
         [
           { text: t(lang, "order.confirm"), callbackData: `order:confirm:${order.id}` },
           { text: t(lang, "order.decline"), callbackData: `order:decline:${order.id}` },
@@ -592,7 +606,7 @@ export class OrderService {
   async operatorCard(o: Order) {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, o.listingId));
     const [buyer, seller] = await Promise.all([this.user(o.buyerUserId), this.user(o.sellerUserId)]);
-    const q = o.quote as DeliveryQuote;
+    const q = normalizeQuote(o.quote as DeliveryQuote);
     const trip = await this.tripOf(o);
     const collect = o.mode === "delivery_only" ? 0 : trip.collect;
     const lines = [
@@ -605,7 +619,12 @@ export class OrderService {
         : [`${l ? listingTitle(l, "ru") : "—"} — ${formatUzs(q.itemPrice)}`]),
       `Способ: ${t("ru", `delivery.${o.mode as DeliveryMode}`)}`,
       collect ? `💵 Получить с покупателя: ${formatUzs(collect)}` : `💵 Наличные не собирать`,
-      `Доставка: ${formatUzs(q.deliveryFee)}${q.codFee ? ` + ${formatUzs(q.codFee)} за наличные` : ""} (${t("ru", `fee_payer.${o.feePayer as FeePayer}`)})`,
+      ...(q.vehicle === "cargo"
+        ? [
+            `🚚 ГРУЗОВОЕ ТАКСИ с грузчиками${q.lift ? ` — ${q.lift.floor} этаж, ${q.lift.elevator ? "есть лифт" : "без лифта"}` : ""}`,
+          ]
+        : []),
+      `Доставка: ${formatUzs(q.deliveryFee)}${q.liftFee ? ` + ${formatUzs(q.liftFee)} подъём` : ""}${q.codFee ? ` + ${formatUzs(q.codFee)} за наличные` : ""} (${t("ru", `fee_payer.${o.feePayer as FeePayer}`)})`,
       ``,
       `Забрать: ${l?.district ? t("ru", `district.${l.district as District}`) : "район не указан"}, продавец ${seller?.phone ?? "—"}`,
       ...(l?.imei ? [`IMEI: ${l.imei} — сверить с *#06# при получении`] : []),
@@ -1035,7 +1054,7 @@ export class OrderService {
         address: role === "seller" ? null : o.address,
         // The buyer's free text reaches the seller only without phones and links (deals stay inside Ishonch).
         comment: o.comment && role === "seller" ? scrubPii(o.comment) : o.comment,
-        quote: o.quote as DeliveryQuote,
+        quote: normalizeQuote(o.quote as DeliveryQuote),
         feePayer: o.feePayer as FeePayer,
         courier: o.courierName ? { name: o.courierName } : null,
         cancelReason: o.cancelReason,

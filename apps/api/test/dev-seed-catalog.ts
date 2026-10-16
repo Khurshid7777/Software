@@ -118,6 +118,30 @@ const extra = [
     district: "mirobod",
     checklist: { ageYears: 3, repairs: ["none"], kit: ["receipt"] },
   },
+  {
+    category: "large_appliance",
+    titleRu: "Стиральная машина LG 7 кг, инверторный мотор",
+    titleUz: "LG 7 kg kir yuvish mashinasi, invertor motor",
+    descriptionRu: "LG F2J3HS0W, 7 кг, 1200 об/мин. Стирает тихо, протечек нет, барабан чистый. Отключим сами, грузчики Ishonch заберут.",
+    descriptionUz: "LG F2J3HS0W, 7 kg, 1200 ayl/min. Jim yuvadi, oqish yo'q, baraban toza. O'zimiz uzib beramiz, Ishonch yukchilari olib ketadi.",
+    modelKey: "lg f2j3hs0w 7kg",
+    price: 2_700_000,
+    condition: "good",
+    district: "olmazor",
+    checklist: { ageYears: 4, repairs: ["none"], kit: ["receipt"] },
+  },
+  {
+    category: "large_appliance",
+    titleRu: "Холодильник Samsung RB37, No Frost",
+    titleUz: "Samsung RB37 muzlatkich, No Frost",
+    descriptionRu: "Двухкамерный, 185 см, No Frost. Морозит отлично, компрессор не менялся. Небольшая царапина на боковой стенке.",
+    descriptionUz: "Ikki kamerali, 185 sm, No Frost. Yaxshi muzlatadi, kompressor almashtirilmagan. Yon devorida kichik tirnalish bor.",
+    modelKey: "samsung rb37",
+    price: 5_100_000,
+    condition: "good",
+    district: "yunusobod",
+    checklist: { ageYears: 5, repairs: ["none"] },
+  },
 ];
 for (const [i, f] of extra.entries()) {
   const [row] = await db
