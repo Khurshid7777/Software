@@ -105,7 +105,7 @@ export class MetricsService {
         count(*) filter (where status = 'cancelled') as cancelled,
         count(*) filter (where status in ('new', 'confirmed', 'courier_assigned', 'picked_up')) as open,
         coalesce(sum((quote->>'itemPrice')::bigint) filter (where status = 'delivered'), 0) as gmv,
-        coalesce(sum((quote->>'deliveryFee')::bigint + (quote->>'codFee')::bigint) filter (where status = 'delivered'), 0) as fees,
+        coalesce(sum((quote->>'deliveryFee')::bigint + coalesce((quote->>'liftFee')::bigint, 0) + (quote->>'codFee')::bigint) filter (where status = 'delivered'), 0) as fees,
         avg(extract(epoch from delivered_at - created_at) / 3600) filter (where status = 'delivered') as hours
       from orders where created_at >= ${ts(from)}`);
     const cancelReasons = await this.rows(sql`
@@ -235,7 +235,7 @@ export class MetricsService {
       where o.created_at >= ${ts(from)} order by o.created_at`);
     const head = [
       "order_id", "created_at", "status", "mode", "district", "item", "item_price", "delivery_fee", "cod_fee",
-      "fee_payer", "buyer_pays", "seller_receives", "courier", "delivered_at", "cancel_reason", "reviewed",
+      "fee_payer", "buyer_pays", "seller_receives", "courier", "delivered_at", "cancel_reason", "reviewed", "vehicle", "lift_fee",
     ];
     const cell = (v: unknown) => {
       let s = v == null ? "" : v instanceof Date ? v.toISOString() : String(v);
@@ -244,11 +244,11 @@ export class MetricsService {
       return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = rows.map((r) => {
-      const q = (r.quote ?? {}) as Record<string, number>;
+      const q = (r.quote ?? {}) as Record<string, number | string>;
       return [
         r.id, r.created_at, r.status, r.mode, r.district, r.title_ru, q.itemPrice, q.deliveryFee, q.codFee,
         r.fee_payer, r.mode === "delivery_only" ? q.buyerFee : q.buyerTotal, q.sellerReceives, r.courier_name,
-        r.delivered_at, r.cancel_reason, num(r.reviewed) > 0 ? "yes" : "no",
+        r.delivered_at, r.cancel_reason, num(r.reviewed) > 0 ? "yes" : "no", q.vehicle ?? "courier", q.liftFee ?? 0,
       ].map(cell).join(";");
     });
     return [head.join(";"), ...lines].join("\n") + "\n";

@@ -78,6 +78,13 @@
       "when": 1792013048771,
       "tag": "0010_dedup_and_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792130027328,
+      "tag": "0011_cargo_delivery",
+      "breakpoints": true
     }
   ]
 }

@@ -27,6 +27,7 @@ import {
   kitItems,
   repairKinds,
   ConditionChecklistSchema,
+  isCargo,
   type CourierTariff,
 } from "../src/index.js";
 
@@ -227,10 +228,11 @@ describe("listing helpers", () => {
 // ---------- stage 4: delivery & trust ----------
 describe("courier tariffs", () => {
   const tariffs: CourierTariff[] = [
-    { id: 1, name: "default", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, active: true },
-    { id: 2, name: "to sergeli", fromDistrict: null, toDistrict: "sergeli", price: 40_000, codFeePct: 1, active: true },
-    { id: 3, name: "chilonzor local", fromDistrict: "chilonzor", toDistrict: "chilonzor", price: 20_000, codFeePct: 1, active: true },
-    { id: 4, name: "disabled", fromDistrict: null, toDistrict: "yunusobod", price: 1, codFeePct: 0, active: false },
+    { id: 1, name: "default", vehicle: "courier", fromDistrict: null, toDistrict: null, price: 30_000, codFeePct: 1, liftPerFloor: 0, active: true },
+    { id: 2, name: "to sergeli", vehicle: "courier", fromDistrict: null, toDistrict: "sergeli", price: 40_000, codFeePct: 1, liftPerFloor: 0, active: true },
+    { id: 3, name: "chilonzor local", vehicle: "courier", fromDistrict: "chilonzor", toDistrict: "chilonzor", price: 20_000, codFeePct: 1, liftPerFloor: 0, active: true },
+    { id: 4, name: "disabled", vehicle: "courier", fromDistrict: null, toDistrict: "yunusobod", price: 1, codFeePct: 0, liftPerFloor: 0, active: false },
+    { id: 5, name: "cargo", vehicle: "cargo", fromDistrict: null, toDistrict: null, price: 150_000, codFeePct: 1, liftPerFloor: 15_000, active: true },
   ];
 
   it("picks the most specific active tariff", () => {
@@ -238,6 +240,23 @@ describe("courier tariffs", () => {
     expect(pickTariff(tariffs, "chilonzor", "sergeli")!.id).toBe(2);
     expect(pickTariff(tariffs, null, "yunusobod")!.id).toBe(1);
     expect(pickTariff([], null, "yunusobod")).toBeNull();
+    // Cargo has its own table: a courier tariff never carries a fridge and vice versa.
+    expect(pickTariff(tariffs, "chilonzor", "chilonzor", "cargo")!.id).toBe(5);
+    expect(pickTariff(tariffs.slice(0, 4), null, "sergeli", "cargo")).toBeNull();
+  });
+
+  it("charges movers per floor above the first only without a lift", () => {
+    const cargo = tariffs[4]!;
+    const q = (lift: { floor: number; elevator: boolean } | null) => quoteDelivery({ tariff: cargo, itemPrice: 4_000_000, mode: "cod_seller", feePayer: "buyer", lift });
+    expect(q({ floor: 5, elevator: false })).toMatchObject({ vehicle: "cargo", deliveryFee: 150_000, liftFee: 60_000, codFee: 40_000, buyerFee: 250_000 });
+    expect(q({ floor: 5, elevator: true }).liftFee).toBe(0);
+    expect(q({ floor: 1, elevator: false }).liftFee).toBe(0);
+    expect(q(null)).toMatchObject({ liftFee: 0, lift: null });
+    // A courier quote ignores the floor.
+    const courier = quoteDelivery({ tariff: tariffs[0]!, itemPrice: 1_000_000, mode: "cod_seller", feePayer: "buyer", lift: { floor: 9, elevator: false } });
+    expect(courier).toMatchObject({ vehicle: "courier", liftFee: 0, lift: null });
+    expect(isCargo("large_appliance")).toBe(true);
+    expect(isCargo("home_appliance")).toBe(false);
   });
 
   it("quotes COD fee and splits fees by payer", () => {

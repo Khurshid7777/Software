@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  MAX_FLOOR,
   TASHKENT_DISTRICTS,
   formatUzs,
+  isCargo,
   listingTitle,
   type BundleQuote,
   type DeliveryMode,
@@ -37,6 +39,9 @@ export function Checkout({ api, listing, onDone }: Props) {
   const [candidates, setCandidates] = useState<ListingDto[]>([]);
   const [extras, setExtras] = useState<string[]>([]);
   const extraKey = extras.join(",");
+  // Big appliances go by cargo taxi: movers carry them up, paid per floor when there is no lift.
+  const [floor, setFloor] = useState(() => Number(readPref("floor")) || 1);
+  const [elevator, setElevator] = useState(() => readPref("elevator") === "1");
 
   useEffect(() => {
     api
@@ -53,6 +58,8 @@ export function Checkout({ api, listing, onDone }: Props) {
   const [needPhone, setNeedPhone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [placed, setPlaced] = useState(false);
+  const cargo = isCargo(listing.category) || candidates.some((c) => extras.includes(c.id) && isCargo(c.category));
+  const lift = cargo ? { floor, elevator } : null;
   useLeaveGuard(!placed && ((address.trim().length > 0 && address !== initialAddress.current) || comment.trim().length > 0), t("checkout.leave_confirm"));
 
   useEffect(() => {
@@ -61,13 +68,13 @@ export function Checkout({ api, listing, onDone }: Props) {
     setQuote(null);
     setError(null);
     api
-      .quote(listing.id, district, mode, extras)
+      .quote(listing.id, district, mode, extras, lift)
       .then((q) => current && setQuote(q))
       .catch((e) => current && setError(e instanceof ApiError ? e.message : t("common.error")));
     return () => {
       current = false;
     };
-  }, [api, listing.id, district, mode, extraKey]);
+  }, [api, listing.id, district, mode, extraKey, cargo, floor, elevator]);
 
   const mounted = useRef(true);
   useEffect(() => () => void (mounted.current = false), []);
@@ -88,11 +95,16 @@ export function Checkout({ api, listing, onDone }: Props) {
         address: address.trim(),
         comment: comment.trim() || undefined,
         ...(extras.length ? { extraListingIds: extras } : {}),
+        ...(lift ? { floor: lift.floor, elevator: lift.elevator } : {}),
       });
       setPlaced(true);
       haptic("success");
       writePref("district", district);
       writePref("address", address.trim());
+      if (lift) {
+        writePref("floor", String(lift.floor));
+        writePref("elevator", lift.elevator ? "1" : "0");
+      }
       onDone(order.id);
     } catch (e) {
       if (e instanceof ApiError && e.code === "phone_required") setNeedPhone(true);
@@ -177,6 +189,25 @@ export function Checkout({ api, listing, onDone }: Props) {
           data-testid="checkout-address"
         />
       </label>
+      {cargo && (
+        <section className="card stack" data-testid="checkout-cargo">
+          <p className="hint">{t("checkout.cargo")}</p>
+          <label className="field">
+            {t("checkout.floor")}
+            <select value={floor} onChange={(e) => setFloor(Number(e.target.value))} data-testid="checkout-floor">
+              {Array.from({ length: MAX_FLOOR }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={elevator} onChange={(e) => setElevator(e.target.checked)} data-testid="checkout-elevator" />
+            {t("checkout.elevator")}
+          </label>
+        </section>
+      )}
       <label className="field">
         {t("checkout.comment")}
         <input value={comment} maxLength={300} onChange={(e) => setComment(e.target.value)} />
@@ -195,6 +226,12 @@ export function Checkout({ api, listing, onDone }: Props) {
             <span>{t("checkout.delivery_fee")}</span>
             <span>{quote.tariffId ? formatUzs(quote.deliveryFee) : t("checkout.no_tariff")}</span>
           </div>
+          {quote.liftFee > 0 && quote.lift && (
+            <div className="row between" data-testid="checkout-lift-fee">
+              <span>{t("checkout.lift_fee", { floor: quote.lift.floor })}</span>
+              <span>{formatUzs(quote.liftFee)}</span>
+            </div>
+          )}
           {sum("codFee") > 0 && (
             <div className="row between">
               <span>{t("checkout.cod_fee")}</span>

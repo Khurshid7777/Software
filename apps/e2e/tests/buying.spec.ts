@@ -40,3 +40,25 @@ test("leaving a half-filled checkout asks first", async ({ page }) => {
   await page.getByRole("button", { name: /Назад/ }).click();
   await expect(page.getByTestId("checkout")).toBeVisible();
 });
+
+test("a fridge goes by cargo taxi: floor without a lift adds the movers' fee", async ({ page }) => {
+  const fridge = (await catalog()).find((i) => i.listing.titleRu.includes("Холодильник"))!;
+  await open(page, BUYER, `startapp=listing_${fridge.listing.id}`);
+  await expect(page.getByTestId("listing-cargo")).toBeVisible();
+  await page.getByTestId("buy-delivery").click();
+  await expect(page.getByTestId("checkout-cargo")).toBeVisible();
+  await page.getByTestId("checkout-district").selectOption("chilonzor");
+  await expect(page.getByTestId("checkout-quote")).toBeVisible();
+  await expect(page.getByTestId("checkout-lift-fee")).toHaveCount(0);
+
+  await page.getByTestId("checkout-floor").selectOption("5");
+  await expect(page.getByTestId("checkout-lift-fee")).toContainText("60 000");
+  await page.getByTestId("checkout-elevator").check();
+  await expect(page.getByTestId("checkout-lift-fee")).toHaveCount(0);
+  await page.getByTestId("checkout-elevator").uncheck();
+  await expect(page.getByTestId("checkout-lift-fee")).toBeVisible();
+
+  await page.getByTestId("checkout-address").fill("Bunyodkor 12, kv 40");
+  await page.getByTestId("checkout-submit").click();
+  await expect(page.getByTestId("order-card").first()).toBeVisible();
+});

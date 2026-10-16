@@ -152,7 +152,10 @@ describe.skipIf(!reachable)("admin: metrics, reports, settings, digest (integrat
     expect(row[2]).toBe("delivered");
     expect(row[5]).toBe("Метрики iPhone 13");
     expect(row[6]).toBe("5000000");
-    expect(row.at(-1)).toBe("yes");
+    const col = (name: string) => row[lines[0]!.split(";").indexOf(name)];
+    expect(col("reviewed")).toBe("yes");
+    expect(col("vehicle")).toBe("courier");
+    expect(col("lift_fee")).toBe("0");
 
     // Signed link for Telegram's downloader: works without auth, only unexpired and untampered.
     const { url } = (await app.inject({ method: "POST", url: "/admin/reports/orders.csv/link", headers: tma(ADMIN), payload: { days: 7 } })).json();

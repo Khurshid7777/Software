@@ -5,6 +5,8 @@ import {
   DELIVERY_MODES,
   InspectionInputSchema,
   MAX_BUNDLE_EXTRA,
+  MAX_FLOOR,
+  VEHICLES,
   OfferInputSchema,
   ORDER_STATUSES,
   ReviewInputSchema,
@@ -36,10 +38,12 @@ const MESSAGES: Record<string, string> = {
 
 const TariffSchema = z.object({
   name: z.string().trim().min(1).max(100),
+  vehicle: z.enum(VEHICLES).default("courier"),
   fromDistrict: z.enum(TASHKENT_DISTRICTS).nullable(),
   toDistrict: z.enum(TASHKENT_DISTRICTS).nullable(),
   price: z.number().int().nonnegative().max(10_000_000),
   codFeePct: z.number().min(0).max(20),
+  liftPerFloor: z.number().int().nonnegative().max(1_000_000).default(0),
   active: z.boolean().default(true),
 });
 
@@ -72,7 +76,7 @@ export function orderRoutes(
     }),
   );
 
-  app.get<{ Querystring: { listingId?: string; district?: string; mode?: string; extra?: string } }>(
+  app.get<{ Querystring: { listingId?: string; district?: string; mode?: string; extra?: string; floor?: string; elevator?: string } }>(
     "/orders/quote",
     { preHandler: requireUser },
     (req, reply) =>
@@ -87,10 +91,13 @@ export function orderRoutes(
               .optional()
               .transform((s) => (s ? s.split(",") : []))
               .pipe(z.array(z.string().uuid()).max(MAX_BUNDLE_EXTRA)),
+            floor: z.coerce.number().int().min(1).max(MAX_FLOOR).optional(),
+            elevator: z.enum(["0", "1"]).optional(),
           })
           .safeParse(req.query);
         if (!q.success) return reply.code(400).send({ error: "bad_request" });
-        return svc.quote(q.data.listingId, q.data.district, q.data.mode, req.user!.id, q.data.extra);
+        const lift = q.data.floor ? { floor: q.data.floor, elevator: q.data.elevator === "1" } : null;
+        return svc.quote(q.data.listingId, q.data.district, q.data.mode, req.user!.id, q.data.extra, lift);
       }),
   );
 

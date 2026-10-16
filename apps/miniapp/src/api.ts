@@ -13,6 +13,7 @@ import type {
   CreateOrderInput,
   DeliveryMode,
   DeliveryQuote,
+  LiftInfo,
   District,
   InspectionCheck,
   Lang,
@@ -243,9 +244,15 @@ export function createApi(initData: string | null) {
     sellerReviews: (sellerId: string) => request<{ rating: SellerRating; reviews: ReviewDto[] }>(`/sellers/${sellerId}/reviews`),
 
     // ---- delivery ----
-    quote: (listingId: string, district: District, mode: DeliveryMode, extra: string[] = []) =>
+    quote: (listingId: string, district: District, mode: DeliveryMode, extra: string[] = [], lift: LiftInfo | null = null) =>
       request<DeliveryQuote & { modes: DeliveryMode[]; bundle: BundleQuote | null }>(
-        `/orders/quote?${new URLSearchParams({ listingId, district, mode, ...(extra.length ? { extra: extra.join(",") } : {}) }).toString()}`,
+        `/orders/quote?${new URLSearchParams({
+          listingId,
+          district,
+          mode,
+          ...(extra.length ? { extra: extra.join(",") } : {}),
+          ...(lift ? { floor: String(lift.floor), elevator: lift.elevator ? "1" : "0" } : {}),
+        }).toString()}`,
       ),
     bundleCandidates: (listingId: string) => request<ListingDto[]>(`/orders/bundle-candidates?listingId=${listingId}`),
     createOrder: (input: CreateOrderInput) => request<OrderDto>("/orders", json("POST", input)),

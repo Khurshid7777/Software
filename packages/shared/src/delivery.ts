@@ -48,21 +48,36 @@ export const MAX_OPEN_ORDERS_PER_BUYER = 5;
 
 // ---------- courier tariffs ----------
 
+/** A courier carries ordinary items; big appliances go by cargo taxi with movers (its own tariffs). */
+export const VEHICLES = ["courier", "cargo"] as const;
+export type Vehicle = (typeof VEHICLES)[number];
+export const CARGO_CATEGORIES = ["large_appliance"] as const;
+export const isCargo = (category: string) => (CARGO_CATEGORIES as readonly string[]).includes(category);
+/** Movers carry the item up the stairs when there is no lift: paid per floor above the first. */
+export const MAX_FLOOR = 30;
+export interface LiftInfo {
+  floor: number;
+  elevator: boolean;
+}
+
 export interface CourierTariff {
   id: number;
   name: string;
+  vehicle: Vehicle;
   /** null = any district */
   fromDistrict: District | null;
   toDistrict: District | null;
   price: number;
   /** Extra fee for carrying cash (COD), percent of the item price. */
   codFeePct: number;
+  /** Cargo: movers' fee per floor above the first when the building has no lift. */
+  liftPerFloor: number;
   active: boolean;
 }
 
-/** Most specific active tariff wins: exact pair → destination only → origin only → default. */
-export function pickTariff(tariffs: CourierTariff[], from: District | null, to: District): CourierTariff | null {
-  const active = tariffs.filter((t) => t.active);
+/** Most specific active tariff of the vehicle wins: exact pair → destination only → origin only → default. */
+export function pickTariff(tariffs: CourierTariff[], from: District | null, to: District, vehicle: Vehicle = "courier"): CourierTariff | null {
+  const active = tariffs.filter((t) => t.active && t.vehicle === vehicle);
   const score = (t: CourierTariff) => {
     if (t.fromDistrict && t.fromDistrict !== from) return -1;
     if (t.toDistrict && t.toDistrict !== to) return -1;
@@ -78,7 +93,11 @@ export function pickTariff(tariffs: CourierTariff[], from: District | null, to: 
 
 export interface DeliveryQuote {
   tariffId: number | null;
+  vehicle: Vehicle;
   deliveryFee: number;
+  /** Cargo without a lift: movers carry the item up (0 otherwise). */
+  liftFee: number;
+  lift: LiftInfo | null;
   codFee: number;
   /** Delivery + COD fee paid by the buyer / by the seller (fee_payer). */
   buyerFee: number;
@@ -97,15 +116,22 @@ export function quoteDelivery(opts: {
   itemPrice: number;
   mode: DeliveryMode;
   feePayer: FeePayer;
+  lift?: LiftInfo | null;
 }): DeliveryQuote {
+  const vehicle = opts.tariff?.vehicle ?? "courier";
+  const lift = vehicle === "cargo" ? (opts.lift ?? null) : null;
   const deliveryFee = opts.tariff?.price ?? 0;
+  const liftFee = lift && !lift.elevator && opts.tariff ? opts.tariff.liftPerFloor * Math.max(0, lift.floor - 1) : 0;
   const codFee = opts.mode === "delivery_only" || !opts.tariff ? 0 : round1000((opts.itemPrice * opts.tariff.codFeePct) / 100);
-  const fees = deliveryFee + codFee;
+  const fees = deliveryFee + liftFee + codFee;
   const sellerFee = opts.feePayer === "seller" ? fees : opts.feePayer === "split" ? round1000(fees / 2) : 0;
   const buyerFee = fees - sellerFee;
   return {
     tariffId: opts.tariff?.id ?? null,
+    vehicle,
     deliveryFee,
+    liftFee,
+    lift,
     codFee,
     buyerFee,
     sellerFee,
@@ -122,6 +148,11 @@ export interface BundleQuote {
   buyerTotal: number;
   /** Delivery fees saved compared with separate orders. */
   saved: number;
+}
+
+/** Orders placed before cargo delivery stored quotes without the vehicle fields. */
+export function normalizeQuote(q: Partial<DeliveryQuote> & Omit<DeliveryQuote, "vehicle" | "liftFee" | "lift">): DeliveryQuote {
+  return { ...q, vehicle: q.vehicle ?? "courier", liftFee: q.liftFee ?? 0, lift: q.lift ?? null };
 }
 
 export interface OrderEventDto {

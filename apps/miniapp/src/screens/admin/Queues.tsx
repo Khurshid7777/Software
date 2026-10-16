@@ -212,7 +212,16 @@ export function OperatorOrders({ api }: { api: Api }) {
             <span className="hint">
               {MODE_LABEL[o.mode]} · {o.mode === "delivery_only" ? "наличные не собирать" : `собрать ${formatUzs(q.buyerTotal)}`}
             </span>
-            <span className="hint">Доставка {formatUzs(q.deliveryFee)}{q.codFee ? ` + ${formatUzs(q.codFee)} за наличные` : ""}</span>
+            {q.vehicle === "cargo" && (
+              <span data-testid="op-cargo">
+                🚚 Грузовое такси с грузчиками{q.lift ? ` — ${q.lift.floor} этаж, ${q.lift.elevator ? "есть лифт" : "без лифта"}` : ""}
+              </span>
+            )}
+            <span className="hint">
+              Доставка {formatUzs(q.deliveryFee)}
+              {q.liftFee ? ` + ${formatUzs(q.liftFee)} подъём` : ""}
+              {q.codFee ? ` + ${formatUzs(q.codFee)} за наличные` : ""}
+            </span>
             <span>📍 {districtName(o.district)}, {o.address}</span>
             {o.comment && <span className="hint">💬 {o.comment}</span>}
             <span className="hint">

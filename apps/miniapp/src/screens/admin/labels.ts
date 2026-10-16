@@ -90,4 +90,5 @@ export const INSPECTION_LABEL: Record<string, string> = {
   load_test: "Тест под нагрузкой: без артефактов и перегрева",
   dead_pixels: "Нет битых пикселей и засветов",
   noise: "Работает без постороннего шума и запаха",
+  no_leaks: "Нет протечек, ржавчины и вмятин",
 };

@@ -92,6 +92,7 @@ export const CHECKLIST_FIELDS: Partial<Record<CheckCategory, readonly ChecklistF
   pc_parts: ["mining", "ageYears", "repairs", "kit"],
   monitor: ["deadPixels", "ageYears", "repairs", "kit"],
   home_appliance: ["ageYears", "repairs", "kit"],
+  large_appliance: ["ageYears", "repairs", "kit"],
 };
 
 export function checklistFields(category: string): readonly ChecklistField[] {
@@ -126,6 +127,7 @@ export const INSPECTION_CHECKS = [
   "load_test",
   "dead_pixels",
   "noise",
+  "no_leaks",
 ] as const;
 export type InspectionCheck = (typeof INSPECTION_CHECKS)[number];
 
@@ -134,6 +136,7 @@ const CATEGORY_CHECKS: Partial<Record<CheckCategory, InspectionCheck[]>> = {
   pc_parts: ["matches_description", "powers_on", "load_test", "noise"],
   monitor: ["matches_description", "powers_on", "dead_pixels"],
   home_appliance: ["matches_description", "powers_on", "noise"],
+  large_appliance: ["matches_description", "powers_on", "noise", "no_leaks"],
 };
 
 /** What the courier checks at pickup for this category (IMEI only when the listing has one). */
