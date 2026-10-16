@@ -1,3 +1,5 @@
+import type { CheckCategory } from "./types.js";
+
 // Marketplace features borrowed from Avito / Vinted / Mercari / Carousell / Swappa (see docs/competitive-analysis.md):
 // price offers, price-drop alerts for favorites, IMEI for phones.
 
@@ -60,10 +62,14 @@ export function normalizeImei(raw: string) {
 /** Categories where the IMEI field is offered. */
 export const IMEI_CATEGORIES = ["smartphone", "tablet"] as const;
 
-// ---------- condition checklist (phones / tablets) ----------
+// ---------- condition checklist ----------
 export const BIOMETRICS_STATES = ["ok", "broken", "none"] as const;
 export const REPAIR_KINDS = ["none", "screen", "battery", "back", "other"] as const;
 export const KIT_ITEMS = ["box", "charger", "receipt", "warranty"] as const;
+/** PC parts (video cards first): was it used for mining. */
+export const MINING_STATES = ["never", "yes", "unknown"] as const;
+/** Monitors: dead / stuck pixels. */
+export const PIXEL_STATES = ["none", "few", "many"] as const;
 
 /** Structured condition instead of free text (Back Market / Swappa style); every field is optional. */
 export interface ConditionChecklist {
@@ -72,11 +78,69 @@ export interface ConditionChecklist {
   biometrics?: (typeof BIOMETRICS_STATES)[number];
   repairs?: Array<(typeof REPAIR_KINDS)[number]>;
   kit?: Array<(typeof KIT_ITEMS)[number]>;
+  mining?: (typeof MINING_STATES)[number];
+  deadPixels?: (typeof PIXEL_STATES)[number];
+  /** How long the item has been in use, years (0 = less than a year). */
+  ageYears?: number;
+}
+export type ChecklistField = keyof ConditionChecklist;
+
+/** Which checklist fields the seller fills for a category; a category that is not listed has no checklist. */
+export const CHECKLIST_FIELDS: Partial<Record<CheckCategory, readonly ChecklistField[]>> = {
+  smartphone: ["batteryPct", "biometrics", "repairs", "kit"],
+  tablet: ["batteryPct", "biometrics", "repairs", "kit"],
+  pc_parts: ["mining", "ageYears", "repairs", "kit"],
+  monitor: ["deadPixels", "ageYears", "repairs", "kit"],
+  home_appliance: ["ageYears", "repairs", "kit"],
+};
+
+export function checklistFields(category: string): readonly ChecklistField[] {
+  return CHECKLIST_FIELDS[category as CheckCategory] ?? [];
+}
+
+/** Repair kinds and kit items that make sense for a category (screen/battery/charger are phone things). */
+export function repairKinds(category: string): ReadonlyArray<(typeof REPAIR_KINDS)[number]> {
+  return (IMEI_CATEGORIES as readonly string[]).includes(category) ? REPAIR_KINDS : ["none", "other"];
+}
+export function kitItems(category: string): ReadonlyArray<(typeof KIT_ITEMS)[number]> {
+  return (IMEI_CATEGORIES as readonly string[]).includes(category) ? KIT_ITEMS : ["box", "receipt", "warranty"];
+}
+
+/** Nothing the category asks for is filled in yet. */
+export function checklistEmpty(category: string, c: ConditionChecklist): boolean {
+  return checklistFields(category).every((f) => {
+    const v = c[f];
+    return v == null || (Array.isArray(v) && v.length === 0);
+  });
 }
 
 // ---------- «Проверено Ishonch»: courier's inspection at pickup ----------
-export const INSPECTION_CHECKS = ["matches_description", "screen", "camera", "biometrics", "imei_match", "battery"] as const;
+export const INSPECTION_CHECKS = [
+  "matches_description",
+  "screen",
+  "camera",
+  "biometrics",
+  "imei_match",
+  "battery",
+  "powers_on",
+  "load_test",
+  "dead_pixels",
+  "noise",
+] as const;
 export type InspectionCheck = (typeof INSPECTION_CHECKS)[number];
+
+const DEVICE_CHECKS: InspectionCheck[] = ["matches_description", "screen", "camera", "biometrics", "imei_match", "battery"];
+const CATEGORY_CHECKS: Partial<Record<CheckCategory, InspectionCheck[]>> = {
+  pc_parts: ["matches_description", "powers_on", "load_test", "noise"],
+  monitor: ["matches_description", "powers_on", "dead_pixels"],
+  home_appliance: ["matches_description", "powers_on", "noise"],
+};
+
+/** What the courier checks at pickup for this category (IMEI only when the listing has one). */
+export function inspectionChecks(category: string, hasImei: boolean): InspectionCheck[] {
+  const list = CATEGORY_CHECKS[category as CheckCategory] ?? DEVICE_CHECKS;
+  return list.filter((c) => c !== "imei_match" || hasImei);
+}
 
 /** true = passed, false = failed; a check that does not apply is left out. */
 export interface Inspection {

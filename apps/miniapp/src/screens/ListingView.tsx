@@ -190,7 +190,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
         </p>
       )}
-      <ChecklistView value={l.checklist} />
+      <ChecklistView category={l.category} value={l.checklist} />
       {l.imeiTail && <p className="hint-card" data-testid="imei-hint">🔐 {t("listing.imei", { tail: l.imeiTail })}</p>}
       <p className="description">{listingDescription(l, lang)}</p>
       {["active", "reserved"].includes(l.status) && (

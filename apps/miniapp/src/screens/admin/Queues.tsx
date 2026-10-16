@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { INSPECTION_CHECKS, formatUzs, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
+import { formatUzs, inspectionChecks, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
 import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
@@ -112,7 +112,7 @@ export function Complaints({ api, onOpen }: { api: Api; onOpen: (id: string) => 
  * Courier's checklist at pickup: each line is "ok" / "problem" / not checked. Any problem = not passed
  * (the listing loses the badge, the seller's record shows it).
  */
-function InspectionForm({ hasImei, onSubmit }: { hasImei: boolean; onSubmit: (c: Partial<Record<InspectionCheck, boolean>>, note?: string) => Promise<unknown> }) {
+function InspectionForm({ category, hasImei, onSubmit }: { category: string; hasImei: boolean; onSubmit: (c: Partial<Record<InspectionCheck, boolean>>, note?: string) => Promise<unknown> }) {
   const [open, setOpen] = useState(false);
   const [checks, setChecks] = useState<Partial<Record<InspectionCheck, boolean>>>({});
   const [note, setNote] = useState("");
@@ -123,7 +123,7 @@ function InspectionForm({ hasImei, onSubmit }: { hasImei: boolean; onSubmit: (c:
         🔍 Осмотр при получении
       </button>
     );
-  const items = INSPECTION_CHECKS.filter((c) => c !== "imei_match" || hasImei);
+  const items = inspectionChecks(category, hasImei);
   return (
     <div className="card stack" data-testid="op-inspection-form">
       {items.map((c) => (
@@ -229,7 +229,7 @@ export function OperatorOrders({ api }: { api: Api }) {
               </span>
             ) : (
               ["confirmed", "courier_assigned", "picked_up"].includes(o.status) && (
-                <InspectionForm hasImei={!!o.imei} onSubmit={(checks, note) => api.inspect(o.id, checks, note).then(reload, (e) => setError(e instanceof ApiError ? e.message : "Ошибка"))} />
+                <InspectionForm category={o.category} hasImei={!!o.imei} onSubmit={(checks, note) => api.inspect(o.id, checks, note).then(reload, (e) => setError(e instanceof ApiError ? e.message : "Ошибка"))} />
               )
             )}
             {o.courier?.name && <span className="hint">Курьер: {o.courier.name}</span>}

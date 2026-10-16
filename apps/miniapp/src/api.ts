@@ -128,6 +128,7 @@ export interface PriceRow {
 export type OperatorOrder = OrderDto & {
   contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null };
   imei: string | null;
+  category: string;
 };
 
 /** The UI language, for messages the API did not localize (rate limits, validation, network). */

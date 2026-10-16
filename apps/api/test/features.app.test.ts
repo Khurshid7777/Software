@@ -224,6 +224,27 @@ describe.skipIf(!reachable)("reviews reminder, share, checklist, inspection, rep
     expect(after.listing.seller!.inspections).toEqual({ passed: 1, failed: 1 });
   });
 
+  it("new categories: a monitor gets its own checklist, catalog filter and courier checks (no Face ID)", async () => {
+    const l = await liveListing(SELLER, { category: "monitor", titleRu: "Монитор Samsung Odyssey G5", titleUz: "Samsung Odyssey G5 monitor" });
+    const patch = (body: unknown) => app.inject({ method: "PATCH", url: `/listings/${l.id}`, headers: tma(SELLER), payload: body as object });
+    const saved = await patch({ checklist: { deadPixels: "none", ageYears: 1, kit: ["box"] } });
+    expect(saved.statusCode).toBe(200);
+    expect((saved.json() as ListingDto).checklist).toEqual({ deadPixels: "none", ageYears: 1, kit: ["box"] });
+
+    const page = (await app.inject({ url: "/catalog?category=monitor", headers: tma(BUYER) })).json() as { items: CatalogItem[] };
+    expect(page.items.map((i) => i.listing.id)).toContain(l.id);
+    expect(page.items.every((i) => i.listing.category === "monitor")).toBe(true);
+
+    const id = await confirmedOrder(l.id);
+    const inspect = (body: unknown) => app.inject({ method: "POST", url: `/operator/orders/${id}/inspection`, headers: internal(OPERATOR), payload: body as object });
+    expect((await inspect({ checks: { biometrics: true } })).statusCode).toBe(400);
+    const ok = await inspect({ checks: { matches_description: true, powers_on: true, dead_pixels: true } });
+    expect(ok.statusCode).toBe(200);
+    expect((ok.json() as OrderDto).inspection?.passed).toBe(true);
+    const ops = (await app.inject({ url: "/operator/orders", headers: internal(OPERATOR) })).json() as Array<{ id: string; category: string }>;
+    expect(ops.find((o) => o.id === id)?.category).toBe("monitor");
+  });
+
   // ---------------- AI reply drafts ----------------
 
   it("reply drafts: the seller gets three AI options (no contacts), sends one with a tap", async () => {

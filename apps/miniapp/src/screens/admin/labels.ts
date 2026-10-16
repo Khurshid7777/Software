@@ -86,4 +86,8 @@ export const INSPECTION_LABEL: Record<string, string> = {
   biometrics: "Face ID / отпечаток",
   imei_match: "IMEI совпадает (*#06#)",
   battery: "Аккумулятор как в объявлении",
+  powers_on: "Включается и определяется",
+  load_test: "Тест под нагрузкой: без артефактов и перегрева",
+  dead_pixels: "Нет битых пикселей и засветов",
+  noise: "Работает без постороннего шума и запаха",
 };

@@ -21,6 +21,12 @@ import {
   listingPlainText,
   suggestPrice,
   sellerTrust,
+  checklistEmpty,
+  checklistFields,
+  inspectionChecks,
+  kitItems,
+  repairKinds,
+  ConditionChecklistSchema,
   type CourierTariff,
 } from "../src/index.js";
 
@@ -277,4 +283,40 @@ describe("phone detection in listing text", () => {
     "leaves %s alone",
     (s) => expect(scrubPii(s)).toBe(s),
   );
+});
+
+describe("category-specific condition", () => {
+  it("asks each category only what makes sense for it", () => {
+    expect(checklistFields("smartphone")).toContain("batteryPct");
+    expect(checklistFields("pc_parts")).toEqual(expect.arrayContaining(["mining", "ageYears"]));
+    expect(checklistFields("pc_parts")).not.toContain("batteryPct");
+    expect(checklistFields("monitor")).toContain("deadPixels");
+    expect(checklistFields("home_appliance")).toEqual(["ageYears", "repairs", "kit"]);
+    expect(checklistFields("other")).toEqual([]);
+    expect(repairKinds("monitor")).toEqual(["none", "other"]);
+    expect(kitItems("home_appliance")).not.toContain("charger");
+  });
+
+  it("knows when the checklist is still empty", () => {
+    expect(checklistEmpty("pc_parts", {})).toBe(true);
+    expect(checklistEmpty("pc_parts", { repairs: [] })).toBe(true);
+    expect(checklistEmpty("pc_parts", { mining: "never" })).toBe(false);
+    // A phone field does not count for a monitor.
+    expect(checklistEmpty("monitor", { batteryPct: 90 })).toBe(true);
+  });
+
+  it("gives the courier the category's inspection list", () => {
+    expect(inspectionChecks("smartphone", true)).toContain("imei_match");
+    expect(inspectionChecks("smartphone", false)).not.toContain("imei_match");
+    expect(inspectionChecks("pc_parts", true)).toEqual(["matches_description", "powers_on", "load_test", "noise"]);
+    expect(inspectionChecks("monitor", true)).toContain("dead_pixels");
+    expect(inspectionChecks("home_appliance", true)).not.toContain("biometrics");
+    expect(inspectionChecks("laptop", false)).toContain("screen");
+  });
+
+  it("validates the new checklist fields", () => {
+    expect(ConditionChecklistSchema.parse({ mining: "yes", ageYears: 0, deadPixels: "few" })).toEqual({ mining: "yes", ageYears: 0, deadPixels: "few" });
+    expect(ConditionChecklistSchema.safeParse({ mining: "maybe" }).success).toBe(false);
+    expect(ConditionChecklistSchema.safeParse({ ageYears: 41 }).success).toBe(false);
+  });
 });

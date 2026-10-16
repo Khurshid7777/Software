@@ -25,6 +25,7 @@ import {
   type DeliveryMode,
   type DeliveryQuote,
   type District,
+  inspectionChecks,
   type Inspection,
   type InspectionCheck,
   type FeePayer,
@@ -575,14 +576,15 @@ export class OrderService {
     const [dtos, people, imeis] = await Promise.all([
       this.dtos(rows, null, "operator"),
       this.db.select({ id: users.id, phone: users.phone }).from(users).where(inArray(users.id, userIds)),
-      this.db.select({ id: listings.id, imei: listings.imei }).from(listings).where(inArray(listings.id, [...new Set(rows.map((o) => o.listingId))])),
+      this.db.select({ id: listings.id, imei: listings.imei, category: listings.category }).from(listings).where(inArray(listings.id, [...new Set(rows.map((o) => o.listingId))])),
     ]);
     const phoneOf = new Map(people.map((u) => [u.id, u.phone]));
-    const imeiOf = new Map(imeis.map((l) => [l.id, l.imei]));
+    const listingOf = new Map(imeis.map((l) => [l.id, l]));
     return rows.map((o, i) => ({
       ...dtos[i]!,
       contacts: { buyerPhone: phoneOf.get(o.buyerUserId) ?? null, sellerPhone: phoneOf.get(o.sellerUserId) ?? null, courierPhone: o.courierPhone },
-      imei: imeiOf.get(o.listingId) ?? null,
+      imei: listingOf.get(o.listingId)?.imei ?? null,
+      category: listingOf.get(o.listingId)?.category ?? "other",
     }));
   }
 
@@ -654,6 +656,10 @@ export class OrderService {
     if (!["confirmed", "courier_assigned", "picked_up", "delivered"].includes(o.status)) throw new OrderRejected("bad_state", 409);
     const values = Object.values(input.checks).filter((v): v is boolean => typeof v === "boolean");
     if (!values.length) throw new OrderRejected("bad_state", 400);
+    // A monitor has no Face ID: only the checks of the item's category count.
+    const [item] = await this.db.select({ category: listings.category }).from(listings).where(eq(listings.id, o.listingId));
+    const allowed = inspectionChecks(item?.category ?? "other", true);
+    if (Object.keys(input.checks).some((c) => !allowed.includes(c as InspectionCheck))) throw new OrderRejected("bad_state", 400);
     const now = new Date();
     const inspection: Inspection = { checks: input.checks, passed: values.every(Boolean), note: input.note || null, at: now.toISOString() };
     await this.db.update(orders).set({ inspection, updatedAt: now }).where(eq(orders.id, o.id));

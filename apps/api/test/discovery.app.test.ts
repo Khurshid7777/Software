@@ -151,4 +151,14 @@ describe.skipIf(!reachable)("similar listings, recently viewed, seller page, sel
     expect(better).not.toContain("no_checklist");
     expect(better).not.toContain("no_cod");
   });
+  it("insights: PC parts ask for their own checklist (mining, age), not for a phone's", async () => {
+    const l = await live(SELLER, { category: "pc_parts", attributes: { modelKey: "testcard x1 8gb", specs: [] } });
+    const codes = async () => (await get<ListingInsights>(`/listings/${l.id}/insights`, SELLER)).tips.map((t) => t.code);
+    expect(await codes()).toContain("no_checklist");
+    expect(await codes()).not.toContain("no_imei");
+    await db.update(listings).set({ checklist: { batteryPct: 90 } }).where(eq(listings.id, l.id));
+    expect(await codes()).toContain("no_checklist");
+    await db.update(listings).set({ checklist: { mining: "never" } }).where(eq(listings.id, l.id));
+    expect(await codes()).not.toContain("no_checklist");
+  });
 });

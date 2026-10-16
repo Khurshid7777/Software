@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CHECK_CATEGORIES, CURRENCIES } from "./types.js";
 import { CONDITIONS, DELIVERY_MODES, TASHKENT_DISTRICTS } from "./listing.js";
 import { COMPLAINT_REASONS, MODERATION_REASONS } from "./delivery.js";
-import { BIOMETRICS_STATES, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, REPAIR_KINDS } from "./market.js";
+import { BIOMETRICS_STATES, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, MINING_STATES, PIXEL_STATES, REPAIR_KINDS } from "./market.js";
 
 /**
  * Every zod schema of the project (AI outputs, API inputs, settings). Kept apart from constants and
@@ -180,6 +180,9 @@ export const ConditionChecklistSchema = z
     biometrics: z.enum(BIOMETRICS_STATES).optional(),
     repairs: z.array(z.enum(REPAIR_KINDS)).max(REPAIR_KINDS.length).transform(uniq).optional(),
     kit: z.array(z.enum(KIT_ITEMS)).max(KIT_ITEMS.length).transform(uniq).optional(),
+    mining: z.enum(MINING_STATES).optional(),
+    deadPixels: z.enum(PIXEL_STATES).optional(),
+    ageYears: z.number().int().min(0).max(40).optional(),
   })
   .strict()
   // "No repairs" together with a repair is a contradiction: the repair wins.

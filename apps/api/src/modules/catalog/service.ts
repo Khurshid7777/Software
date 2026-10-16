@@ -3,6 +3,8 @@ import {
   canonicalQuery,
   canonicalWord,
   IMEI_CATEGORIES,
+  checklistEmpty,
+  checklistFields,
   SELLER_PAGE_LIMIT,
   formatUzs,
   listingTitle,
@@ -354,7 +356,7 @@ export class CatalogService {
     if (days >= 14 && l.requestsCount === 0) tips.push({ code: "stale", severity: "medium", params: { days } });
     if (dto.photos.length < 3) tips.push({ code: "few_photos", severity: "medium", params: { n: dto.photos.length } });
     if ((l.descriptionRu || l.descriptionUz).trim().length < 120) tips.push({ code: "short_description", severity: "low", params: {} });
-    if (phone && checklist.batteryPct == null && !checklist.repairs?.length) tips.push({ code: "no_checklist", severity: "medium", params: {} });
+    if (checklistFields(l.category).length && checklistEmpty(l.category, checklist)) tips.push({ code: "no_checklist", severity: "medium", params: {} });
     if (phone && !l.imei) tips.push({ code: "no_imei", severity: "low", params: {} });
     if (!(l.allowedDeliveryModes as string[]).includes("cod_seller")) tips.push({ code: "no_cod", severity: "low", params: {} });
     return {

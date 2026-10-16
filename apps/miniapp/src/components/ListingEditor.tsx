@@ -186,9 +186,7 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           <span className="hint">{t("sell.imei_hint")}</span>
         </label>
       )}
-      {(IMEI_CATEGORIES as readonly string[]).includes(listing.category) && (
-        <ChecklistEditor value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
-      )}
+      <ChecklistEditor category={listing.category} value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
 
       <label className="field">
         {t("sell.field.district")}

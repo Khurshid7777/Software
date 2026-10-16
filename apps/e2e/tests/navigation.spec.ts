@@ -40,3 +40,14 @@ test("a listing remembers being viewed; the storefront shows it", async ({ page 
   await open(page, BUYER);
   await expect(page.getByTestId("recently-viewed").getByTestId("mini-card")).toHaveCount(1);
 });
+
+test("new categories: monitors on the storefront, with their own condition facts", async ({ page }) => {
+  await open(page, BUYER);
+  await page.locator(".category", { hasText: "Мониторы" }).click();
+  const cards = page.getByTestId("item-card");
+  await expect(cards).toHaveCount(1);
+  await cards.first().locator(".item-main").click();
+  const facts = page.getByTestId("checklist-view");
+  await expect(facts).toContainText("Битые пиксели: нет");
+  await expect(facts).toContainText("В использовании: 1 г.");
+});
