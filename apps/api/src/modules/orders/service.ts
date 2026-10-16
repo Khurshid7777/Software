@@ -21,8 +21,18 @@ import {
   quoteDelivery,
   scrubPii,
   t,
+  CONDITION_FACTOR,
+  GUARANTEE_DAYS,
+  TRADE_MAX_TOPUP_PCT,
+  normalizeModelKey,
   type BundleQuote,
+  type Condition,
   type CourierTariff,
+  type DisputeDto,
+  type DisputeReason,
+  type DisputeResolution,
+  type OfferKind,
+  type TradeItem,
   type CreateOrderInput,
   type DeliveryMode,
   type DeliveryQuote,
@@ -41,7 +51,21 @@ import {
   type OrderStatus,
 } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { courierTariffs, listingPhotos, listings, offers, orderEvents, orders, reviews, users, type Order, type User } from "../../db/schema.js";
+import {
+  courierTariffs,
+  disputes,
+  listingPhotos,
+  listings,
+  offers,
+  orderEvents,
+  orders,
+  reviews,
+  users,
+  type Order,
+  type User,
+} from "../../db/schema.js";
+
+const DAY_MS = 86_400_000;
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
 import type { StaffNotifier } from "../../telegram/staff.js";
 import type { ListingService } from "../listings/service.js";
@@ -64,7 +88,12 @@ export type OrderError =
   | "offer_pending"
   | "too_many_offers"
   | "bundle_invalid"
-  | "no_tariff";
+  | "no_tariff"
+  | "trade_not_accepted"
+  | "trade_topup_too_big"
+  | "guarantee_expired"
+  | "dispute_exists"
+  | "bad_amount";
 
 export class OrderRejected extends Error {
   constructor(
@@ -217,7 +246,13 @@ export class OrderService {
       .select()
       .from(offers)
       .where(
-        and(eq(offers.listingId, listingId), eq(offers.buyerUserId, buyerId), eq(offers.status, "accepted"), gt(offers.expiresAt, new Date())),
+        and(
+          eq(offers.listingId, listingId),
+          eq(offers.buyerUserId, buyerId),
+          eq(offers.kind, "price"),
+          eq(offers.status, "accepted"),
+          gt(offers.expiresAt, new Date()),
+        ),
       )
       .orderBy(desc(offers.decidedAt))
       .limit(1);
@@ -230,7 +265,9 @@ export class OrderService {
     return {
       id: o.id,
       listingId: o.listingId,
+      kind: o.kind as OfferKind,
       amount: o.amount,
+      trade: (o.trade as TradeItem | null) ?? null,
       listPrice: o.listPrice,
       status,
       createdAt: o.createdAt.toISOString(),
@@ -306,6 +343,87 @@ export class OrderService {
     return this.offerDto(offer);
   }
 
+  /**
+   * «Обмен с доплатой»: the buyer offers their item plus a top-up (or asks the seller to add one). Same
+   * lifecycle as a price offer (one pending per buyer and listing, the seller answers with bot buttons);
+   * once accepted the two arrange the meeting in the chat — an exchange is not a courier delivery.
+   */
+  async makeTradeOffer(buyer: User, listingId: string, input: { title: string; condition: Condition; description?: string; topUp: number }) {
+    const l = await this.availableListing(listingId);
+    if (l.sellerUserId === buyer.id) throw new OrderRejected("own_listing", 409);
+    if (!l.acceptsTrade) throw new OrderRejected("trade_not_accepted", 409);
+    if (Math.abs(input.topUp) > (l.price! * TRADE_MAX_TOPUP_PCT) / 100) throw new OrderRejected("trade_topup_too_big", 400);
+    // Our valuation of the buyer's item helps the seller decide (reference price scaled by condition).
+    const key = normalizeModelKey(input.title);
+    const range = await this.d.repo.findReferencePrice(key);
+    const item: TradeItem = {
+      title: scrubPii(input.title),
+      condition: input.condition,
+      description: input.description ? scrubPii(input.description) : null,
+      modelKey: range ? key : null,
+      estimate: range ? Math.round((range.median * CONDITION_FACTOR[input.condition]) / 10_000) * 10_000 : null,
+    };
+    const now = new Date();
+    await this.db
+      .update(offers)
+      .set({ status: "expired" })
+      .where(and(eq(offers.listingId, l.id), eq(offers.buyerUserId, buyer.id), eq(offers.status, "pending"), lt(offers.expiresAt, now)));
+    const reservation = await this.d.repo.reserveDaily(buyer.id, "offer_made", OFFERS_PER_DAY);
+    if (reservation == null) throw new OrderRejected("too_many_offers", 429);
+    let offer: typeof offers.$inferSelect;
+    try {
+      [offer] = (await this.db
+        .insert(offers)
+        .values({
+          listingId: l.id,
+          buyerUserId: buyer.id,
+          sellerUserId: l.sellerUserId,
+          kind: "trade",
+          amount: input.topUp,
+          trade: item,
+          listPrice: l.price!,
+          expiresAt: new Date(now.getTime() + OFFER_PENDING_HOURS * 3600_000),
+        })
+        .returning()) as [typeof offers.$inferSelect];
+    } catch (err) {
+      await this.d.repo.refundDaily(reservation);
+      if (isUniqueViolation(err)) throw new OrderRejected("offer_pending", 409);
+      throw err;
+    }
+    await this.d.repo.event(buyer.id, "trade_offer_made", { offerId: offer.id, listingId: l.id, topUp: input.topUp, estimate: item.estimate });
+    const seller = await this.user(l.sellerUserId);
+    if (seller) {
+      const lang = seller.language as Lang;
+      const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      await this.dm(
+        seller,
+        t(lang, "trade.new_for_seller", {
+          title: listingTitle(l, lang),
+          item: item.title,
+          condition: t(lang, `condition.${item.condition}`),
+          estimate: item.estimate ? t(lang, "trade.estimate", { amount: formatUzs(item.estimate) }) : "",
+          topup: this.topUpText(lang, input.topUp),
+          description: item.description ? `\n«${item.description}»` : "",
+          hours: OFFER_PENDING_HOURS,
+        }),
+        [
+          [
+            { text: t(lang, "offer.accept"), callbackData: `offer:accept:${offer.id}` },
+            { text: t(lang, "offer.decline"), callbackData: `offer:decline:${offer.id}` },
+          ],
+          ...(url ? [[{ text: t(lang, "favorites.open"), url }]] : []),
+        ],
+      );
+    }
+    return this.offerDto(offer);
+  }
+
+  private topUpText(lang: Lang, topUp: number) {
+    if (topUp > 0) return t(lang, "trade.topup_buyer", { amount: formatUzs(topUp) });
+    if (topUp < 0) return t(lang, "trade.topup_seller", { amount: formatUzs(-topUp) });
+    return t(lang, "trade.topup_none");
+  }
+
   /** Seller's answer (bot button or API). Compare-and-set: a second tap or an expired offer changes nothing. */
   async decideOffer(seller: User, id: string, decision: "accept" | "decline"): Promise<OfferDto> {
     const [o] = await this.db.select().from(offers).where(eq(offers.id, id));
@@ -332,11 +450,16 @@ export class OrderService {
     if (buyer && l) {
       const lang = buyer.language as Lang;
       const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
-      const text =
-        updated.status === "accepted"
+      const trade = o.kind === "trade" ? (o.trade as TradeItem) : null;
+      const text = trade
+        ? updated.status === "accepted"
+          ? t(lang, "trade.accepted_for_buyer", { title: listingTitle(l, lang), item: trade.title, topup: this.topUpText(lang, o.amount) })
+          : t(lang, "trade.declined_for_buyer", { title: listingTitle(l, lang), item: trade.title })
+        : updated.status === "accepted"
           ? t(lang, "offer.accepted_for_buyer", { title: listingTitle(l, lang), amount: formatUzs(o.amount), hours: OFFER_ACCEPTED_HOURS })
           : t(lang, "offer.declined_for_buyer", { title: listingTitle(l, lang), amount: formatUzs(o.amount) });
-      await this.dm(buyer, text, url ? [[{ text: t(lang, updated.status === "accepted" ? "offer.checkout" : "favorites.open"), url }]] : []);
+      const button = trade ? "trade.write_seller" : updated.status === "accepted" ? "offer.checkout" : "favorites.open";
+      await this.dm(buyer, text, url ? [[{ text: t(lang, button), url }]] : []);
     }
     return this.offerDto(updated);
   }
@@ -466,6 +589,153 @@ export class OrderService {
       await this.dm(seller, t(lang, "order.review_received", { stars: "⭐".repeat(rating), text: text ? `\n«${scrubPii(text)}»` : "" }));
     }
     return this.dto(id, buyer);
+  }
+
+  // ---------- Ishonch guarantee ----------
+  private disputeDto(d: typeof disputes.$inferSelect): DisputeDto {
+    return {
+      id: d.id,
+      orderId: d.orderId,
+      reason: d.reason as DisputeReason,
+      text: d.text,
+      sellerResponse: d.sellerResponse,
+      status: d.status as DisputeDto["status"],
+      resolution: (d.resolution as DisputeResolution | null) ?? null,
+      amount: d.amount,
+      note: d.note,
+      createdAt: d.createdAt.toISOString(),
+      resolvedAt: d.resolvedAt?.toISOString() ?? null,
+    };
+  }
+
+  private guaranteeUntil(o: Order) {
+    return o.status === "delivered" && o.deliveredAt ? new Date(o.deliveredAt.getTime() + GUARANTEE_DAYS * DAY_MS) : null;
+  }
+
+  /** The buyer found a problem within GUARANTEE_DAYS of delivery: the seller and the moderators are told. */
+  async openDispute(buyer: User, id: string, input: { reason: DisputeReason; text: string }) {
+    const o = await this.load(id);
+    if (o.buyerUserId !== buyer.id) throw new OrderRejected("forbidden", 403);
+    const until = this.guaranteeUntil(o);
+    if (!until) throw new OrderRejected("bad_state", 409);
+    if (until <= new Date()) throw new OrderRejected("guarantee_expired", 409);
+    const text = scrubPii(input.text);
+    try {
+      await this.db.insert(disputes).values({
+        orderId: o.id,
+        listingId: o.listingId,
+        buyerUserId: o.buyerUserId,
+        sellerUserId: o.sellerUserId,
+        reason: input.reason,
+        text,
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) throw new OrderRejected("dispute_exists", 409);
+      throw err;
+    }
+    await this.d.repo.event(buyer.id, "dispute_opened", { orderId: o.id, reason: input.reason });
+    const [seller, [l]] = await Promise.all([this.user(o.sellerUserId), this.db.select().from(listings).where(eq(listings.id, o.listingId))]);
+    if (seller) {
+      const lang = seller.language as Lang;
+      await this.dm(
+        seller,
+        t(lang, "dispute.new_for_seller", { title: l ? listingTitle(l, lang) : "—", reason: t(lang, `dispute.reason.${input.reason}`), text }),
+        await this.openButton(lang, o.id, "dispute.respond"),
+      );
+    }
+    await this.d.staff.moderators(
+      [
+        `⚖️ Спор по гарантии, заказ #${o.id.slice(0, 8)}`,
+        `${l ? listingTitle(l, "ru") : "—"} — ${formatUzs(normalizeQuote(o.quote as DeliveryQuote).itemPrice)}`,
+        `Причина: ${t("ru", `dispute.reason.${input.reason}`)}`,
+        `«${text}»`,
+        `Решение — в админке, раздел «Споры».`,
+      ].join("\n"),
+    );
+    return this.dto(id, buyer);
+  }
+
+  /** The seller's side of the story (once, while the dispute is open). */
+  async respondDispute(seller: User, id: string, text: string) {
+    const o = await this.load(id);
+    if (o.sellerUserId !== seller.id) throw new OrderRejected("forbidden", 403);
+    const [updated] = await this.db
+      .update(disputes)
+      .set({ sellerResponse: scrubPii(text) })
+      .where(and(eq(disputes.orderId, o.id), eq(disputes.status, "open"), sql`${disputes.sellerResponse} is null`))
+      .returning();
+    if (!updated) throw new OrderRejected("bad_state", 409);
+    await this.d.staff.moderators(`⚖️ Продавец ответил по спору #${o.id.slice(0, 8)}:\n«${updated.sellerResponse}»`);
+    return this.dto(id, seller);
+  }
+
+  /** Admin queue: open disputes first, with what the decision needs (prices, phones, both stories). */
+  async adminDisputes(all = false) {
+    const rows = await this.db
+      .select({ d: disputes, o: orders, titleRu: listings.titleRu, titleUz: listings.titleUz })
+      .from(disputes)
+      .innerJoin(orders, eq(orders.id, disputes.orderId))
+      .innerJoin(listings, eq(listings.id, disputes.listingId))
+      .where(all ? undefined : eq(disputes.status, "open"))
+      .orderBy(asc(disputes.status), desc(disputes.createdAt))
+      .limit(100);
+    if (!rows.length) return [];
+    const people = await this.db
+      .select({ id: users.id, phone: users.phone })
+      .from(users)
+      .where(inArray(users.id, [...new Set(rows.flatMap((r) => [r.d.buyerUserId, r.d.sellerUserId]))]));
+    const phoneOf = new Map(people.map((u) => [u.id, u.phone]));
+    return rows.map((r) => ({
+      ...this.disputeDto(r.d),
+      title: r.titleRu || r.titleUz,
+      listingId: r.d.listingId,
+      itemPrice: normalizeQuote(r.o.quote as DeliveryQuote).itemPrice,
+      deliveredAt: r.o.deliveredAt?.toISOString() ?? null,
+      inspection: (r.o.inspection as Inspection | null) ?? null,
+      buyerPhone: phoneOf.get(r.d.buyerUserId) ?? null,
+      sellerPhone: phoneOf.get(r.d.sellerUserId) ?? null,
+    }));
+  }
+
+  /** Admin's decision; both sides are told. A refund or compensation counts against the seller's trust. */
+  async resolveDispute(admin: User, disputeId: string, input: { resolution: DisputeResolution; amount?: number; note?: string }) {
+    const [d] = await this.db.select().from(disputes).where(eq(disputes.id, disputeId));
+    if (!d) throw new OrderRejected("not_found", 404);
+    const o = await this.load(d.orderId);
+    const itemPrice = normalizeQuote(o.quote as DeliveryQuote).itemPrice;
+    if (input.resolution === "partial" && (!input.amount || input.amount >= itemPrice)) throw new OrderRejected("bad_amount", 400);
+    const amount = input.resolution === "partial" ? input.amount! : input.resolution === "refund" ? itemPrice : null;
+    const [updated] = await this.db
+      .update(disputes)
+      .set({ status: "resolved", resolution: input.resolution, amount, note: input.note || null, resolvedBy: admin.id, resolvedAt: new Date() })
+      .where(and(eq(disputes.id, d.id), eq(disputes.status, "open")))
+      .returning();
+    if (!updated) throw new OrderRejected("bad_state", 409);
+    await this.d.repo.event(admin.id, "dispute_resolved", { orderId: o.id, resolution: input.resolution, amount });
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, o.listingId));
+    for (const [uid, key] of [
+      [o.buyerUserId, "dispute.resolved_for_buyer"],
+      [o.sellerUserId, "dispute.resolved_for_seller"],
+    ] as const) {
+      const u = await this.user(uid);
+      if (!u) continue;
+      const lang = u.language as Lang;
+      await this.dm(
+        u,
+        t(lang, key, {
+          title: l ? listingTitle(l, lang) : "—",
+          outcome: t(lang, `dispute.resolution.${input.resolution}`, { amount: amount ? formatUzs(amount) : "" }),
+          note: input.note ? `\n${input.note}` : "",
+        }),
+        await this.openButton(lang, o.id),
+      );
+    }
+    return this.disputeDto(updated);
+  }
+
+  async openDisputesCount() {
+    const [{ n }] = (await this.db.select({ n: count() }).from(disputes).where(eq(disputes.status, "open"))) as [{ n: number }];
+    return Number(n);
   }
 
   /** The orders of a bundle (or just this one), the first order last: it carries the loud side effects. */
@@ -805,7 +1075,11 @@ export class OrderService {
     return this.d.notifier.miniAppLink(`order_${orderId}`).catch((err) => (console.error("mini app link failed", err), null));
   }
 
-  private async openButton(lang: Lang, orderId: string, key: "order.open" | "order.leave_review" = "order.open"): Promise<NotifyButton[][]> {
+  private async openButton(
+    lang: Lang,
+    orderId: string,
+    key: "order.open" | "order.leave_review" | "dispute.respond" = "order.open",
+  ): Promise<NotifyButton[][]> {
     const url = await this.link(orderId);
     return url ? [[{ text: t(lang, key), url }]] : [];
   }
@@ -992,7 +1266,7 @@ export class OrderService {
     const orderIds = rows.map((o) => o.id);
     const listingIds = [...new Set(rows.map((o) => o.listingId))];
     const bundleIds = [...new Set(rows.map((o) => o.bundleId).filter((b): b is string => !!b))];
-    const [listingRows, photoRows, history, reviewRows, siblings] = await Promise.all([
+    const [listingRows, photoRows, history, reviewRows, siblings, disputeRows] = await Promise.all([
       this.db.select().from(listings).where(inArray(listings.id, listingIds)),
       this.db
         .selectDistinctOn([listingPhotos.listingId])
@@ -1017,7 +1291,9 @@ export class OrderService {
             .where(inArray(orders.bundleId, bundleIds))
             .orderBy(asc(orders.createdAt))
         : Promise.resolve([]),
+      this.db.select().from(disputes).where(inArray(disputes.orderId, orderIds)),
     ]);
+    const disputeOf = new Map(disputeRows.map((d) => [d.orderId, d]));
     const listingOf = new Map(listingRows.map((l) => [l.id, l]));
     const photoOf = new Map(photoRows.map((p) => [p.listingId, p]));
     const reviewOf = new Map(reviewRows.map((r) => [r.orderId, r]));
@@ -1030,14 +1306,18 @@ export class OrderService {
       const photo = photoOf.get(o.listingId);
       const review = reviewOf.get(o.id);
       const status = o.status as OrderStatus;
+      const dispute = disputeOf.get(o.id);
+      const until = this.guaranteeUntil(o);
       const actions: OrderDto["actions"] = [];
       if (role === "buyer") {
         if (canTransition(status, "cancelled", "buyer")) actions.push("cancel");
         if (status === "delivered" && !review) actions.push("review");
+        if (until && until > new Date() && !dispute) actions.push("dispute");
       }
       if (role === "seller") {
         if (status === "new") actions.push("confirm", "decline");
         else if (canTransition(status, "cancelled", "seller")) actions.push("cancel");
+        if (dispute?.status === "open" && !dispute.sellerResponse) actions.push("dispute_response");
       }
       return {
         id: o.id,
@@ -1065,6 +1345,8 @@ export class OrderService {
         canReview: actions.includes("review"),
         actions,
         inspection: (o.inspection as Inspection | null) ?? null,
+        guaranteeUntil: until?.toISOString() ?? null,
+        dispute: dispute ? this.disputeDto(dispute) : null,
         bundle: siblings
           .filter((b) => o.bundleId && b.bundleId === o.bundleId && b.orderId !== o.id)
           .map((b) => ({ orderId: b.orderId, listingId: b.listingId, status: b.status as OrderStatus, titleRu: b.titleRu, titleUz: b.titleUz })),

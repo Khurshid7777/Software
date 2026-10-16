@@ -85,6 +85,13 @@
       "when": 1792130027328,
       "tag": "0011_cargo_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792134682138,
+      "tag": "0012_guarantee_trade",
+      "breakpoints": true
     }
   ]
 }

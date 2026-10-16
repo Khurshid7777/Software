@@ -7,7 +7,12 @@ import {
   MAX_BUNDLE_EXTRA,
   MAX_FLOOR,
   VEHICLES,
+  DisputeInputSchema,
+  DisputeResolveSchema,
+  DisputeResponseSchema,
+  GUARANTEE_DAYS,
   OfferInputSchema,
+  TradeOfferInputSchema,
   ORDER_STATUSES,
   ReviewInputSchema,
   TASHKENT_DISTRICTS,
@@ -34,6 +39,11 @@ const MESSAGES: Record<string, string> = {
   too_many_offers: "offer.err.too_many",
   bundle_invalid: "order.err.bundle_invalid",
   no_tariff: "order.err.no_tariff",
+  trade_not_accepted: "order.err.trade_not_accepted",
+  trade_topup_too_big: "order.err.trade_topup_too_big",
+  guarantee_expired: "order.err.guarantee_expired",
+  dispute_exists: "order.err.dispute_exists",
+  bad_amount: "order.err.bad_amount",
 };
 
 const TariffSchema = z.object({
@@ -62,7 +72,9 @@ export function orderRoutes(
       if (err instanceof OrderRejected) {
         const lang = (req.user?.language ?? "uz") as Lang;
         const key = MESSAGES[err.code];
-        return reply.code(err.status).send({ error: err.code, message: key ? t(lang, key as Parameters<typeof t>[1]) : err.code });
+        return reply
+          .code(err.status)
+          .send({ error: err.code, message: key ? t(lang, key as Parameters<typeof t>[1], { days: GUARANTEE_DAYS }) : err.code });
       }
       throw err;
     }
@@ -122,6 +134,14 @@ export function orderRoutes(
       return svc.makeOffer(req.user!, req.params.id, parsed.data.amount);
     }),
   );
+  // «Обмен с доплатой»: the buyer's item + a top-up; answered with the same bot buttons as a price offer.
+  app.post<{ Params: { id: string } }>("/listings/:id/trade-offers", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = TradeOfferInputSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.makeTradeOffer(req.user!, req.params.id, parsed.data);
+    }),
+  );
   app.post<{ Params: { id: string; decision: string } }>("/offers/:id/:decision", { preHandler: requireUser }, (req, reply) =>
     handle(req, reply, async () => {
       const { decision } = req.params;
@@ -153,6 +173,32 @@ export function orderRoutes(
       const parsed = ReviewInputSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       return svc.review(req.user!, req.params.id, parsed.data.rating, parsed.data.text);
+    }),
+  );
+
+  // ---- Ishonch guarantee: disputes after delivery ----
+  app.post<{ Params: { id: string } }>("/orders/:id/dispute", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = DisputeInputSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.openDispute(req.user!, req.params.id, parsed.data);
+    }),
+  );
+  app.post<{ Params: { id: string } }>("/orders/:id/dispute/response", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = DisputeResponseSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.respondDispute(req.user!, req.params.id, parsed.data.text);
+    }),
+  );
+  app.get<{ Querystring: { all?: string } }>("/admin/disputes", { preHandler: auth.requireAdmin }, (req) => svc.adminDisputes(req.query.all === "1"));
+  app.post<{ Params: { id: string } }>("/admin/disputes/:id/resolve", { preHandler: auth.requireAdmin }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = DisputeResolveSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      const res = await svc.resolveDispute(req.user!, req.params.id, parsed.data);
+      await audit(req.user!, "dispute.resolve", req.params.id, { resolution: res.resolution, amount: res.amount });
+      return res;
     }),
   );
 

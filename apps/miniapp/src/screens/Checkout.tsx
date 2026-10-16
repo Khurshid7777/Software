@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  GUARANTEE_DAYS,
   MAX_FLOOR,
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -255,7 +256,11 @@ export function Checkout({ api, listing, onDone }: Props) {
       )}
 
       {district && !quote && !error && <p className="hint center">⏳ {t("checkout.calculating")}</p>}
-      <p className="hint-card">🔍 {t("checkout.inspection")}</p>
+      <p className="hint-card">
+        🔍 {t("checkout.inspection")}
+        <br />
+        {t("guarantee.checkout", { days: GUARANTEE_DAYS })}
+      </p>
 
       {needPhone && (
         <div className="card stack">

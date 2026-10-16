@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CHECK_CATEGORIES, CURRENCIES } from "./types.js";
 import { CONDITIONS, DELIVERY_MODES, TASHKENT_DISTRICTS } from "./listing.js";
 import { COMPLAINT_REASONS, MAX_FLOOR, MODERATION_REASONS } from "./delivery.js";
-import { BIOMETRICS_STATES, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, MINING_STATES, PIXEL_STATES, REPAIR_KINDS } from "./market.js";
+import { BIOMETRICS_STATES, DISPUTE_REASONS, DISPUTE_RESOLUTIONS, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, MINING_STATES, PIXEL_STATES, REPAIR_KINDS } from "./market.js";
 
 /**
  * Every zod schema of the project (AI outputs, API inputs, settings). Kept apart from constants and
@@ -203,6 +203,31 @@ export const ReplySuggestionsSchema = z.object({
 export const OfferInputSchema = z.object({
   amount: z.number().int().positive().max(10_000_000_000),
 });
+
+export const TradeOfferInputSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  condition: z.enum(CONDITIONS),
+  description: z.string().trim().max(500).optional(),
+  /** > 0: the buyer adds money; < 0: the buyer asks the seller to add. */
+  topUp: z.number().int().min(-10_000_000_000).max(10_000_000_000),
+});
+
+export const DisputeInputSchema = z.object({
+  reason: z.enum(DISPUTE_REASONS),
+  text: z.string().trim().min(10).max(1000),
+});
+
+export const DisputeResponseSchema = z.object({
+  text: z.string().trim().min(3).max(1000),
+});
+
+export const DisputeResolveSchema = z
+  .object({
+    resolution: z.enum(DISPUTE_RESOLUTIONS),
+    amount: z.number().int().positive().max(10_000_000_000).optional(),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine((d) => d.resolution !== "partial" || d.amount != null, { message: "amount is required for a partial refund" });
 
 export const ReviewInputSchema = z.object({
   rating: z.number().int().min(1).max(5),

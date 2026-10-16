@@ -79,6 +79,16 @@ export function catalogRoutes(
     return page;
   });
 
+  // ---- «Сколько стоит?»: valuation by model and condition, model autocomplete ----
+  app.get<{ Querystring: { q?: string; condition?: string } }>("/valuation", { preHandler: auth.optionalUser }, (req, reply) => {
+    const q = z.object({ q: z.string().trim().min(2).max(120), condition: z.enum(CONDITIONS).default("good") }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: "bad_request" });
+    return catalog.valuation(q.data.q, q.data.condition);
+  });
+  app.get<{ Querystring: { q?: string } }>("/valuation/models", { preHandler: auth.optionalUser }, async (req) =>
+    ({ models: await catalog.valuationModels((req.query.q ?? "").slice(0, 120)) }),
+  );
+
   // ---- discovery: similar listings, recently viewed, seller page, seller insights ----
   const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
   app.get<{ Querystring: { ids?: string } }>("/catalog/batch", { preHandler: auth.optionalUser }, (req) =>

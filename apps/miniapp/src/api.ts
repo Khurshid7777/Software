@@ -1,5 +1,11 @@
 import { t } from "@ishonch/shared/client";
 import type {
+  Condition,
+  DisputeDto,
+  DisputeReason,
+  DisputeResolution,
+  Inspection,
+  Valuation,
   AssistantMessage,
   AssistantResponse,
   BundleQuote,
@@ -84,7 +90,7 @@ export interface ShopInfo {
 }
 
 export type ListingPatch = Partial<
-  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei" | "checklist">
+  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei" | "checklist" | "acceptsTrade">
 >;
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
@@ -126,6 +132,17 @@ export interface PriceRow {
   source: string;
   updatedAt: string;
 }
+/** Admin queue row: the dispute plus what the decision needs. */
+export type AdminDispute = DisputeDto & {
+  title: string;
+  listingId: string;
+  itemPrice: number;
+  deliveredAt: string | null;
+  inspection: Inspection | null;
+  buyerPhone: string | null;
+  sellerPhone: string | null;
+};
+
 export type OperatorOrder = OrderDto & {
   contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null };
   imei: string | null;
@@ -233,6 +250,10 @@ export function createApi(initData: string | null) {
     shareLink: (listingId: string) => request<{ url: string | null }>(`/listings/${listingId}/share`),
     myOffer: (listingId: string) => request<{ offer: OfferDto | null }>(`/listings/${listingId}/offers/mine`),
     makeOffer: (listingId: string, amount: number) => request<OfferDto>(`/listings/${listingId}/offers`, json("POST", { amount })),
+    tradeOffer: (listingId: string, input: { title: string; condition: Condition; description?: string; topUp: number }) =>
+      request<OfferDto>(`/listings/${listingId}/trade-offers`, json("POST", input)),
+    valuation: (q: string, condition: Condition) => request<Valuation>(`/valuation?${new URLSearchParams({ q, condition }).toString()}`),
+    valuationModels: (q: string) => request<{ models: string[] }>(`/valuation/models?q=${encodeURIComponent(q)}`),
     setFavorite: (id: string, on: boolean) => request(`/favorites/${id}`, { method: on ? "POST" : "DELETE" }),
     favorites: () => request<CatalogItem[]>("/favorites"),
     searches: () => request<SavedSearch[]>("/searches"),
@@ -259,6 +280,11 @@ export function createApi(initData: string | null) {
     myOrders: (role: "buyer" | "seller") => request<OrderDto[]>(`/orders/mine?role=${role}`),
     order: (id: string) => request<OrderDto>(`/orders/${encodeURIComponent(id)}`),
     orderAction: (id: string, action: "confirm" | "decline" | "cancel") => request<OrderDto>(`/orders/${id}/${action}`, { method: "POST" }),
+    openDispute: (id: string, reason: DisputeReason, text: string) => request<OrderDto>(`/orders/${id}/dispute`, json("POST", { reason, text })),
+    respondDispute: (id: string, text: string) => request<OrderDto>(`/orders/${id}/dispute/response`, json("POST", { text })),
+    adminDisputes: (all = false) => request<AdminDispute[]>(`/admin/disputes${all ? "?all=1" : ""}`),
+    resolveDispute: (id: string, resolution: DisputeResolution, amount?: number, note?: string) =>
+      request<DisputeDto>(`/admin/disputes/${id}/resolve`, json("POST", { resolution, amount, note: note || undefined })),
     review: (id: string, rating: number, text: string) =>
       request<OrderDto>(`/orders/${id}/review`, json("POST", { rating, text: text.trim() || undefined })),
 

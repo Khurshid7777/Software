@@ -160,6 +160,8 @@ export const listings = pgTable(
     imei: text("imei"),
     /** Phones/tablets: structured condition (battery %, biometrics, repairs, kit), see ConditionChecklist. */
     checklist: jsonb("checklist").notNull().default({}),
+    /** "Рассмотрю обмен": buyers may propose their item plus a top-up. */
+    acceptsTrade: boolean("accepts_trade").notNull().default(false),
     /** «Проверено Ishonch»: the courier's inspection passed (badge while recent), see Inspection. */
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     verification: jsonb("verification"),
@@ -318,7 +320,11 @@ export const offers = pgTable(
     sellerUserId: uuid("seller_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** price | trade (the buyer's item + a top-up, see TradeItem). */
+    kind: text("kind").notNull().default("price"),
+    /** Price offer: the price. Trade: the top-up, > 0 from the buyer, < 0 from the seller. */
     amount: bigint("amount", { mode: "number" }).notNull(),
+    trade: jsonb("trade"),
     /** Listing price when the offer was made. */
     listPrice: bigint("list_price", { mode: "number" }).notNull(),
     status: text("status").notNull().default("pending"),
@@ -417,6 +423,40 @@ export const orderEvents = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("order_events_order_idx").on(t.orderId)],
+);
+
+/** Ishonch guarantee: the buyer's claim after delivery, decided by an admin. One per order. */
+export const disputes = pgTable(
+  "disputes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    text: text("text").notNull(),
+    sellerResponse: text("seller_response"),
+    /** open | resolved */
+    status: text("status").notNull().default("open"),
+    /** refund | partial | rejected */
+    resolution: text("resolution"),
+    amount: bigint("amount", { mode: "number" }),
+    note: text("note"),
+    resolvedBy: uuid("resolved_by").references(() => users.id, { onDelete: "set null" }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("disputes_status_idx").on(t.status, t.createdAt), index("disputes_seller_idx").on(t.sellerUserId, t.resolution)],
 );
 
 /** One review per delivered order, written by the buyer about the seller. */

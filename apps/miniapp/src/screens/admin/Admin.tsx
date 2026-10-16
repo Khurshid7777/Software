@@ -2,12 +2,13 @@ import { useState } from "react";
 import type { Api } from "../../api";
 import { Dashboard } from "./Dashboard";
 import { AuditLog, References, Settings, Users } from "./Manage";
-import { Complaints, ModerationQueue, OperatorOrders } from "./Queues";
+import { Complaints, Disputes, ModerationQueue, OperatorOrders } from "./Queues";
 
 const ADMIN_TABS = [
   ["dashboard", "Сводка"],
   ["moderation", "Модерация"],
   ["complaints", "Жалобы"],
+  ["disputes", "Споры"],
   ["orders", "Заказы"],
   ["users", "Пользователи"],
   ["references", "Справочники"],
@@ -37,6 +38,7 @@ export function Admin({ api, role, onOpenListing }: { api: Api; role: string; on
       {tab === "dashboard" && <Dashboard api={api} />}
       {tab === "moderation" && <ModerationQueue api={api} onOpen={onOpenListing} />}
       {tab === "complaints" && <Complaints api={api} onOpen={onOpenListing} />}
+      {tab === "disputes" && <Disputes api={api} onOpen={onOpenListing} />}
       {tab === "orders" && <OperatorOrders api={api} />}
       {tab === "users" && <Users api={api} />}
       {tab === "references" && <References api={api} />}

@@ -188,6 +188,20 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
       )}
       <ChecklistEditor category={listing.category} value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
 
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={listing.acceptsTrade}
+          onChange={(e) => void save({ acceptsTrade: e.target.checked })}
+          data-testid="accepts-trade"
+        />
+        <span>
+          {t("trade.accepts_label")}
+          <br />
+          <span className="hint">{t("trade.accepts_hint")}</span>
+        </span>
+      </label>
+
       <label className="field">
         {t("sell.field.district")}
         <select value={v.district ?? ""} onChange={(e) => save({ district: (e.target.value || null) as ListingPatch["district"] })}>

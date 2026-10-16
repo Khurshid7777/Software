@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, inspectionChecks, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
-import { ApiError, apiUrl, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
+import { formatUzs, inspectionChecks, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
+import { ApiError, apiUrl, type AdminDispute, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
 import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
@@ -102,6 +102,100 @@ export function Complaints({ api, onOpen }: { api: Api; onOpen: (id: string) => 
               </li>
             ))}
           </ul>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+const DISPUTE_REASON: Record<string, string> = {
+  not_as_described: "Не соответствует описанию",
+  hidden_defect: "Скрытый дефект",
+  not_working: "Не работает",
+  counterfeit: "Подделка",
+  incomplete: "Неполная комплектация",
+  other: "Другое",
+};
+const RESOLUTION_LABEL: Record<string, string> = { refund: "Возврат товара и денег", partial: "Частичная компенсация", rejected: "Отказ" };
+
+/** Ishonch guarantee: both stories, the courier's inspection and phones; refund / compensation / reject. */
+export function Disputes({ api, onOpen }: { api: Api; onOpen: (id: string) => void }) {
+  const [all, setAll] = useState(false);
+  const load = useCallback(() => api.adminDisputes(all), [api, all]);
+  const { data, error, reload, setError } = useLoad<AdminDispute[]>(load);
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  async function resolve(d: AdminDispute, resolution: DisputeResolution) {
+    const amount = resolution === "partial" ? Number(amounts[d.id] ?? 0) : undefined;
+    const label = resolution === "partial" ? `компенсацию ${formatUzs(amount ?? 0)}` : RESOLUTION_LABEL[resolution]!.toLowerCase();
+    if (!(await confirmDialog(`Решение по спору «${d.title}»: ${label}?`))) return;
+    await api.resolveDispute(d.id, resolution, amount, notes[d.id]).catch((e) => setError(e instanceof ApiError ? e.message : "Ошибка"));
+    reload();
+  }
+  return (
+    <div className="stack">
+      <p className="hint">
+        Гарантия Ishonch: покупатель открывает спор в течение 3 дней после доставки. Возврат или компенсация засчитываются против продавца
+        (снижают его уровень доверия).
+      </p>
+      <label className="check-row">
+        <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+        показать решённые
+      </label>
+      {error && <p className="error">{error}</p>}
+      {!data && !error && <p className="hint center">Загрузка…</p>}
+      {data && !data.length && <p className="hint center">Открытых споров нет 🎉</p>}
+      {data?.map((d) => (
+        <article key={d.id} className="card stack" data-testid="dispute-item">
+          <div className="row between">
+            <button className="link" onClick={() => onOpen(d.listingId)}>
+              <strong>{d.title || "—"}</strong>
+            </button>
+            <span className="badge">{formatUzs(d.itemPrice)}</span>
+          </div>
+          <span>⚖️ {DISPUTE_REASON[d.reason] ?? d.reason}</span>
+          <span className="hint">Покупатель: «{d.text}»</span>
+          <span className="hint">{d.sellerResponse ? `Продавец: «${d.sellerResponse}»` : "Продавец ещё не ответил"}</span>
+          {d.inspection && (
+            <span className="hint">
+              🔍 Осмотр курьером: {d.inspection.passed ? "пройден" : "были замечания"}
+              {d.inspection.note && ` — ${d.inspection.note}`}
+            </span>
+          )}
+          <span className="hint">
+            📞 покупатель {d.buyerPhone ?? "—"} · продавец {d.sellerPhone ?? "—"}
+          </span>
+          {d.status === "open" ? (
+            <>
+              <input placeholder="Комментарий к решению (увидят обе стороны)" maxLength={500} value={notes[d.id] ?? ""} onChange={(e) => setNotes({ ...notes, [d.id]: e.target.value })} />
+              <div className="row">
+                <input
+                  inputMode="numeric"
+                  placeholder="Сумма компенсации"
+                  value={amounts[d.id] ?? ""}
+                  onChange={(e) => setAmounts({ ...amounts, [d.id]: e.target.value.replace(/\D/g, "") })}
+                  data-testid="dispute-amount"
+                />
+                <button className="chip" disabled={!Number(amounts[d.id])} onClick={() => resolve(d, "partial")} data-testid="dispute-partial">
+                  Компенсация
+                </button>
+              </div>
+              <div className="row">
+                <button className="chip" onClick={() => resolve(d, "refund")} data-testid="dispute-refund">
+                  ↩️ Возврат
+                </button>
+                <button className="chip danger" onClick={() => resolve(d, "rejected")} data-testid="dispute-reject">
+                  Отказать
+                </button>
+              </div>
+            </>
+          ) : (
+            <span className="hint-card">
+              {RESOLUTION_LABEL[d.resolution ?? ""] ?? d.resolution}
+              {d.amount ? ` — ${formatUzs(d.amount)}` : ""}
+              {d.note && ` · ${d.note}`}
+            </span>
+          )}
         </article>
       ))}
     </div>

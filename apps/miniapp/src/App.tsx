@@ -18,6 +18,7 @@ import { Shop } from "./screens/Shop";
 import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
+import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
 import { setBackButton, type TelegramEnv } from "./telegram";
@@ -36,6 +37,7 @@ type Screen =
   | { name: "orders"; focusId?: string }
   | { name: "profile" }
   | { name: "seller"; id: string }
+  | { name: "valuation" }
   | { name: "admin" };
 
 /** A navigation entry: screens below the top stay mounted (state, loaded lists) and remember their scroll. */
@@ -84,6 +86,7 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_favorites") return { name: "favorites" };
   if (startParam === "screen_profile") return { name: "profile" };
   if (startParam === "screen_shop") return { name: "shop" };
+  if (startParam === "screen_valuation") return { name: "valuation" };
   return { name: "home" };
 }
 
@@ -338,6 +341,9 @@ export function App({ env }: { env: TelegramEnv }) {
             onCatalog={() => go({ name: "catalog" })}
           />
         );
+        break;
+      case "valuation":
+        body = <Valuation api={api} onSell={() => go({ name: "sell" })} />;
         break;
       case "seller":
         body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;

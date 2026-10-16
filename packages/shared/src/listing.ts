@@ -79,6 +79,8 @@ export interface ListingSeller {
   responseMinutes: number | null;
   /** Courier inspections of this seller's items: passed / failed. */
   inspections: { passed: number; failed: number };
+  /** Guarantee disputes decided against the seller. */
+  disputesLost: number;
 }
 
 /** Listing as returned by the API. */
@@ -102,6 +104,8 @@ export interface ListingDto {
   imeiTail: string | null;
   /** Phones/tablets: structured condition. */
   checklist: ConditionChecklist;
+  /** "Рассмотрю обмен": buyers may offer their item plus a top-up. */
+  acceptsTrade: boolean;
   /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
   verified: Inspection | null;
   district: District | null;

@@ -144,6 +144,12 @@ export class Repo {
    * but requires the same model numbers / storage (13 vs 13, 128 vs 128).
    */
   async findReferencePrice(modelKey: string): Promise<MarketRange | null> {
+    const row = await this.findReferenceRow(modelKey);
+    return row ? { min: row.min, median: row.median, max: row.max } : null;
+  }
+
+  /** The reference row of the same model (trigram candidates, then the same numbers and modifiers). */
+  async findReferenceRow(modelKey: string): Promise<(MarketRange & { modelKey: string }) | null> {
     const key = normalizeModelKey(modelKey);
     const rows = await this.db
       .select({
@@ -156,8 +162,20 @@ export class Repo {
       .where(sql`${priceReference.modelKey} % ${key}`)
       .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
       .limit(5);
-    const row = rows.find((r) => sameModel(r.modelKey, key));
-    return row ? { min: row.min, median: row.median, max: row.max } : null;
+    return rows.find((r) => sameModel(r.modelKey, key)) ?? null;
+  }
+
+  /** Model names from the price reference for an autocomplete (prefix words first, then similar). */
+  async suggestModels(query: string, limit = 8): Promise<string[]> {
+    const key = normalizeModelKey(query);
+    if (key.length < 2) return [];
+    const rows = await this.db
+      .select({ modelKey: priceReference.modelKey })
+      .from(priceReference)
+      .where(sql`${priceReference.modelKey} ilike ${`%${key.replace(/[%_\\]/g, "")}%`} or ${priceReference.modelKey} % ${key}`)
+      .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
+      .limit(limit);
+    return rows.map((r) => r.modelKey);
   }
 
   listPriceReference() {

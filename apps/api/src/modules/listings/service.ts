@@ -40,6 +40,7 @@ import type { Repo } from "../../db/repo.js";
 import {
   channels,
   complaints,
+  disputes,
   conversations,
   favorites,
   listingPhotos,
@@ -121,6 +122,7 @@ export const ListingPatchSchema = z
       .refine(isValidImei, "invalid IMEI")
       .nullable(),
     checklist: ConditionChecklistSchema,
+    acceptsTrade: z.boolean(),
   })
   .partial();
 export type ListingPatch = z.infer<typeof ListingPatchSchema>;
@@ -893,7 +895,7 @@ export class ListingService {
   async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt">>): Promise<Map<string, ListingSeller>> {
     const sellerIds = sellers.map((u) => u.id);
     if (!sellerIds.length) return new Map();
-    const [shopRows, sales, ratings, responseOf, insp] = await Promise.all([
+    const [shopRows, sales, ratings, responseOf, insp, lost] = await Promise.all([
       this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds)),
       // Platform sales = orders actually delivered by an Ishonch courier. The seller's own "sold on Ishonch"
       // mark is not counted: anyone could set it and get the "high trust" badge without a single sale.
@@ -917,7 +919,13 @@ export class ListingService {
         .from(orders)
         .where(and(inArray(orders.sellerUserId, sellerIds), sql`${orders.inspection} is not null`))
         .groupBy(orders.sellerUserId),
+      this.db
+        .select({ seller: disputes.sellerUserId, n: count() })
+        .from(disputes)
+        .where(and(inArray(disputes.sellerUserId, sellerIds), inArray(disputes.resolution, ["refund", "partial"])))
+        .groupBy(disputes.sellerUserId),
     ]);
+    const lostOf = new Map(lost.map((r) => [r.seller, Number(r.n)]));
     const shopOf = new Map(shopRows.map((sh) => [sh.ownerUserId, sh]));
     const salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
     const ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
@@ -935,6 +943,7 @@ export class ListingService {
             shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
             responseMinutes: responseOf.get(u.id) ?? null,
             inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
+            disputesLost: lostOf.get(u.id) ?? 0,
           },
         ];
       }),
@@ -1054,6 +1063,7 @@ export class ListingService {
         ...(isOwner ? { imei: l.imei } : {}),
         imeiTail: l.imei ? l.imei.slice(-4) : null,
         checklist: (l.checklist as ConditionChecklist) ?? {},
+        acceptsTrade: l.acceptsTrade,
         verified:
           l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,
@@ -1089,6 +1099,7 @@ export class ListingService {
           shop: null,
           responseMinutes: null,
           inspections: { passed: 0, failed: 0 },
+          disputesLost: 0,
         };
       }
       out.push(dto);

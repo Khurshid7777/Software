@@ -20,6 +20,7 @@ import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
+import { TradeForm } from "../components/TradeForm";
 import { useLang, useT } from "../i18n";
 import { canShareStory, ensureWriteAccess, haptic, shareLink, shareToStory } from "../telegram";
 
@@ -46,6 +47,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   const [complaint, setComplaint] = useState<{ reason: ComplaintReason | null; text: string } | null>(null);
   const [offer, setOffer] = useState<OfferDto | null>(null);
   const [offering, setOffering] = useState<string | null>(null);
+  const [trading, setTrading] = useState(false);
   const [reviews, setReviews] = useState<ReviewDto[] | null>(null);
   const [similar, setSimilar] = useState<CatalogItem[]>([]);
 
@@ -177,6 +179,14 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
               {" "}
               <s className="old-price" data-testid="old-price">{formatUzs(l.previousPrice)}</s>{" "}
               <span className="badge">📉 {t("listing.price_dropped")}</span>
+            </>
+          )}
+          {l.acceptsTrade && (
+            <>
+              {" "}
+              <span className="badge trade-badge" data-testid="trade-badge">
+                {t("trade.badge")}
+              </span>
             </>
           )}
         </p>
@@ -321,10 +331,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
             )}
             {offer && (
               <p className={offer.status === "accepted" ? "hint-card center" : "hint center"} data-testid="offer-status">
-                {t(`offer.status.${offer.status}`, {
-                  amount: formatUzs(offer.amount),
-                  until: new Date(offer.expiresAt).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ", { dateStyle: "short", timeStyle: "short" }),
-                })}
+                {offer.kind === "trade" && offer.trade
+                  ? t(`trade.status.${offer.status}`, { item: offer.trade.title })
+                  : t(`offer.status.${offer.status}`, {
+                      amount: formatUzs(offer.amount),
+                      until: new Date(offer.expiresAt).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ", { dateStyle: "short", timeStyle: "short" }),
+                    })}
               </p>
             )}
             {l.price && offer?.status !== "pending" && offer?.status !== "accepted" &&
@@ -346,6 +358,23 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
                     {t("offer.send")}
                   </button>
                 </div>
+              ))}
+            {l.acceptsTrade && offer?.status !== "pending" && offer?.status !== "accepted" &&
+              (trading ? (
+                <TradeForm
+                  api={api}
+                  listingId={l.id}
+                  onSent={(o) => {
+                    setOffer(o);
+                    setTrading(false);
+                    setToast(t("trade.sent"));
+                  }}
+                  onError={setToast}
+                />
+              ) : (
+                <button className="link" onClick={() => setTrading(true)} data-testid="trade-open">
+                  {t("trade.open")}
+                </button>
               ))}
           </>
         )

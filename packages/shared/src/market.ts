@@ -1,4 +1,6 @@
 import type { CheckCategory } from "./types.js";
+import type { Condition, PriceSuggestion } from "./listing.js";
+import type { MarketRange } from "./price/verdict.js";
 
 // Marketplace features borrowed from Avito / Vinted / Mercari / Carousell / Swappa (see docs/competitive-analysis.md):
 // price offers, price-drop alerts for favorites, IMEI for phones.
@@ -16,10 +18,17 @@ export const OFFER_ACCEPTED_HOURS = 48;
 /** Offers per buyer per day (each one is a DM to a seller). */
 export const OFFERS_PER_DAY = 10;
 
+export const OFFER_KINDS = ["price", "trade"] as const;
+export type OfferKind = (typeof OFFER_KINDS)[number];
+
 export interface OfferDto {
   id: string;
   listingId: string;
+  kind: OfferKind;
+  /** Price offer: the proposed price. Trade: the top-up (> 0 the buyer adds money, < 0 the seller does). */
   amount: number;
+  /** Trade offers: what the buyer gives in exchange. */
+  trade: TradeItem | null;
   listPrice: number;
   status: OfferStatus;
   createdAt: string;
@@ -197,3 +206,60 @@ export interface ListingInsights {
 
 /** Public seller page: profile facts + live listings. */
 export const SELLER_PAGE_LIMIT = 30;
+
+// ---------- trade-in between people («обмен с доплатой») ----------
+/** The buyer's item offered in exchange; `estimate` is our valuation of it (null: unknown model). */
+export interface TradeItem {
+  title: string;
+  condition: Condition;
+  description: string | null;
+  modelKey: string | null;
+  estimate: number | null;
+}
+/** Top-up limit either way, as a share of the asking price (a 10x top-up is not an exchange). */
+export const TRADE_MAX_TOPUP_PCT = 200;
+
+// ---------- valuation («Сколько стоит?») ----------
+/** Reference prices are for a used item in good condition; other conditions scale them. */
+export const CONDITION_FACTOR: Record<Condition, number> = { new: 1.15, like_new: 1.05, good: 1, fair: 0.85, broken: 0.5 };
+export const VALUATION_HISTORY_MONTHS = 6;
+
+export interface Valuation {
+  /** The model we priced (the matched reference row, else the normalized query). */
+  modelKey: string;
+  condition: Condition;
+  /** Market range for the condition. */
+  range: MarketRange | null;
+  source: "reference" | "catalog" | "none";
+  /** Quick / market / max price for the condition. */
+  estimate: PriceSuggestion | null;
+  /** Sold on Ishonch in the last 90 days. */
+  sold: { count: number; median: number | null };
+  /** Live listings of the model now. */
+  live: number;
+  /** Median asking price per month (oldest first), months without listings left out. */
+  history: Array<{ month: string; median: number; n: number }>;
+}
+
+// ---------- Ishonch guarantee: disputes after delivery ----------
+/** The buyer can open a dispute this long after delivery (hidden defects show up in use). */
+export const GUARANTEE_DAYS = 3;
+export const DISPUTE_REASONS = ["not_as_described", "hidden_defect", "not_working", "counterfeit", "incomplete", "other"] as const;
+export type DisputeReason = (typeof DISPUTE_REASONS)[number];
+/** refund: the item goes back, full refund; partial: compensation of `amount`; rejected: no fault found. */
+export const DISPUTE_RESOLUTIONS = ["refund", "partial", "rejected"] as const;
+export type DisputeResolution = (typeof DISPUTE_RESOLUTIONS)[number];
+
+export interface DisputeDto {
+  id: string;
+  orderId: string;
+  reason: DisputeReason;
+  text: string;
+  sellerResponse: string | null;
+  status: "open" | "resolved";
+  resolution: DisputeResolution | null;
+  amount: number | null;
+  note: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}

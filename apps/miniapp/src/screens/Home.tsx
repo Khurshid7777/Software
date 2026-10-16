@@ -28,7 +28,7 @@ interface Props {
   /** Staff see an entry to the admin panel (operators: delivery orders only). */
   staff?: "admin" | "operator" | null;
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin") => void;
+  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation") => void;
   onCatalog: (filters?: CatalogFilters) => void;
   onListing: (id: string) => void;
 }
@@ -124,6 +124,14 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
           <span className="hint">{t("home.quick.favorites_desc")}</span>
         </button>
       </div>
+
+      <button className="tile" onClick={() => onOpen("valuation")} data-testid="open-valuation">
+        <span className="tile-icon">💰</span>
+        <span>
+          <strong>{t("home.quick.valuation")}</strong>
+          <span className="hint">{t("valuation.subtitle")}</span>
+        </span>
+      </button>
 
       {recent.length > 0 && (
         <section className="stack-tight" data-testid="recently-viewed">

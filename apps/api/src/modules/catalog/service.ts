@@ -1,5 +1,11 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, sql, type SQL } from "drizzle-orm";
 import {
+  CONDITION_FACTOR,
+  VALUATION_HISTORY_MONTHS,
+  normalizeModelKey,
+  suggestPrice,
+  type Condition,
+  type Valuation,
   canonicalQuery,
   canonicalWord,
   IMEI_CATEGORIES,
@@ -228,6 +234,7 @@ export class CatalogService {
       accountAgeDays: (Date.now() - new Date(s.registeredAt).getTime()) / DAY,
       rating: s.rating,
       inspections: s.inspections,
+      disputesLost: s.disputesLost,
     });
   }
 
@@ -273,6 +280,64 @@ export class CatalogService {
       .sort((a, b) => a - b);
     if (prices.length < 3) return null;
     return { min: quantile(prices, 0.2), median: quantile(prices, 0.5), max: quantile(prices, 0.8) };
+  }
+
+  // ---------- valuation («Сколько стоит?») ----------
+  /**
+   * Market price for a model in a condition: the price reference (or our catalog median) scaled by the
+   * condition, what sold on Ishonch lately and the monthly asking-price history. No AI: instant and free.
+   */
+  async valuation(query: string, condition: Condition): Promise<Valuation> {
+    const ref = await this.repo.findReferenceRow(query);
+    const modelKey = ref?.modelKey ?? normalizeModelKey(query);
+    const base = ref ?? (await this.findCatalogPrice(modelKey));
+    const source: Valuation["source"] = ref ? "reference" : base ? "catalog" : "none";
+    const f = CONDITION_FACTOR[condition];
+    const scale = (n: number) => Math.round((n * f) / 10_000) * 10_000;
+    const range = base ? { min: scale(base.min), median: scale(base.median), max: scale(base.max) } : null;
+
+    const since = new Date(Date.now() - VALUATION_HISTORY_MONTHS * 31 * DAY);
+    const rows = await this.db
+      .select({
+        price: listings.price,
+        status: listings.status,
+        soldAt: listings.soldAt,
+        publishedAt: listings.publishedAt,
+        key: sql<string>`${listings.attributes}->>'modelKey'`,
+      })
+      .from(listings)
+      .where(
+        sql`${listings.status} in ('active', 'reserved', 'sold', 'archived') and ${listings.price} > 0
+            and ${listings.publishedAt} > ${since.toISOString()}
+            and coalesce(${listings.attributes}->>'modelKey', '') % ${modelKey}`,
+      )
+      .limit(1000);
+    const same = rows.filter((r) => r.key && sameModel(r.key, modelKey));
+    const soldRecent = same
+      .filter((r) => r.status === "sold" && r.soldAt && r.soldAt.getTime() > Date.now() - 90 * DAY)
+      .map((r) => r.price!)
+      .sort((a, b) => a - b);
+    const byMonth = new Map<string, number[]>();
+    for (const r of same) {
+      const month = (r.soldAt ?? r.publishedAt)!.toISOString().slice(0, 7);
+      byMonth.set(month, [...(byMonth.get(month) ?? []), r.price!]);
+    }
+    return {
+      modelKey,
+      condition,
+      range,
+      source,
+      estimate: suggestPrice(range, source),
+      sold: { count: soldRecent.length, median: soldRecent.length ? quantile(soldRecent, 0.5) : null },
+      live: same.filter((r) => r.status === "active").length,
+      history: [...byMonth.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, prices]) => ({ month, median: quantile(prices.sort((a, b) => a - b), 0.5), n: prices.length })),
+    };
+  }
+
+  valuationModels(query: string) {
+    return this.repo.suggestModels(query);
   }
 
   // ---------- discovery ----------

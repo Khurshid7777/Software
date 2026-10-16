@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, listingTitle, type OrderDto } from "@ishonch/shared/client";
+import { formatUzs, listingTitle, type DisputeReason, type OrderDto } from "@ishonch/shared/client";
 import { photoUrl, ApiError, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { LoadError } from "../components/LoadError";
+import { Guarantee } from "../components/Guarantee";
 import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
 import { confirmDialog } from "../dialogs";
@@ -108,6 +109,8 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
           onOpenListing={() => onOpenListing(o.listing.id)}
           onAction={(a) => act(() => api.orderAction(o.id, a))}
           onReview={(rating, text) => act(() => api.review(o.id, rating, text), t("orders.review_thanks"))}
+          onDispute={(reason, text) => act(() => api.openDispute(o.id, reason, text), t("guarantee.sent"))}
+          onRespond={(text) => act(() => api.respondDispute(o.id, text), t("dispute.responded"))}
         />
       ))}
     </div>
@@ -120,12 +123,16 @@ function OrderCard({
   onOpenListing,
   onAction,
   onReview,
+  onDispute,
+  onRespond,
 }: {
   order: OrderDto;
   highlighted: boolean;
   onOpenListing: () => void;
   onAction: (a: "confirm" | "decline" | "cancel") => void;
   onReview: (rating: number, text: string) => void;
+  onDispute: (reason: DisputeReason, text: string) => void;
+  onRespond: (text: string) => void;
 }) {
   const t = useT();
   const lang = useLang();
@@ -181,7 +188,7 @@ function OrderCard({
         </ol>
       </details>
 
-      {o.actions.length > 0 && !o.actions.includes("review") && (
+      {o.actions.some((a) => a === "confirm" || a === "decline" || a === "cancel") && (
         <div className="row wrap">
           {o.actions.includes("confirm") && (
             <button className="chip" onClick={() => onAction("confirm")} data-testid="order-confirm">
@@ -218,6 +225,7 @@ function OrderCard({
         </div>
       )}
       {o.review && <p className="hint">{t("orders.your_review", { stars: "⭐".repeat(o.review.rating) })}</p>}
+      <Guarantee order={o} onOpen={onDispute} onRespond={onRespond} />
     </article>
   );
 }

@@ -156,7 +156,8 @@ export class MetricsService {
     const decisions = Object.fromEntries(moderation.map((r) => [String(r.decision), num(r.n)]));
     const system = await this.one(sql`
       select count(*) filter (where done_at is null and attempts < ${MAX_ATTEMPTS}) as queued,
-             count(*) filter (where done_at is null and attempts >= ${MAX_ATTEMPTS}) as failed
+             count(*) filter (where done_at is null and attempts >= ${MAX_ATTEMPTS}) as failed,
+             (select count(*) from disputes where status = 'open') as disputes
       from jobs`);
     return {
       period: { from: from.toISOString(), to: to.toISOString(), days },
@@ -211,7 +212,7 @@ export class MetricsService {
         monthlyLimitUsd: limit,
         byFeature: ai.map((r) => ({ feature: String(r.feature), calls: num(r.calls), usd: round4(num(r.usd)) })),
       },
-      system: { queuedJobs: num(system.queued), failedJobs: num(system.failed) },
+      system: { queuedJobs: num(system.queued), failedJobs: num(system.failed), openDisputes: num(system.disputes) },
       daily: daily.map((r) => ({
         date: String(r.day),
         newUsers: num(r.new_users),
@@ -272,7 +273,8 @@ export class MetricsService {
         (select count(*) from complaints where resolved_at is null) as complaints,
         (select count(*) from orders where status in ('new', 'confirmed', 'courier_assigned', 'picked_up')
            and updated_at < now() - interval '24 hours') as stuck,
-        (select count(*) from jobs where done_at is null and attempts >= ${MAX_ATTEMPTS}) as failed_jobs`);
+        (select count(*) from jobs where done_at is null and attempts >= ${MAX_ATTEMPTS}) as failed_jobs,
+        (select count(*) from disputes where status = 'open') as disputes`);
     const month = await this.repo.aiSpendSince(startOfMonthUtc(now));
     const limit = await this.repo.getSetting("ai_monthly_limit_usd", 50);
     const pct = limit ? Math.round((month / limit) * 100) : 0;
@@ -281,6 +283,7 @@ export class MetricsService {
       num(y.pending) && `🛡 на модерации: ${num(y.pending)}`,
       num(y.complaints) && `⚠️ открытых жалоб: ${num(y.complaints)}`,
       num(y.stuck) && `⏳ заказов без движения > 24 ч: ${num(y.stuck)}`,
+      num(y.disputes) && `⚖️ открытых споров по гарантии: ${num(y.disputes)}`,
       pct >= 80 && `💸 AI: ${pct}% месячного лимита`,
       num(y.failed_jobs) && `🧯 фоновых задач с ошибкой: ${num(y.failed_jobs)} (посты в каналы, уведомления)`,
     ].filter(Boolean);

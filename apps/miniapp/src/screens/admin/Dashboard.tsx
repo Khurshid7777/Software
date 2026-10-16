@@ -70,6 +70,11 @@ export function Dashboard({ api }: { api: Api }) {
             />
           </div>
 
+          {m.system.openDisputes > 0 && (
+            <p className="card kpi-alert" data-testid="open-disputes">
+              ⚖️ Открытых споров по гарантии: {m.system.openDisputes} — вкладка «Споры».
+            </p>
+          )}
           {m.system.failedJobs > 0 && (
             <p className="card kpi-alert" data-testid="failed-jobs">
               🧯 Фоновых задач с ошибкой: {m.system.failedJobs} (посты в каналы, уведомления). В очереди: {m.system.queuedJobs}. Причины —

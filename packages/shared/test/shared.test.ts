@@ -28,6 +28,7 @@ import {
   repairKinds,
   ConditionChecklistSchema,
   isCargo,
+  prettyModel,
   type CourierTariff,
 } from "../src/index.js";
 
@@ -337,5 +338,14 @@ describe("category-specific condition", () => {
     expect(ConditionChecklistSchema.parse({ mining: "yes", ageYears: 0, deadPixels: "few" })).toEqual({ mining: "yes", ageYears: 0, deadPixels: "few" });
     expect(ConditionChecklistSchema.safeParse({ mining: "maybe" }).success).toBe(false);
     expect(ConditionChecklistSchema.safeParse({ ageYears: 41 }).success).toBe(false);
+  });
+});
+
+describe("prettyModel", () => {
+  it("writes model keys the way people do", () => {
+    expect(prettyModel("apple iphone 13 128gb")).toBe("Apple iPhone 13 128 GB");
+    expect(prettyModel("nvidia geforce rtx 3060 12gb")).toBe("Nvidia Geforce RTX 3060 12 GB");
+    expect(prettyModel("lg f2j3hs0w 7kg")).toBe("LG F2J3HS0W 7KG");
+    expect(prettyModel("samsung galaxy s23 ultra 256gb")).toBe("Samsung Galaxy S23 Ultra 256 GB");
   });
 });
