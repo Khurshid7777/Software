@@ -351,3 +351,60 @@ export function applyDiscount(price: number, pct: number) {
 
 /** At most one "new item from a seller you follow" message per seller and Tashkent day. */
 export const FOLLOW_ALERTS_PER_DAY = 1;
+
+// ---------- Stage 18: meeting in person (docs/plan.md) ----------
+
+/**
+ * Busy public places with security and cameras where buyers and sellers of electronics meet in Tashkent
+ * (OfferUp "MeetUp Spots"). A starting list: the main entrance of big malls and the electronics market.
+ */
+export const MEETING_SPOTS = ["samarqand_darvoza", "mega_planet", "compass", "riviera", "malika"] as const;
+export type MeetingSpot = (typeof MEETING_SPOTS)[number];
+
+/** Daytime only (Tashkent time): from 9:00, the last meeting starts at 20:00. */
+export const MEETING_FROM_HOUR = 9;
+export const MEETING_TO_HOUR = 21;
+export const MEETING_MAX_DAYS = 7;
+export const MEETING_MIN_LEAD_MINUTES = 60;
+export const MEETINGS_PER_DAY = 5;
+export const MEETING_REMIND_HOURS = 2;
+
+export const MEETING_STATUSES = ["pending", "accepted", "declined", "cancelled", "bought", "not_bought"] as const;
+export type MeetingStatus = (typeof MEETING_STATUSES)[number];
+
+export interface MeetingDto {
+  id: string;
+  listingId: string;
+  title: string;
+  price: number | null;
+  category: string;
+  role: "buyer" | "seller";
+  spot: MeetingSpot | null;
+  /** The buyer's own place when no spot from the list was chosen. */
+  place: string | null;
+  at: string;
+  note: string | null;
+  status: MeetingStatus;
+  actions: Array<"accept" | "decline" | "cancel" | "report">;
+}
+
+/** Why a meeting time is not allowed (null — fine). Times are whole hours in Tashkent. */
+export function meetingTimeError(at: Date, now: Date): "too_soon" | "too_far" | "night" | null {
+  if (at.getTime() < now.getTime() + MEETING_MIN_LEAD_MINUTES * 60_000) return "too_soon";
+  if (at.getTime() > now.getTime() + MEETING_MAX_DAYS * 864e5) return "too_far";
+  const local = new Date(at.getTime() + 5 * 3600_000);
+  const minutes = local.getUTCHours() * 60 + local.getUTCMinutes();
+  if (minutes < MEETING_FROM_HOUR * 60 || minutes > (MEETING_TO_HOUR - 1) * 60) return "night";
+  return null;
+}
+
+/** Bookable hourly slots for one Tashkent day (`dayOffset` 0 = today), as UTC instants. */
+export function meetingSlots(now: Date, dayOffset: number): Date[] {
+  const local = new Date(now.getTime() + 5 * 3600_000);
+  const out: Date[] = [];
+  for (let h = MEETING_FROM_HOUR; h < MEETING_TO_HOUR; h++) {
+    const at = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + dayOffset, h) - 5 * 3600_000);
+    if (!meetingTimeError(at, now)) out.push(at);
+  }
+  return out;
+}

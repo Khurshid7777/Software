@@ -249,6 +249,15 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   );
 
   // Seller: answer a buyer's price offer.
+  // Seller: answer a request to meet in person (stage 18).
+  bot.callbackQuery(/^meet:(accept|decline):([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      const m = await api.meetingAction(user, ctx.match[2]!, ctx.match[1] as "accept" | "decline");
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, m.status === "accepted" ? "meet.status.accepted" : "meet.status.declined");
+    }),
+  );
+
   bot.callbackQuery(/^offer:(accept|decline):([0-9a-f-]{36})$/, (ctx) =>
     buttonAction(ctx, async (user, lang) => {
       const offer = await api.offerAction(user, ctx.match[2]!, ctx.match[1] as "accept" | "decline");

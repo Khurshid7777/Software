@@ -1,5 +1,7 @@
 import { t } from "@ishonch/shared/client";
 import type {
+  MeetingDto,
+  MeetingSpot,
   Condition,
   DisputeDto,
   DisputeReason,
@@ -214,6 +216,10 @@ export function createApi(initData: string | null) {
     generate: (id: string, answers: Record<string, string>) =>
       request<ListingDto>(`/listings/${id}/generate`, json("POST", { answers })),
     updateListing: (id: string, patch: ListingPatch) => request<ListingDto>(`/listings/${id}`, json("PATCH", patch)),
+    requestMeeting: (id: string, body: { spot: MeetingSpot | null; place: string | null; at: string; note: string | null }) =>
+      request<MeetingDto>(`/listings/${id}/meetings`, json("POST", body)),
+    meetings: () => request<MeetingDto[]>("/meetings"),
+    meetingAction: (id: string, action: string, body: object = {}) => request<MeetingDto>(`/meetings/${id}/${action}`, json("POST", body)),
     offerToLikers: (id: string, amount: number) =>
       request<{ sent: number; price: number; expiresAt: string; deferredUntil: string | null }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {

@@ -20,6 +20,8 @@ import { LISTING_AI_PER_DAY, ListingService } from "./modules/listings/service.j
 import { ShopService } from "./modules/shops/service.js";
 import { FsStorage, S3Storage, type Storage } from "./storage/storage.js";
 import { DisabledSpeechToText, HttpWhisperSpeechToText, type SpeechToText } from "./stt/speechToText.js";
+import { MeetingService } from "./modules/meetings/service.js";
+import { meetingRoutes } from "./modules/meetings/routes.js";
 import { BotApiPublisher, type ChannelPublisher, type Notifier } from "./telegram/publisher.js";
 import { AssistantService } from "./modules/catalog/assistant.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
@@ -135,6 +137,8 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     publisher !== undefined ? publisher : config.BOT_TOKEN ? new BotApiPublisher(config.BOT_TOKEN, config.MINIAPP_LINK) : null;
   // eslint-disable-next-line prefer-const
   let catalog: CatalogService;
+  // eslint-disable-next-line prefer-const
+  let meetingsSvc: MeetingService;
   const checks = new CheckService(
     repo,
     aiService,
@@ -175,13 +179,19 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     enqueue: (kind, payload, runAt) => queue.enqueue(kind, payload, runAt),
     quietUntil: config.QUIET_HOURS ? quietUntil : undefined,
     onPublished: (id) => catalog.notifySavedSearches(id),
-    onUnavailable: (id, reason): Promise<number> => ordersSvc.closeNewOrders(id, reason),
+    onUnavailable: async (id, reason): Promise<number> => {
+      const closed = await ordersSvc.closeNewOrders(id, reason);
+      // Sold, archived or hidden: meetings about it are off too (a price change keeps them).
+      if (reason === "listing_unavailable") await meetingsSvc.cancelForListing(id);
+      return closed;
+    },
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
     usdRate: config.USD_RATE,
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
   });
 
   catalog = new CatalogService(repo, listingsSvc, gateway);
+  meetingsSvc = new MeetingService({ repo, notifier: gateway, markSold: (id) => listingsSvc.soldAtMeeting(id) });
   const assistant = new AssistantService(repo, catalog, aiService, {
     perDay: config.ASSISTANT_PER_DAY,
     usdRate: config.USD_RATE,
@@ -252,6 +262,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   }, (actor, action, target, details) => repo.audit(actor, action, target, details));
   evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
+  meetingRoutes(app, meetingsSvc, { requireUser: auth.requireUser });
   catalogRoutes(app, catalog, assistant, new ReplySuggestions(repo, aiService, catalog), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
@@ -266,6 +277,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     catalog,
     listings: listingsSvc,
     orders: ordersSvc,
+    meetings: meetingsSvc,
     trust,
     metrics,
     digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff, adminLink }, config.DIGEST_HOUR, now),
@@ -280,6 +292,7 @@ declare module "fastify" {
       catalog: CatalogService;
       listings: ListingService;
       orders: OrderService;
+      meetings: MeetingService;
       trust: TrustService;
       metrics: MetricsService;
       digest: (now?: Date) => Promise<boolean>;

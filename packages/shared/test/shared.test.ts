@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  meetingSlots,
+  meetingTimeError,
   applyDiscount,
   bundleDiscountPct,
   quietUntil,
@@ -422,5 +424,24 @@ describe("coming back (stage 17)", () => {
     expect(bundleDiscountPct(null, 3)).toBe(0);
     expect(applyDiscount(1_234_567, 10)).toBe(1_111_000);
     expect(applyDiscount(1_234_567, 0)).toBe(1_234_567);
+  });
+});
+
+describe("meetings (stage 18)", () => {
+  const now = new Date("2026-03-10T05:30:00Z"); // 10:30 in Tashkent
+  it("daytime only, at least an hour ahead, at most 7 days", () => {
+    expect(meetingTimeError(new Date("2026-03-10T06:00:00Z"), now)).toBe("too_soon"); // 11:00
+    expect(meetingTimeError(new Date("2026-03-10T07:00:00Z"), now)).toBeNull(); // 12:00
+    expect(meetingTimeError(new Date("2026-03-10T15:00:00Z"), now)).toBeNull(); // 20:00
+    expect(meetingTimeError(new Date("2026-03-10T16:00:00Z"), now)).toBe("night"); // 21:00
+    expect(meetingTimeError(new Date("2026-03-11T03:00:00Z"), now)).toBe("night"); // 08:00
+    expect(meetingTimeError(new Date("2026-03-11T04:00:00Z"), now)).toBeNull(); // 09:00
+    expect(meetingTimeError(new Date("2026-03-18T07:00:00Z"), now)).toBe("too_far");
+  });
+  it("hourly slots of a day skip the past and the night", () => {
+    const today = meetingSlots(now, 0).map((d) => d.toISOString());
+    expect(today[0]).toBe("2026-03-10T07:00:00.000Z"); // 12:00
+    expect(today.at(-1)).toBe("2026-03-10T15:00:00.000Z"); // 20:00
+    expect(meetingSlots(now, 1)).toHaveLength(12); // 9:00 … 20:00
   });
 });

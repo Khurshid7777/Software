@@ -634,3 +634,37 @@ export const follows = pgTable(
   },
   (t) => [primaryKey({ columns: [t.followerUserId, t.sellerUserId] }), index("follows_seller_idx").on(t.sellerUserId)],
 );
+
+/**
+ * A meeting in person arranged on Ishonch (stage 18): the buyer proposes a place and an hour, the seller
+ * answers in the bot; payment happens hand to hand and never passes through Ishonch.
+ */
+export const meetings = pgTable(
+  "meetings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** A spot from MEETING_SPOTS, or null with `place` written by the buyer. */
+    spot: text("spot"),
+    place: text("place"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note"),
+    status: text("status").notNull().default("pending"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("meetings_listing_idx").on(t.listingId),
+    index("meetings_buyer_idx").on(t.buyerUserId),
+    index("meetings_seller_idx").on(t.sellerUserId),
+  ],
+);

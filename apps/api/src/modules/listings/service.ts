@@ -793,6 +793,20 @@ export class ListingService {
   }
 
   // ---------- management ----------
+  /**
+   * The buyer reported buying the item at a meeting arranged on Ishonch (stage 18). Not counted in
+   * "platform sales" — those are delivered orders only, which Ishonch sees itself.
+   */
+  async soldAtMeeting(id: string) {
+    const done = await this.db
+      .update(listings)
+      .set({ status: "sold", soldVia: "platform", soldAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(listings.id, id), eq(listings.status, "active")))
+      .returning({ id: listings.id });
+    if (done.length) await this.d.onUnavailable?.(id, "listing_unavailable");
+    return done.length > 0;
+  }
+
   async markSold(user: User, id: string, via: "platform" | "elsewhere") {
     const l = await this.own(user, id);
     // A reserved listing is sold through its delivery order (or the order is cancelled first).

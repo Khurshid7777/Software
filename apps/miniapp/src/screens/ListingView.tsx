@@ -21,6 +21,7 @@ import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
+import { MeetForm } from "../components/Meeting";
 import { Passport } from "../components/Passport";
 import { BundleBadge, SellerBadges } from "../components/SellerBadges";
 import { useLang, useT } from "../i18n";
@@ -50,6 +51,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   const [offer, setOffer] = useState<OfferDto | null>(null);
   const [offering, setOffering] = useState<string | null>(null);
   const [trading, setTrading] = useState(false);
+  const [meeting, setMeeting] = useState<"form" | "sent" | null>(null);
   const [reviews, setReviews] = useState<ReviewDto[] | null>(null);
   const [similar, setSimilar] = useState<CatalogItem[]>([]);
 
@@ -385,6 +387,26 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
               ) : (
                 <button className="link" onClick={() => setTrading(true)} data-testid="trade-open">
                   {t("trade.open")}
+                </button>
+              ))}
+            {l.status === "active" &&
+              (meeting === "form" ? (
+                <MeetForm
+                  api={api}
+                  listingId={l.id}
+                  onSent={() => {
+                    setMeeting("sent");
+                    setToast(t("meet.sent"));
+                  }}
+                  onError={setToast}
+                />
+              ) : meeting === "sent" ? (
+                <p className="hint-card center" data-testid="meet-sent">
+                  {t("meet.sent")}
+                </p>
+              ) : (
+                <button className="secondary" onClick={() => setMeeting("form")} data-testid="meet-open">
+                  {t("meet.button")}
                 </button>
               ))}
           </>

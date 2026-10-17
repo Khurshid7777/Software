@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, listingTitle, type DisputeReason, type OrderDto } from "@ishonch/shared/client";
+import { formatUzs, listingTitle, type DisputeReason, type MeetingDto, type OrderDto } from "@ishonch/shared/client";
+import { MeetingCard } from "../components/Meeting";
 import { photoUrl, ApiError, compressImage, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { LoadError } from "../components/LoadError";
@@ -27,6 +28,7 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
   const [items, setItems] = useState<OrderDto[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [meetings, setMeetings] = useState<MeetingDto[]>([]);
 
   // Notifications about sales open the seller tab.
   useEffect(() => {
@@ -47,6 +49,10 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
       .myOrders(role)
       .then((list) => isCurrent() && setItems(list))
       .catch(() => isCurrent() && (setItems([]), setFailed(true)));
+    api
+      .meetings()
+      .then((list) => isCurrent() && setMeetings(list))
+      .catch(() => undefined);
   }, [api, role, begin]);
   useEffect(load, [load]);
   // Bring the order from the notification into view once the list is there.
@@ -85,6 +91,16 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
         ))}
       </div>
       {toast && <Toast text={toast} onClose={() => setToast(null)} />}
+      {meetings.filter((m) => m.role === role).length > 0 && (
+        <section className="stack-tight" data-testid="meetings">
+          <h2>{t("meet.list_title")}</h2>
+          {meetings
+            .filter((m) => m.role === role)
+            .map((m) => (
+              <MeetingCard key={m.id} meeting={m} onOpenListing={() => onOpenListing(m.listingId)} onAction={(a, body) => act(() => api.meetingAction(m.id, a, body))} />
+            ))}
+        </section>
+      )}
       {items === null && <p className="hint center">{t("common.loading")}</p>}
       {failed && <LoadError onRetry={load} />}
       {items?.length === 0 && !failed && (

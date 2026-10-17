@@ -124,6 +124,10 @@ class FakeApi {
     this.calls.push(`mod:${u.id}:${decision}:${id}`);
     return { status: decision === "approve" ? "active" : "rejected", title: "iPhone" };
   }
+  async meetingAction(u: { id: number }, id: string, action: string) {
+    this.calls.push(`meet:${u.id}:${id}:${action}`);
+    return { status: action === "accept" ? "accepted" : "declined" };
+  }
   async renewListing(u: { id: number }, id: string) {
     this.calls.push(`renew:${u.id}:${id}`);
     return {};
@@ -444,5 +448,23 @@ describe("Reply button state lives in the API", () => {
     await bot.idle();
     expect(String(sent.at(-1)!.payload.text)).toContain("истекло");
     expect(api.calls.some((c) => c.startsWith("checkText:поздний"))).toBe(false);
+  });
+
+  it("meeting request buttons: the seller accepts in the bot", async () => {
+    const { api, bot, sent } = setup();
+    const id = "22222222-2222-2222-2222-222222222222";
+    await bot.handleUpdate({
+      update_id: 4,
+      callback_query: {
+        id: "cb1",
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        chat_instance: "1",
+        data: `meet:accept:${id}`,
+        message: { message_id: 3, date: 0, chat: { id: 5, type: "private", first_name: "A" }, text: "🤝" },
+      },
+    });
+    await bot.idle();
+    expect(api.calls).toContain(`meet:5:${id}:accept`);
+    expect(sent.some((s) => s.method === "answerCallbackQuery" && String(s.payload.text).includes("Договорились"))).toBe(true);
   });
 });
