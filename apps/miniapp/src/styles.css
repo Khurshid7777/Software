@@ -116,6 +116,7 @@ button.secondary.recording { color: var(--danger); border-color: var(--danger); 
 .chip.active { border-color: var(--button); outline: 1px solid var(--button); }
 .add-thumb { display: flex; align-items: center; justify-content: center; font-size: 26px; color: var(--link); background: var(--bg); cursor: pointer; }
 .hint-card { background: color-mix(in srgb, var(--button) 10%, var(--bg)); }
+.promoted { padding: 8px; border-radius: 14px; border: 1px dashed color-mix(in srgb, var(--hint) 50%, transparent); }
 .spinner {
   width: 36px; height: 36px; border-radius: 50%; border: 4px solid var(--bg);
   border-top-color: var(--button); animation: spin 0.9s linear infinite; margin: 40px auto 8px;

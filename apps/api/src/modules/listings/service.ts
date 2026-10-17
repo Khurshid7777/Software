@@ -1258,6 +1258,7 @@ export class ListingService {
           ? {
               autoDrop: l.autoDropFloor && l.autoDropAt ? { floor: l.autoDropFloor, nextAt: l.autoDropAt.toISOString() } : null,
               likersOffer: l.likersOfferPrice && l.likersOfferAt ? { price: l.likersOfferPrice, at: l.likersOfferAt.toISOString() } : null,
+              promotedUntil: l.promotedUntil && l.promotedUntil > new Date() ? l.promotedUntil.toISOString() : null,
             }
           : {}),
         verified:

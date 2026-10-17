@@ -155,6 +155,42 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     if (user) await ctx.reply(t(await langOf(user), "bot.help"));
   });
 
+  // Telegram requires bots that take payments to answer /paysupport.
+  bot.command("paysupport", async (ctx) => {
+    const user = tgUser(ctx);
+    if (user) await ctx.reply(t(await langOf(user), "bot.paysupport"));
+  });
+
+  // ---- Telegram Stars (stage 18): the API decides, the bot only relays ----
+  // Telegram waits ~10 s for the answer; an API failure says no rather than charging for nothing.
+  bot.on("pre_checkout_query", async (ctx) => {
+    const q = ctx.preCheckoutQuery;
+    const user = { id: q.from.id, language_code: q.from.language_code };
+    const res = await api
+      .paymentPrecheck(user, { payload: q.invoice_payload, currency: q.currency, amount: q.total_amount })
+      .catch(async () => ({ ok: false, message: t(await langOf(user), "common.error") }));
+    await ctx.answerPreCheckoutQuery(res.ok, res.ok ? undefined : { error_message: res.message ?? "" });
+  });
+
+  bot.on("message:successful_payment", async (ctx) => {
+    const user = tgUser(ctx);
+    if (!user) return;
+    const p = ctx.message.successful_payment;
+    try {
+      const res = await api.paymentPaid(user, {
+        payload: p.invoice_payload,
+        currency: p.currency,
+        amount: p.total_amount,
+        chargeId: p.telegram_payment_charge_id,
+      });
+      await ctx.reply(res.message);
+    } catch (err) {
+      // The charge id is logged so support can refund by hand (/paysupport).
+      console.error("successful_payment not recorded", p.telegram_payment_charge_id, err);
+      await ctx.reply(t(await langOf(user), "bot.paysupport"));
+    }
+  });
+
   bot.command("lang", async (ctx) => {
     await ctx.reply(t("uz", "bot.choose_language"), {
       reply_markup: new InlineKeyboard().text("🇺🇿 O'zbekcha", "lang:uz").text("🇷🇺 Русский", "lang:ru"),

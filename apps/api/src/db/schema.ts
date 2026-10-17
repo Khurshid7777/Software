@@ -171,6 +171,8 @@ export const listings = pgTable(
     /** The last «Предложить избранным»: price and time (limits how often and how high the next one is). */
     likersOfferPrice: bigint("likers_offer_price", { mode: "number" }),
     likersOfferAt: timestamp("likers_offer_at", { withTimezone: true }),
+  /** Paid promotion (stage 18): shown in the promoted block until then. */
+  promotedUntil: timestamp("promoted_until", { withTimezone: true }),
     /**
      * Condition grade A–D (catalog filter «Класс A–B»). Mirrors computeGrade() in @ishonch/shared/passport —
      * the condition sets the best grade, checklist facts only lower it; a test keeps the two identical.
@@ -633,4 +635,32 @@ export const follows = pgTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.followerUserId, t.sellerUserId] }), index("follows_seller_idx").on(t.sellerUserId)],
+);
+
+/**
+ * Paid promotion of a listing for Telegram Stars (stage 18). pending → active after Telegram confirms the
+ * payment (charge_id is unique: a repeated update never counts twice) → refunded when it could not start
+ * or an admin returned the stars.
+ */
+export const promotions = pgTable(
+  "promotions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    plan: text("plan").notNull(),
+    days: integer("days").notNull(),
+    stars: integer("stars").notNull(),
+    status: text("status").notNull().default("pending"),
+    chargeId: text("charge_id").unique(),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("promotions_listing_idx").on(t.listingId)],
 );

@@ -124,6 +124,14 @@ class FakeApi {
     this.calls.push(`mod:${u.id}:${decision}:${id}`);
     return { status: decision === "approve" ? "active" : "rejected", title: "iPhone" };
   }
+  async paymentPrecheck(_u: unknown, p: { payload: string; amount: number }) {
+    this.calls.push(`precheck:${p.payload}:${p.amount}`);
+    return p.amount === 50 ? { ok: true } : { ok: false, message: "Счёт недействителен" };
+  }
+  async paymentPaid(_u: unknown, p: { payload: string; chargeId: string }) {
+    this.calls.push(`paid:${p.payload}:${p.chargeId}`);
+    return { ok: true, message: "📣 Продвижение включено" };
+  }
   async renewListing(u: { id: number }, id: string) {
     this.calls.push(`renew:${u.id}:${id}`);
     return {};
@@ -444,5 +452,50 @@ describe("Reply button state lives in the API", () => {
     await bot.idle();
     expect(String(sent.at(-1)!.payload.text)).toContain("истекло");
     expect(api.calls.some((c) => c.startsWith("checkText:поздний"))).toBe(false);
+  });
+
+  it("Stars: pre-checkout asks the API and answers Telegram; a successful payment is recorded and confirmed", async () => {
+    const { api, bot, sent } = setup();
+    const query = (amount: number): Update => ({
+      update_id: 2,
+      pre_checkout_query: {
+        id: "q1",
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        currency: "XTR",
+        total_amount: amount,
+        invoice_payload: "promo:11111111-1111-1111-1111-111111111111",
+      },
+    });
+    await bot.handleUpdate(query(50));
+    expect(sent.at(-1)).toMatchObject({ method: "answerPreCheckoutQuery", payload: { pre_checkout_query_id: "q1", ok: true } });
+    await bot.handleUpdate(query(10));
+    expect(sent.at(-1)).toMatchObject({ method: "answerPreCheckoutQuery", payload: { ok: false, error_message: "Счёт недействителен" } });
+
+    await bot.handleUpdate({
+      update_id: 3,
+      message: {
+        message_id: 2,
+        date: 0,
+        chat: { id: 5, type: "private", first_name: "A" },
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        successful_payment: {
+          currency: "XTR",
+          total_amount: 50,
+          invoice_payload: "promo:11111111-1111-1111-1111-111111111111",
+          telegram_payment_charge_id: "ch_1",
+          provider_payment_charge_id: "",
+        },
+      },
+    });
+    await bot.idle();
+    expect(api.calls).toContain("paid:promo:11111111-1111-1111-1111-111111111111:ch_1");
+    expect(String(sent.at(-1)!.payload.text)).toContain("Продвижение включено");
+  });
+
+  it("/paysupport answers", async () => {
+    const { bot, sent } = setup();
+    await bot.handleUpdate(msg("/paysupport"));
+    await bot.idle();
+    expect(String(sent.at(-1)!.payload.text)).toContain("звёздами");
   });
 });

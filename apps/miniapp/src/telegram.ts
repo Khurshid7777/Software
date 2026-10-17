@@ -5,6 +5,7 @@ import {
   hapticFeedback,
   checkHomeScreenStatus,
   init,
+  invoice,
   isTMA,
   miniApp,
   requestPhoneAccess,
@@ -139,6 +140,19 @@ export function shareToStory(photoUrl: string, text: string, link: string, linkN
 }
 
 /** Hides Telegram's loading placeholder: called after the first render, not before. */
+/**
+ * Telegram's payment sheet for a Stars invoice link (stage 18). Resolves to Telegram's status ("paid",
+ * "cancelled", "failed", "pending"), or "unavailable" outside Telegram (local dev, Playwright).
+ */
+export async function payInvoice(url: string): Promise<string> {
+  if (!isTMA() || !invoice.open.isAvailable()) return "unavailable";
+  try {
+    return await invoice.open(url, "url");
+  } catch {
+    return "failed";
+  }
+}
+
 export function markReady() {
   try {
     if (miniApp.ready.isAvailable()) miniApp.ready();

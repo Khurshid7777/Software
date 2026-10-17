@@ -120,6 +120,13 @@
       "when": 1792231864198,
       "tag": "0016_coming_back",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792238629353,
+      "tag": "0017_promotion",
+      "breakpoints": true
     }
   ]
 }

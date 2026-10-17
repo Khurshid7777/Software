@@ -21,7 +21,13 @@ export interface Notifier {
   send(telegramUserId: number, text: string, buttons?: NotifyButton[][]): Promise<void>;
 }
 
-export class BotApiPublisher implements ChannelPublisher, Notifier {
+/** Telegram Stars payments for digital services (stage 18): an invoice link for the Mini App and refunds. */
+export interface StarsPayments {
+  createStarsInvoice(invoice: { title: string; description: string; payload: string; label: string; stars: number }): Promise<string>;
+  refundStars(telegramUserId: number, chargeId: string): Promise<void>;
+}
+
+export class BotApiPublisher implements ChannelPublisher, Notifier, StarsPayments {
   private api: Api;
   private username: Promise<string> | null = null;
 
@@ -55,6 +61,15 @@ export class BotApiPublisher implements ChannelPublisher, Notifier {
           }
         : undefined,
     });
+  }
+
+  createStarsInvoice(i: { title: string; description: string; payload: string; label: string; stars: number }) {
+    // Stars: currency XTR and an empty provider token (https://core.telegram.org/bots/payments-stars).
+    return this.api.createInvoiceLink(i.title, i.description, i.payload, "", "XTR", [{ label: i.label, amount: i.stars }]);
+  }
+
+  async refundStars(telegramUserId: number, chargeId: string) {
+    await this.api.refundStarPayment(telegramUserId, chargeId);
   }
 
   async miniAppLink(startParam: string) {

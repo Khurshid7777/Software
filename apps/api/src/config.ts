@@ -78,6 +78,13 @@ const EnvSchema = z.object({
     .transform((v) => v === "true"),
   // Optional notifications wait from 22:00 to 08:00 Tashkent. Off by default only in tests (time-of-day independent).
   QUIET_HOURS: z.enum(["true", "false"]).optional(),
+  // Paid promotion for Telegram Stars (stage 18): off until the prices are approved.
+  PROMOTION_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true"),
+  PROMO_STARS_3D: z.coerce.number().int().positive().default(50),
+  PROMO_STARS_7D: z.coerce.number().int().positive().default(100),
 });
 
 export type Config = Omit<z.infer<typeof EnvSchema>, "QUIET_HOURS"> & { QUIET_HOURS: boolean };
