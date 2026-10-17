@@ -91,13 +91,17 @@ export interface ConditionChecklist {
   deadPixels?: (typeof PIXEL_STATES)[number];
   /** How long the item has been in use, years (0 = less than a year). */
   ageYears?: number;
+  /** Signed out of iCloud / Google / the maker's account, reset (the seller's word; the courier checks). */
+  accountUnlocked?: boolean;
 }
 export type ChecklistField = keyof ConditionChecklist;
 
 /** Which checklist fields the seller fills for a category; a category that is not listed has no checklist. */
 export const CHECKLIST_FIELDS: Partial<Record<CheckCategory, readonly ChecklistField[]>> = {
-  smartphone: ["batteryPct", "biometrics", "repairs", "kit"],
-  tablet: ["batteryPct", "biometrics", "repairs", "kit"],
+  smartphone: ["accountUnlocked", "batteryPct", "biometrics", "repairs", "kit"],
+  tablet: ["accountUnlocked", "batteryPct", "biometrics", "repairs", "kit"],
+  laptop: ["accountUnlocked", "ageYears", "repairs", "kit"],
+  smartwatch: ["accountUnlocked", "batteryPct", "repairs", "kit"],
   pc_parts: ["mining", "ageYears", "repairs", "kit"],
   monitor: ["deadPixels", "ageYears", "repairs", "kit"],
   home_appliance: ["ageYears", "repairs", "kit"],
@@ -112,8 +116,9 @@ export function checklistFields(category: string): readonly ChecklistField[] {
 export function repairKinds(category: string): ReadonlyArray<(typeof REPAIR_KINDS)[number]> {
   return (IMEI_CATEGORIES as readonly string[]).includes(category) ? REPAIR_KINDS : ["none", "other"];
 }
+const CHARGER_CATEGORIES = ["smartphone", "tablet", "laptop", "smartwatch", "headphones"];
 export function kitItems(category: string): ReadonlyArray<(typeof KIT_ITEMS)[number]> {
-  return (IMEI_CATEGORIES as readonly string[]).includes(category) ? KIT_ITEMS : ["box", "receipt", "warranty"];
+  return CHARGER_CATEGORIES.includes(category) ? KIT_ITEMS : ["box", "receipt", "warranty"];
 }
 
 /** Nothing the category asks for is filled in yet. */
@@ -183,6 +188,7 @@ export const INSIGHT_TIPS = [
   "few_photos",
   "short_description",
   "no_checklist",
+  "no_account_check",
   "no_imei",
   "no_cod",
 ] as const;

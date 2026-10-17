@@ -180,6 +180,15 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
             />
             ✔️ {t("catalog.verified_only")}
           </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={!!draft.goodGrade}
+              onChange={(e) => setDraft({ ...draft, goodGrade: e.target.checked || undefined })}
+              data-testid="good-grade"
+            />
+            🅰️ {t("catalog.good_grade")}
+          </label>
           <div className="row">
             <button
               className="secondary"

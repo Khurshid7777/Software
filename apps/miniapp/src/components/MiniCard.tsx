@@ -1,6 +1,7 @@
 import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared/client";
 import { photoUrl } from "../api";
 import { useLang, useT } from "../i18n";
+import { GradeChip } from "./Passport";
 
 /** Compact two-column card for the storefront: photo first, then price and title. */
 export function MiniCard({ item, onOpen }: { item: CatalogItem; onOpen: () => void }) {
@@ -12,6 +13,11 @@ export function MiniCard({ item, onOpen }: { item: CatalogItem; onOpen: () => vo
       <span className="mini-photo">
         {l.photos[0] ? <img src={photoUrl(l.photos[0].url, 480)} alt="" loading="lazy" width={300} height={300} /> : <span className="no-photo">📦</span>}
         {l.verified && <span className="mini-badge">✅ {t("verified.short")}</span>}
+        {l.grade && (
+          <span className="mini-grade">
+            <GradeChip grade={l.grade} />
+          </span>
+        )}
       </span>
       <span className="mini-body">
         {l.price && (

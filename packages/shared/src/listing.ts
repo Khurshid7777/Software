@@ -4,6 +4,7 @@ import { formatUzs } from "./price/parsePrice.js";
 import { t } from "./i18n-core.js";
 import type { MarketRange } from "./price/verdict.js";
 import type { ConditionChecklist, Inspection } from "./market.js";
+import type { Grade } from "./passport.js";
 
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
 export type Condition = (typeof CONDITIONS)[number];
@@ -106,6 +107,8 @@ export interface ListingDto {
   checklist: ConditionChecklist;
   /** "Рассмотрю обмен": buyers may offer their item plus a top-up. */
   acceptsTrade: boolean;
+  /** Condition grade A–D from the condition and the checklist (see computeGrade); null without a condition. */
+  grade: Grade | null;
   /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
   verified: Inspection | null;
   district: District | null;

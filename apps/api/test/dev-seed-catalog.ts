@@ -28,6 +28,15 @@ const [shop] = await db
 await db.delete(listings).where(eq(listings.sellerUserId, shopOwner.id));
 await db.delete(listings).where(eq(listings.sellerUserId, privateSeller.id));
 
+/** A filled-in passport for the demo phones and laptops (the fixture has none). */
+function demoChecklist(category: string, condition: string) {
+  if (category === "smartphone" || category === "tablet") {
+    return { accountUnlocked: true, batteryPct: condition === "new" ? 100 : 88, repairs: ["none"], kit: ["box", "charger"] };
+  }
+  if (category === "laptop") return { accountUnlocked: true, ageYears: 2, repairs: ["none"], kit: ["charger"] };
+  return {};
+}
+
 for (const [i, f] of catalog.entries()) {
   const fromShop = ["mba_m1", "redmi_note13", "airpods_pro2"].includes(f.key);
   const [row] = await db
@@ -44,6 +53,7 @@ for (const [i, f] of catalog.entries()) {
       condition: f.condition,
       price: f.price,
       district: f.district,
+      checklist: demoChecklist(f.category, f.condition),
       status: "active",
       publishedAt: new Date(),
       bumpedAt: new Date(Date.now() - i * 60_000),

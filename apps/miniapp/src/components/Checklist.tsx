@@ -61,6 +61,19 @@ export function ChecklistEditor({ category, value: initial, onSave: save }: { ca
   return (
     <fieldset className="field stack" data-testid="checklist-editor">
       <legend>{t("checklist.title")}</legend>
+      {fields.includes("accountUnlocked") && (
+        <>
+          <OneOf
+            label={t("checklist.account_label")}
+            values={["yes", "no"] as const}
+            value={value.accountUnlocked == null ? undefined : value.accountUnlocked ? "yes" : "no"}
+            text={(v) => t(`checklist.account.${v}`)}
+            onPick={(v) => onSave({ ...value, accountUnlocked: v == null ? undefined : v === "yes" })}
+            testId="checklist-account"
+          />
+          <span className="hint">{t("checklist.account_hint")}</span>
+        </>
+      )}
       {fields.includes("batteryPct") && (
         <label className="field">
           {t("checklist.battery_label")}
@@ -166,6 +179,7 @@ export function ChecklistEditor({ category, value: initial, onSave: save }: { ca
 export function ChecklistView({ category, value }: { category: string; value: ConditionChecklist }) {
   const t = useT();
   const rows: string[] = [];
+  if (value.accountUnlocked != null) rows.push(value.accountUnlocked ? `🔓 ${t("checklist.account_view_yes")}` : `🔒 ${t("checklist.account_view_no")}`);
   if (value.batteryPct != null) rows.push(`🔋 ${t("checklist.battery", { pct: value.batteryPct })}`);
   if (value.biometrics) rows.push(`🔒 ${t("checklist.biometrics_label")}: ${t(`checklist.biometrics.${value.biometrics}`)}`);
   if (value.mining) rows.push(`⛏ ${t("checklist.mining_label")}: ${t(`checklist.mining.${value.mining}`)}`);

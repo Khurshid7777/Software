@@ -55,6 +55,7 @@ export function filtersToQuery(f: CatalogFilters, sort?: CatalogSort, offset = 0
   if (f.conditions?.length) p.set("conditions", f.conditions.join(","));
   if (f.district) p.set("district", f.district);
   if (f.verifiedOnly) p.set("verifiedOnly", "true");
+  if (f.goodGrade) p.set("goodGrade", "true");
   if (sort) p.set("sort", sort);
   if (offset) p.set("offset", String(offset));
   return p.toString();

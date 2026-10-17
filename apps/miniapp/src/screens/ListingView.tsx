@@ -21,6 +21,7 @@ import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
+import { Passport } from "../components/Passport";
 import { useLang, useT } from "../i18n";
 import { canShareStory, ensureWriteAccess, haptic, shareLink, shareToStory } from "../telegram";
 
@@ -201,6 +202,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
         </p>
       )}
+      {item.passport && <Passport passport={item.passport} />}
       <ChecklistView category={l.category} value={l.checklist} />
       {isCargo(l.category) && (
         <p className="hint-card" data-testid="listing-cargo">

@@ -4,7 +4,7 @@ import { ApiError, type Api } from "../api";
 import { useT } from "../i18n";
 
 /** Tips that the seller fixes in the editor vs. by bumping the listing. */
-const EDIT_TIPS: InsightTip[] = ["price_above_market", "favorites_no_requests", "few_photos", "short_description", "no_checklist", "no_imei", "no_cod"];
+const EDIT_TIPS: InsightTip[] = ["price_above_market", "favorites_no_requests", "few_photos", "short_description", "no_checklist", "no_account_check", "no_imei", "no_cod"];
 const BUMP_TIPS: InsightTip[] = ["low_views", "stale"];
 
 /** "Почему не продаётся": numbers of the listing and concrete next steps. */

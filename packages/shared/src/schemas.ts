@@ -107,6 +107,8 @@ export const CatalogFiltersSchema = z.object({
   conditions: z.array(z.enum(CONDITIONS)).optional(),
   district: z.enum(TASHKENT_DISTRICTS).optional(),
   verifiedOnly: z.coerce.boolean().optional(),
+  /** Only grade A–B items (see computeGrade). */
+  goodGrade: z.coerce.boolean().optional(),
 });
 
 export type CatalogFilters = z.infer<typeof CatalogFiltersSchema>;
@@ -186,6 +188,7 @@ export const ConditionChecklistSchema = z
     mining: z.enum(MINING_STATES).optional(),
     deadPixels: z.enum(PIXEL_STATES).optional(),
     ageYears: z.number().int().min(0).max(40).optional(),
+    accountUnlocked: z.boolean().optional(),
   })
   .strict()
   // "No repairs" together with a repair is a contradiction: the repair wins.

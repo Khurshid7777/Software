@@ -1,3 +1,4 @@
+import type { ItemPassport } from "./passport.js";
 import type { CatalogFilters } from "./schemas.js";
 import { CHECK_CATEGORIES } from "./types.js";
 import { CONDITIONS, TASHKENT_DISTRICTS, type ListingDto } from "./listing.js";
@@ -35,6 +36,8 @@ export interface CatalogItem {
   market: PriceVerdict | null;
   trust: TrustLevel;
   favorite: boolean;
+  /** The listing page only (`/catalog/:id`): grade, checks and history of the item itself. */
+  passport?: ItemPassport;
 }
 
 export interface CatalogPage {

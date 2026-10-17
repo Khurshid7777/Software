@@ -28,6 +28,7 @@ import {
   repairKinds,
   ConditionChecklistSchema,
   isCargo,
+  computeGrade,
   prettyModel,
   type CourierTariff,
 } from "../src/index.js";
@@ -347,5 +348,28 @@ describe("prettyModel", () => {
     expect(prettyModel("nvidia geforce rtx 3060 12gb")).toBe("Nvidia Geforce RTX 3060 12 GB");
     expect(prettyModel("lg f2j3hs0w 7kg")).toBe("LG F2J3HS0W 7KG");
     expect(prettyModel("samsung galaxy s23 ultra 256gb")).toBe("Samsung Galaxy S23 Ultra 256 GB");
+  });
+});
+
+describe("item passport: condition grade", () => {
+  it("the condition sets the best grade, facts only lower it", () => {
+    expect(computeGrade(null, {})).toEqual({ grade: null, reasons: [] });
+    expect(computeGrade("new", {}).grade).toBe("A");
+    expect(computeGrade("like_new", { batteryPct: 90 }).grade).toBe("A");
+    expect(computeGrade("good", { batteryPct: 100 }).grade).toBe("B");
+    expect(computeGrade("fair", {}).grade).toBe("C");
+    expect(computeGrade("broken", { batteryPct: 100 }).grade).toBe("D");
+  });
+
+  it("names the facts that lowered the grade", () => {
+    expect(computeGrade("like_new", { batteryPct: 82 })).toEqual({ grade: "B", reasons: ["battery_worn"] });
+    expect(computeGrade("like_new", { batteryPct: 75, repairs: ["screen"] })).toEqual({ grade: "C", reasons: ["battery_low"] });
+    expect(computeGrade("new", { repairs: ["none"] }).grade).toBe("A");
+    expect(computeGrade("new", { repairs: ["screen"] })).toEqual({ grade: "B", reasons: ["repaired"] });
+    expect(computeGrade("good", { repairs: ["screen"] })).toEqual({ grade: "B", reasons: [] }); // already B
+    expect(computeGrade("like_new", { deadPixels: "many" }).grade).toBe("C");
+    expect(computeGrade("like_new", { deadPixels: "few" }).grade).toBe("B");
+    expect(computeGrade("like_new", { biometrics: "broken" }).grade).toBe("C");
+    expect(computeGrade("new", { mining: "yes" })).toEqual({ grade: "B", reasons: ["mining"] });
   });
 });

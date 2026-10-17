@@ -24,6 +24,7 @@ import {
   t,
   type Condition,
   type ConditionChecklist,
+  type Grade,
   type DeliveryMode,
   type District,
   type Inspection,
@@ -1064,6 +1065,7 @@ export class ListingService {
         imeiTail: l.imei ? l.imei.slice(-4) : null,
         checklist: (l.checklist as ConditionChecklist) ?? {},
         acceptsTrade: l.acceptsTrade,
+        grade: (l.grade as Grade | null) ?? null,
         verified:
           l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,

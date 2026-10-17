@@ -1,5 +1,11 @@
-import { and, asc, count, desc, eq, gte, inArray, lt, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, ne, sql, type SQL } from "drizzle-orm";
 import {
+  ACCOUNT_CATEGORIES,
+  GOOD_GRADES,
+  computeGrade,
+  type ItemHistory,
+  type ItemPassport,
+  type PassportCheck,
   CONDITION_FACTOR,
   VALUATION_HISTORY_MONTHS,
   normalizeModelKey,
@@ -38,6 +44,7 @@ import {
   conversations,
   favorites,
   listings,
+  orders,
   savedSearches,
   searchNotifications,
   shops,
@@ -142,6 +149,7 @@ export class CatalogService {
     if (f.priceMax != null) c.push(sql`${listings.price} <= ${f.priceMax}`);
     if (f.conditions?.length) c.push(inArray(listings.condition, f.conditions));
     if (f.district) c.push(eq(listings.district, f.district));
+    if (f.goodGrade) c.push(inArray(listings.grade, GOOD_GRADES));
     if (f.verifiedOnly) {
       c.push(sql`exists (select 1 from ${shops} where ${shops.id} = ${listings.shopId} and ${shops.verified})`);
     }
@@ -222,7 +230,79 @@ export class CatalogService {
     const [fav] = viewer
       ? await this.db.select().from(favorites).where(and(eq(favorites.userId, viewer.id), eq(favorites.listingId, id)))
       : [];
-    return { listing, market: await this.market(listing), trust: this.trust(listing), favorite: !!fav };
+    const market = await this.market(listing);
+    return { listing, market, trust: this.trust(listing), favorite: !!fav, passport: await this.passport(listing, market) };
+  }
+
+  /**
+   * «Паспорт товара» (docs/plan.md §2): the grade, checks that name who confirmed them, and the device's
+   * history on Ishonch by IMEI — counts, dates and prices only, never who sold it before.
+   */
+  async passport(l: ListingDto, market: PriceVerdict | null): Promise<ItemPassport> {
+    const { grade, reasons } = computeGrade(l.condition, l.checklist ?? {});
+    const c = l.checklist ?? {};
+    const fields = checklistFields(l.category);
+    const checks: PassportCheck[] = [{ code: "inspection", source: "courier", status: l.verified?.passed ? "ok" : "unknown" }];
+    let history: ItemHistory | null = null;
+
+    if ((IMEI_CATEGORIES as readonly string[]).includes(l.category)) {
+      const [row] = await this.db.select({ imei: listings.imei, seller: listings.sellerUserId }).from(listings).where(eq(listings.id, l.id));
+      if (!row?.imei) checks.push({ code: "imei", source: "ishonch", status: "unknown" });
+      else {
+        const others = await this.db
+          .select({ id: listings.id, seller: listings.sellerUserId, status: listings.status, price: listings.price, publishedAt: listings.publishedAt })
+          .from(listings)
+          .where(and(eq(listings.imei, row.imei), ne(listings.id, l.id)));
+        const clash = others.some((o) => o.seller !== row.seller && ["active", "pending", "reserved"].includes(o.status));
+        checks.push({ code: "imei", source: "ishonch", status: clash ? "fail" : "ok" });
+        const past = others.filter((o) => o.publishedAt).sort((a, b) => b.publishedAt!.getTime() - a.publishedAt!.getTime());
+        if (past.length) {
+          const [insp] = (await this.db
+            .select({
+              passed: sql<number>`count(*) filter (where (${orders.inspection}->>'passed')::boolean)::int`,
+              failed: sql<number>`count(*) filter (where not (${orders.inspection}->>'passed')::boolean)::int`,
+            })
+            .from(orders)
+            .where(and(inArray(orders.listingId, past.map((o) => o.id)), sql`${orders.inspection} is not null`))) as [{ passed: number; failed: number }];
+          history = {
+            listings: past.length,
+            sold: past.filter((o) => o.status === "sold").length,
+            prices: past
+              .filter((o) => o.price)
+              .slice(0, 5)
+              .map((o) => ({ at: o.publishedAt!.toISOString(), price: o.price! })),
+            inspections: { passed: insp?.passed ?? 0, failed: insp?.failed ?? 0 },
+          };
+        }
+      }
+    }
+    if ((ACCOUNT_CATEGORIES as readonly string[]).includes(l.category)) {
+      checks.push({ code: "account", source: "seller", status: c.accountUnlocked === true ? "ok" : c.accountUnlocked === false ? "fail" : "unknown" });
+    }
+    if (fields.includes("batteryPct")) {
+      checks.push(
+        c.batteryPct == null
+          ? { code: "battery", source: "seller", status: "unknown" }
+          : { code: "battery", source: "seller", status: c.batteryPct >= 80 ? "ok" : "warn", params: { pct: c.batteryPct } },
+      );
+    }
+    if (fields.includes("repairs")) {
+      const repairs = c.repairs ?? [];
+      checks.push({ code: "repairs", source: "seller", status: !repairs.length ? "unknown" : repairs.every((r) => r === "none") ? "ok" : "warn" });
+    }
+    checks.push({ code: "photos", source: "ishonch", status: l.photos.length >= 3 ? "ok" : "warn", params: { n: l.photos.length } });
+    // A price far below the market is the classic bait: it is a warning, not a bargain.
+    const price: PassportCheck["status"] = !market || market.verdict === "unknown"
+      ? "unknown"
+      : market.verdict === "above" || (market.verdict === "below" && (market.diffPct ?? 0) <= -30)
+        ? "warn"
+        : "ok";
+    checks.push({ code: "price", source: "ishonch", status: price, params: market?.diffPct != null ? { pct: market.diffPct } : undefined });
+    if (fields.includes("kit")) {
+      const docs = (c.kit ?? []).filter((k) => k === "box" || k === "receipt" || k === "warranty");
+      checks.push({ code: "documents", source: "seller", status: docs.length ? "ok" : "unknown" });
+    }
+    return { grade, reasons, checks, passed: checks.filter((x) => x.status === "ok").length, total: checks.length, history };
   }
 
   trust(l: ListingDto) {
@@ -422,6 +502,9 @@ export class CatalogService {
     if (dto.photos.length < 3) tips.push({ code: "few_photos", severity: "medium", params: { n: dto.photos.length } });
     if ((l.descriptionRu || l.descriptionUz).trim().length < 120) tips.push({ code: "short_description", severity: "low", params: {} });
     if (checklistFields(l.category).length && checklistEmpty(l.category, checklist)) tips.push({ code: "no_checklist", severity: "medium", params: {} });
+    if ((ACCOUNT_CATEGORIES as readonly string[]).includes(l.category) && checklist.accountUnlocked !== true) {
+      tips.push({ code: "no_account_check", severity: "medium", params: {} });
+    }
     if (phone && !l.imei) tips.push({ code: "no_imei", severity: "low", params: {} });
     if (!(l.allowedDeliveryModes as string[]).includes("cod_seller")) tips.push({ code: "no_cod", severity: "low", params: {} });
     return {
@@ -485,6 +568,7 @@ export class CatalogService {
       filters.category ? t(lang, `category.${filters.category}`) : null,
       filters.priceMax ? `≤ ${formatUzs(filters.priceMax)}` : null,
       filters.verifiedOnly ? "✔️" : null,
+      filters.goodGrade ? "A–B" : null,
     ].filter(Boolean);
     const [row] = await this.db
       .insert(savedSearches)

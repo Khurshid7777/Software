@@ -92,6 +92,13 @@
       "when": 1792134682138,
       "tag": "0012_guarantee_trade",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792223954798,
+      "tag": "0013_item_passport",
+      "breakpoints": true
     }
   ]
 }

@@ -162,6 +162,27 @@ export const listings = pgTable(
     checklist: jsonb("checklist").notNull().default({}),
     /** "Рассмотрю обмен": buyers may propose their item plus a top-up. */
     acceptsTrade: boolean("accepts_trade").notNull().default(false),
+    /**
+     * Condition grade A–D (catalog filter «Класс A–B»). Mirrors computeGrade() in @ishonch/shared/passport —
+     * the condition sets the best grade, checklist facts only lower it; a test keeps the two identical.
+     */
+    grade: text("grade").generatedAlwaysAs(
+      sql`case
+        when condition is null or condition = 'unknown' then null
+        when condition = 'broken' then 'D'
+        when condition = 'fair'
+          or (checklist->>'batteryPct')::int < 80
+          or checklist->>'biometrics' = 'broken'
+          or checklist->>'deadPixels' = 'many' then 'C'
+        when condition = 'good'
+          or (checklist->>'batteryPct')::int < 85
+          or checklist->>'deadPixels' = 'few'
+          or checklist->>'mining' = 'yes'
+          or checklist->'repairs' @> '["screen"]' or checklist->'repairs' @> '["battery"]'
+          or checklist->'repairs' @> '["back"]' or checklist->'repairs' @> '["other"]' then 'B'
+        else 'A'
+      end`,
+    ),
     /** «Проверено Ishonch»: the courier's inspection passed (badge while recent), see Inspection. */
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     verification: jsonb("verification"),

@@ -3,7 +3,7 @@ import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonc
 import type { Api } from "../api";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { useT } from "../i18n";
-import { readRecent } from "../prefs";
+import { readPref, readRecent, writePref } from "../prefs";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
 /** Category chips on the storefront (the catch-all ones live in the catalog filters). */
@@ -44,6 +44,8 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
   const [query, setQuery] = useState("");
   const [homeScreen, setHomeScreen] = useState(false);
   const [recent, setRecent] = useState<CatalogItem[]>([]);
+  // New users see once how a purchase is protected; one tap hides it for good on this device.
+  const [howTo, setHowTo] = useState(() => readPref("trust_intro_seen") !== "1");
 
   useEffect(() => {
     let current = true;
@@ -85,6 +87,27 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
           data-testid="home-search"
         />
       </form>
+
+      {howTo && (
+        <section className="card stack-tight" data-testid="trust-intro">
+          <strong>🛡 {t("home.trust.title")}</strong>
+          <ol className="trust-steps">
+            <li>{t("home.trust.step1")}</li>
+            <li>{t("home.trust.step2")}</li>
+            <li>{t("home.trust.step3")}</li>
+          </ol>
+          <button
+            className="link"
+            onClick={() => {
+              writePref("trust_intro_seen", "1");
+              setHowTo(false);
+            }}
+            data-testid="trust-intro-close"
+          >
+            {t("home.trust.close")}
+          </button>
+        </section>
+      )}
 
       <div className="category-strip scroll-x" role="list">
         {CATEGORIES.map((c) => (
@@ -129,7 +152,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
         <span className="tile-icon">💰</span>
         <span>
           <strong>{t("home.quick.valuation")}</strong>
-          <span className="hint">{t("valuation.subtitle")}</span>
+          <span className="hint">{t("home.quick.valuation_desc")}</span>
         </span>
       </button>
 
