@@ -119,8 +119,6 @@ export interface ListingDto {
   autoDrop?: { floor: number; nextAt: string } | null;
   /** Owner only: the last «Предложить избранным» (price and when). */
   likersOffer?: { price: number; at: string } | null;
-  /** Owner only: paid promotion running until this moment (stage 18). */
-  promotedUntil?: string | null;
   /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
   verified: Inspection | null;
   district: District | null;

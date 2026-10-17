@@ -351,16 +351,3 @@ export function applyDiscount(price: number, pct: number) {
 
 /** At most one "new item from a seller you follow" message per seller and Tashkent day. */
 export const FOLLOW_ALERTS_PER_DAY = 1;
-
-// ---------- Stage 18: paid promotion for Telegram Stars (docs/plan.md) ----------
-
-export const PROMO_PLANS = ["3d", "7d"] as const;
-export type PromoPlan = (typeof PROMO_PLANS)[number];
-export const PROMO_DAYS: Record<PromoPlan, number> = { "3d": 3, "7d": 7 };
-/** Promoted cards above the first catalog page: never more than this. */
-export const PROMO_SLOTS = 2;
-
-export interface PromoOptions {
-  enabled: boolean;
-  plans: Array<{ plan: PromoPlan; days: number; stars: number }>;
-}

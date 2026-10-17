@@ -153,26 +153,6 @@ export class ApiClient {
     });
   }
 
-  /** Telegram Stars (stage 18): may this payment go ahead? */
-  paymentPrecheck(user: TgUser, p: { payload: string; currency: string; amount: number }) {
-    return this.request<{ ok: boolean; message?: string }>("/internal/payments/precheck", {
-      method: "POST",
-      user,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(p),
-    });
-  }
-
-  /** Telegram Stars: the payment went through; the API starts the promotion or refunds. */
-  paymentPaid(user: TgUser, p: { payload: string; currency: string; amount: number; chargeId: string }) {
-    return this.request<{ ok: boolean; message: string }>("/internal/payments/paid", {
-      method: "POST",
-      user,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(p),
-    });
-  }
-
   renewListing(user: TgUser, listingId: string) {
     return this.request(`/listings/${encodeURIComponent(listingId)}/renew`, { method: "POST", user });
   }

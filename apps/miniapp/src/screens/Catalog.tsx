@@ -31,7 +31,6 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
   const [query, setQuery] = useState(initial?.q ?? "");
   const [sort, setSort] = useState<CatalogSort>("relevance");
   const [items, setItems] = useState<CatalogItem[] | null>(null);
-  const [promoted, setPromoted] = useState<CatalogItem[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -57,7 +56,6 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
         } else setToast(t("common.load_error"));
         return;
       }
-      if (offset === 0) setPromoted(page.promoted ?? []);
       setItems((prev) => (offset === 0 ? page.items : [...(prev ?? []), ...page.items.filter((i) => !prev?.some((p) => p.listing.id === i.listing.id))]));
       setNext(page.nextOffset);
     },
@@ -75,11 +73,7 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
 
   // Optimistic heart: flips at once, flips back if the request failed.
   async function favorite(item: CatalogItem, on: boolean) {
-    const flip = (v: boolean) => (i: CatalogItem) => (i.listing.id === item.listing.id ? { ...i, favorite: v } : i);
-    const set = (v: boolean) => {
-      setItems((list) => list?.map(flip(v)) ?? null);
-      setPromoted((list) => list.map(flip(v)));
-    };
+    const set = (v: boolean) => setItems((list) => list?.map((i) => (i.listing.id === item.listing.id ? { ...i, favorite: v } : i)) ?? null);
     set(on);
     haptic("light");
     try {
@@ -245,14 +239,6 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
         ))}
       {failed && <LoadError onRetry={() => void load(0)} />}
       {items?.length === 0 && !failed && <Empty icon="🔍" title={t("catalog.nothing")} text={t("catalog.empty")} />}
-      {items && promoted.length > 0 && (
-        <section className="stack-tight promoted" data-testid="promoted">
-          <span className="hint">{t("promo.label")}</span>
-          {promoted.map((i) => (
-            <ItemCard key={`p-${i.listing.id}`} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
-          ))}
-        </section>
-      )}
       {items?.map((i) => (
         <ItemCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
       ))}

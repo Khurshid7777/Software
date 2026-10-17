@@ -5,8 +5,6 @@ import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
 import { Insights } from "../components/Insights";
 import { SellFaster } from "../components/SellFaster";
-import { Promote } from "../components/Promote";
-import type { PromoOptions } from "@ishonch/shared/client";
 import { LoadError } from "../components/LoadError";
 import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
@@ -35,8 +33,6 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
   const [soldFor, setSoldFor] = useState<string | null>(null);
   const [insightsFor, setInsightsFor] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [promo, setPromo] = useState<PromoOptions | null>(null);
-  useEffect(() => void api.promotionOptions().then(setPromo).catch(() => undefined), [api]);
 
   const begin = useLatest();
   const load = useCallback(() => {
@@ -197,9 +193,6 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
             </div>
           )}
           {l.status === "active" && soldFor !== l.id && <SellFaster api={api} listing={l} onDone={(m) => (setToast(m), load())} />}
-          {l.status === "active" && soldFor !== l.id && promo?.enabled && (
-            <Promote api={api} listing={l} options={promo} onDone={(m) => (setToast(m), load())} />
-          )}
           {insightsFor === l.id && (
             <Insights
               api={api}

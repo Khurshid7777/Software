@@ -21,8 +21,7 @@ const webhookSecret = process.env.BOT_WEBHOOK_SECRET ?? "";
 const port = Number(process.env.BOT_PORT ?? 8081);
 
 const bot = createBot({ token, miniAppUrl }, api);
-// pre_checkout_query: Telegram Stars payments (stage 18) — without it every payment times out.
-const allowed_updates = ["message", "callback_query", "my_chat_member", "pre_checkout_query"] as const;
+const allowed_updates = ["message", "callback_query", "my_chat_member"] as const;
 
 await bot.init();
 await bot.api.setMyCommands([
@@ -30,7 +29,6 @@ await bot.api.setMyCommands([
   { command: "help", description: "Yordam / Помощь" },
   { command: "sell", description: "Sotish / Продать" },
   { command: "lang", description: "Til / Язык" },
-  { command: "paysupport", description: "To‘lov / Оплата" },
 ]);
 await bot.api.setChatMenuButton({
   menu_button: { type: "web_app", text: "Ishonch", web_app: { url: miniAppUrl } },

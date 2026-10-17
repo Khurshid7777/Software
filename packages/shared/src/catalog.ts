@@ -42,8 +42,6 @@ export interface CatalogItem {
 
 export interface CatalogPage {
   items: CatalogItem[];
-  /** Paid promotion (stage 18): at most PROMO_SLOTS cards, first page only, shown apart and labelled. */
-  promoted?: CatalogItem[];
   nextOffset: number | null;
 }
 

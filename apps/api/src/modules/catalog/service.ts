@@ -1,8 +1,7 @@
-import { and, asc, count, desc, eq, gte, inArray, lt, ne, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, ne, sql, type SQL } from "drizzle-orm";
 import {
   ACCOUNT_CATEGORIES,
   GOOD_GRADES,
-  PROMO_SLOTS,
   computeGrade,
   type ItemHistory,
   type ItemPassport,
@@ -200,25 +199,8 @@ export class CatalogService {
 
   async search(f: CatalogFilters, sort: CatalogSort, offset: number, viewer: User | null): Promise<CatalogPage> {
     const ids = await this.searchIds(f, sort, offset, PAGE_SIZE + 1);
-    const pageIds = ids.slice(0, PAGE_SIZE);
-    const items = await this.items(pageIds, viewer);
-    const promoted = offset === 0 && sort !== "price_asc" && sort !== "price_desc" ? await this.promotedItems(f, pageIds, viewer) : [];
-    return { items, ...(promoted.length ? { promoted } : {}), nextOffset: ids.length > PAGE_SIZE ? offset + PAGE_SIZE : null };
-  }
-
-  /**
-   * Paid promotion (stage 18, eBay "Sponsored" style): up to PROMO_SLOTS matching listings with a running
-   * promotion, rotated at random, shown apart from the organic page. Items already on the first page are
-   * not repeated; the organic order itself never changes.
-   */
-  private async promotedItems(f: CatalogFilters, organic: string[], viewer: User | null) {
-    const rows = await this.db
-      .select({ id: listings.id })
-      .from(listings)
-      .where(and(...this.conditions(f), sql`${listings.promotedUntil} > now()`, organic.length ? notInArray(listings.id, organic) : undefined))
-      .orderBy(sql`random()`)
-      .limit(PROMO_SLOTS);
-    return this.items(rows.map((r) => r.id), viewer);
+    const items = await this.items(ids.slice(0, PAGE_SIZE), viewer);
+    return { items, nextOffset: ids.length > PAGE_SIZE ? offset + PAGE_SIZE : null };
   }
 
   /** Builds catalog cards (listing + market label + seller trust + favorite flag). */

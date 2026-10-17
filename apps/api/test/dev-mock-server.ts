@@ -13,8 +13,7 @@ import { fixtures, listingFixtures, mockAiByPrompt } from "./helpers.js";
 const assistantCases = JSON.parse(readFileSync(`${PROMPTS_DIR}__fixtures__/assistant.json`, "utf8")).cases;
 
 const botToken = process.env.BOT_TOKEN ?? "123456:DEV";
-// Paid promotion is on in the mock: invoices are fake links, payments are reported through /internal/payments/*.
-const config = loadConfig({ PROMOTION_ENABLED: "true", ...process.env, BOT_TOKEN: botToken, NODE_ENV: "development" });
+const config = loadConfig({ ...process.env, BOT_TOKEN: botToken, NODE_ENV: "development" });
 const { db } = createDb(config.DATABASE_URL);
 const check = fixtures.find((f) => f.name === (process.env.FIXTURE ?? "iphone13_prepay_ru"))!;
 const listing = listingFixtures.find((f) => f.name === (process.env.LISTING_FIXTURE ?? "samsung_a54_photo_only_ru"))!;
@@ -76,11 +75,6 @@ const app = await buildApp({
     send: async (chatId, text, buttons) => {
       console.log(`[dm ${chatId}] ${text.replace(/\n/g, " | ")} ${JSON.stringify(buttons ?? [])}`);
     },
-    createStarsInvoice: async (i) => {
-      console.log(`[invoice] ${i.title} ⭐${i.stars} ${i.payload}`);
-      return `https://t.me/$dev-invoice?payload=${encodeURIComponent(i.payload)}`;
-    },
-    refundStars: async (userId, chargeId) => console.log(`[refund] ${userId} ${chargeId}`),
   },
 });
 await app.listen({ port: Number(process.env.PORT ?? 3000), host: "127.0.0.1" });

@@ -20,9 +20,7 @@ import { LISTING_AI_PER_DAY, ListingService } from "./modules/listings/service.j
 import { ShopService } from "./modules/shops/service.js";
 import { FsStorage, S3Storage, type Storage } from "./storage/storage.js";
 import { DisabledSpeechToText, HttpWhisperSpeechToText, type SpeechToText } from "./stt/speechToText.js";
-import { BotApiPublisher, type ChannelPublisher, type Notifier, type StarsPayments } from "./telegram/publisher.js";
-import { PromotionService } from "./modules/promotions/service.js";
-import { promotionRoutes } from "./modules/promotions/routes.js";
+import { BotApiPublisher, type ChannelPublisher, type Notifier } from "./telegram/publisher.js";
 import { AssistantService } from "./modules/catalog/assistant.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { CatalogService } from "./modules/catalog/service.js";
@@ -47,8 +45,7 @@ export interface AppDeps {
   ai?: Pick<AiService, "structured">;
   storage?: Storage;
   stt?: SpeechToText;
-  /** Bot API gateway; with createStarsInvoice/refundStars it also takes Telegram Stars payments. */
-  publisher?: (ChannelPublisher & Notifier & Partial<StarsPayments>) | null;
+  publisher?: (ChannelPublisher & Notifier) | null;
   courier?: CourierProvider;
   /** true in server.ts: jobs go to the queue and a worker runs them. Tests and dev run them inline. */
   backgroundJobs?: boolean;
@@ -255,17 +252,6 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   }, (actor, action, target, details) => repo.audit(actor, action, target, details));
   evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
-  const promotionsSvc = new PromotionService({
-    repo,
-    payments: gateway && "createStarsInvoice" in gateway ? (gateway as unknown as StarsPayments) : null,
-    enabled: config.PROMOTION_ENABLED,
-    prices: { "3d": config.PROMO_STARS_3D, "7d": config.PROMO_STARS_7D },
-  });
-  promotionRoutes(app, promotionsSvc, {
-    requireUser: auth.requireUser,
-    requireInternal: auth.requireInternal,
-    requireAdmin: auth.requireRole("admin"),
-  });
   catalogRoutes(app, catalog, assistant, new ReplySuggestions(repo, aiService, catalog), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,

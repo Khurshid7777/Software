@@ -1,7 +1,5 @@
 import { t } from "@ishonch/shared/client";
 import type {
-  PromoOptions,
-  PromoPlan,
   Condition,
   DisputeDto,
   DisputeReason,
@@ -216,9 +214,6 @@ export function createApi(initData: string | null) {
     generate: (id: string, answers: Record<string, string>) =>
       request<ListingDto>(`/listings/${id}/generate`, json("POST", { answers })),
     updateListing: (id: string, patch: ListingPatch) => request<ListingDto>(`/listings/${id}`, json("PATCH", patch)),
-    promotionOptions: () => request<PromoOptions>("/promotion/options"),
-    promote: (id: string, plan: PromoPlan) =>
-      request<{ promotionId: string; invoiceLink: string; days: number; stars: number }>(`/listings/${id}/promote`, json("POST", { plan })),
     offerToLikers: (id: string, amount: number) =>
       request<{ sent: number; price: number; expiresAt: string; deferredUntil: string | null }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {
