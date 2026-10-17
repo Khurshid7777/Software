@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
@@ -13,6 +13,11 @@ import {
   PRICE_DROP_BADGE_DAYS,
   VERIFIED_BADGE_DAYS,
   PRICE_DROP_MIN_PCT,
+  AUTO_DROP_EVERY_DAYS,
+  AUTO_DROP_MIN_FLOOR_PCT,
+  nextAutoDropPrice,
+  sellerBadges,
+  type NotifyType,
   PRIVATE_SELLER_ACTIVE_LIMIT,
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -24,6 +29,7 @@ import {
   t,
   type Condition,
   type ConditionChecklist,
+  type Grade,
   type DeliveryMode,
   type District,
   type Inspection,
@@ -36,12 +42,15 @@ import {
   type ModerationRecord,
   type PriceSuggestion,
 } from "@ishonch/shared";
-import type { Repo } from "../../db/repo.js";
+import { startOfTashkentDay, type Repo } from "../../db/repo.js";
 import {
   channels,
   complaints,
+  disputes,
   conversations,
+  evidence,
   favorites,
+  follows,
   listingPhotos,
   listings,
   orders,
@@ -60,6 +69,7 @@ import { buildCaption, type ChannelPublisher, type Notifier } from "../../telegr
 import type { StaffNotifier } from "../../telegram/staff.js";
 import { hasContactInfo, type ModerationService } from "../moderation/service.js";
 import { analyzeListing, generateListingText } from "./ai.js";
+import type { EvidenceService } from "../evidence/service.js";
 
 export const MAX_PHOTOS = 10;
 /** A price cut deeper than this (percent) sends a live listing back through moderation. */
@@ -86,7 +96,14 @@ export type ListingError =
   | "bad_image"
   | "contact_info"
   | "duplicate"
-  | "ai_quota";
+  | "ai_quota"
+  | "bad_floor"
+  | "bad_request";
+
+/** «🔕 Не присылать такое» under an optional message (stage 20); the bot switches the type off. */
+export function unsubscribeRow(lang: Lang, type: NotifyType) {
+  return [{ text: t(lang, "notify.unsub"), callbackData: `unsub:${type}` }];
+}
 
 export class ListingRejected extends Error {
   constructor(
@@ -121,6 +138,9 @@ export const ListingPatchSchema = z
       .refine(isValidImei, "invalid IMEI")
       .nullable(),
     checklist: ConditionChecklistSchema,
+    acceptsTrade: z.boolean(),
+    /** Автоснижение: the floor (null turns it off). */
+    autoDropFloor: z.number().int().positive().max(10_000_000_000).nullable(),
   })
   .partial();
 export type ListingPatch = z.infer<typeof ListingPatchSchema>;
@@ -150,19 +170,27 @@ export interface ListingServiceDeps {
   /** Duplicate search + AI pre-moderation; null = publish without moderation. */
   moderation?: ModerationService | null;
   photoSecret: string;
+  /** Evidence files: the seller's video check shows on the listing. */
+  evidence?: EvidenceService;
   usdRate: number;
   /** Feature flag: `cod_platform` stays off until there is a legal entity and a courier contract. */
   codPlatformEnabled: boolean;
   /** A listing left sale (sold, archived, hidden, expired): open "new" delivery requests are closed. */
   onUnavailable?: (listingId: string, reason: string) => Promise<unknown>;
   /** Background jobs (channel posts, saved-search alerts). Without it they run inside the request. */
-  enqueue?: (kind: string, payload: Record<string, unknown>) => Promise<void>;
+  enqueue?: (kind: string, payload: Record<string, unknown>, runAt?: Date | null) => Promise<void>;
+  /** End of the quiet hours when `now` is in them (QUIET_HOURS); absent — optional messages go out at once. */
+  quietUntil?: (now: Date) => Date | null;
   /** Hook for saved-search alerts (module A). Failures never block publication. */
   onPublished?: (listingId: string) => Promise<unknown>;
 }
 
 export class ListingService {
   constructor(private d: ListingServiceDeps) {}
+
+  get evidence() {
+    return this.d.evidence;
+  }
 
   private get db() {
     return this.d.repo.db;
@@ -343,11 +371,25 @@ export class ListingService {
     if (patch.price === null && l.status !== "draft") throw new ListingRejected("fill_required", 400);
     if (textChanged && l.status !== "draft" && hasContactInfo({ ...l, ...patch })) throw new ListingRejected("contact_info", 400);
     const now = new Date();
+    // Автоснижение: the floor must sit below the price and not under half of it; the first step in 3 days.
+    let autoDrop: Partial<Listing> = {};
+    if (patch.autoDropFloor !== undefined) {
+      const price = patch.price ?? l.price;
+      if (patch.autoDropFloor === null) autoDrop = { autoDropAt: null };
+      else if (!price || patch.autoDropFloor >= price || patch.autoDropFloor < (price * AUTO_DROP_MIN_FLOOR_PCT) / 100) {
+        throw new ListingRejected("bad_floor", 400, { min: formatUzs(Math.ceil((price ?? 0) * AUTO_DROP_MIN_FLOOR_PCT / 100)) });
+      } else autoDrop = { autoDropAt: new Date(now.getTime() + AUTO_DROP_EVERY_DAYS * DAY) };
+    }
     const priceChange = l.status === "active" && patch.price != null && l.price != null && patch.price !== l.price ? this.priceChange(l, patch.price, now) : {};
     await this.db
       .update(listings)
-      .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, updatedAt: now })
-      .where(eq(listings.id, id));
+      .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, ...autoDrop, updatedAt: now })
+      // Compare-and-set on the status read above: an order confirmed meanwhile (reserved) wins.
+      .where(and(eq(listings.id, id), eq(listings.status, l.status)))
+      .returning({ id: listings.id })
+      .then((rows) => {
+        if (!rows.length) throw new ListingRejected("bad_state", 409);
+      });
     const priceChanged = patch.price != null && l.price != null && patch.price !== l.price;
     // Open delivery requests were quoted at the old price: they close and the buyers are told to re-order.
     if (priceChanged && l.status === "active") await this.d.onUnavailable?.(id, "price_changed");
@@ -356,7 +398,7 @@ export class ListingService {
     const baitDrop = priceChanged && patch.price! < l.price! * (1 - BAIT_DROP_PCT / 100);
     if ((textChanged || imeiChanged || baitDrop) && l.status === "active") await this.remoderate(id);
     if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.price! - patch.price! >= (l.price! * PRICE_DROP_MIN_PCT) / 100) {
-      await this.schedule("price_drop_alerts", { listingId: id, price: patch.price });
+      await this.schedule("price_drop_alerts", { listingId: id, price: patch.price }, this.quiet(now));
     }
     return this.dto(id, user.id);
   }
@@ -505,11 +547,18 @@ export class ListingService {
       : [];
     if (own.length) await this.schedule("channel_posts", { listingId: id, channelIds: own.map((c) => c.id), since: now.toISOString() });
     await this.schedule("saved_search_alerts", { listingId: id });
+    // A relisted or restored item is not news: followers hear only about a first publication.
+    if (!l.publishedAt) await this.schedule("follower_alerts", { listingId: id }, this.quiet(now));
     return own;
   }
 
-  private async schedule(kind: string, payload: Record<string, unknown>) {
-    if (this.d.enqueue) return this.d.enqueue(kind, payload);
+  private quiet(now: Date) {
+    return this.d.quietUntil?.(now) ?? null;
+  }
+
+  /** `runAt`: deliver later (quiet hours). Without a queue the job runs now. */
+  private async schedule(kind: string, payload: Record<string, unknown>, runAt?: Date | null) {
+    if (this.d.enqueue) return this.d.enqueue(kind, payload, runAt);
     await this.runJob(kind, payload).catch((err) => console.error(`${kind} failed`, err));
   }
 
@@ -517,6 +566,7 @@ export class ListingService {
   async runJob(kind: string, payload: Record<string, unknown>) {
     if (kind === "saved_search_alerts") return this.d.onPublished?.(String(payload.listingId));
     if (kind === "price_drop_alerts") return this.priceDropAlerts(String(payload.listingId), Number(payload.price));
+    if (kind === "follower_alerts") return this.followerAlerts(String(payload.listingId));
     if (kind === "channel_posts") {
       const id = String(payload.listingId);
       const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
@@ -565,6 +615,81 @@ export class ListingService {
   }
 
   /**
+   * "Новый товар у продавца, на которого вы подписаны" (Depop / Vinted follow): at most one message per
+   * follower and seller a Tashkent day — the day is claimed in follows.last_notified_at before sending.
+   */
+  async followerAlerts(listingId: string, now = new Date()) {
+    if (!this.d.notifier) return 0;
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.status !== "active") return 0;
+    const claimed = await this.db
+      .update(follows)
+      .set({ lastNotifiedAt: now })
+      .where(
+        and(
+          eq(follows.sellerUserId, l.sellerUserId),
+          sql`(${follows.lastNotifiedAt} is null or ${follows.lastNotifiedAt} < ${startOfTashkentDay(now).toISOString()})`,
+          sql`${follows.followerUserId} in (select id from ${users} where banned_at is null and not ('follow' = any(notify_off)))`,
+        ),
+      )
+      .returning({ userId: follows.followerUserId });
+    if (!claimed.length) return 0;
+    const fans = await this.db.select().from(users).where(inArray(users.id, claimed.map((c) => c.userId)));
+    const [shop] = await this.db.select({ name: shops.name }).from(shops).where(eq(shops.ownerUserId, l.sellerUserId));
+    const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+    let sent = 0;
+    for (const u of fans) {
+      const lang = u.language as Lang;
+      const ok = await this.d.notifier
+        .send(
+          u.telegramId,
+          t(lang, "follow.new_listing", {
+            seller: shop?.name ?? t(lang, "seller.private"),
+            title: listingTitle(l, lang),
+            price: l.price ? formatUzs(l.price) : "",
+          }),
+          [...(url ? [[{ text: t(lang, "bot.open_listing"), url }]] : []), unsubscribeRow(lang, "follow")],
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (ok) sent++;
+    }
+    return sent;
+  }
+
+  /** Follow / unfollow a seller (not yourself, not a banned or unknown user). */
+  async follow(user: User, sellerId: string, on: boolean) {
+    if (sellerId === user.id) throw new ListingRejected("bad_request", 400);
+    const [seller] = await this.db.select().from(users).where(eq(users.id, sellerId));
+    if (!seller || seller.bannedAt) throw new ListingRejected("not_found", 404);
+    if (on) await this.db.insert(follows).values({ followerUserId: user.id, sellerUserId: sellerId }).onConflictDoNothing();
+    else await this.db.delete(follows).where(and(eq(follows.followerUserId, user.id), eq(follows.sellerUserId, sellerId)));
+    const [{ n }] = (await this.db.select({ n: count() }).from(follows).where(eq(follows.sellerUserId, sellerId))) as [{ n: number }];
+    return { following: on, followers: Number(n) };
+  }
+
+  async isFollowing(userId: string, sellerId: string) {
+    const [row] = await this.db
+      .select({ s: follows.sellerUserId })
+      .from(follows)
+      .where(and(eq(follows.followerUserId, userId), eq(follows.sellerUserId, sellerId)));
+    return !!row;
+  }
+
+  /** The sellers a user follows (newest first), as public seller cards. */
+  async following(user: User) {
+    const rows = await this.db
+      .select({ u: users })
+      .from(follows)
+      .innerJoin(users, eq(users.id, follows.sellerUserId))
+      .where(and(eq(follows.followerUserId, user.id), isNull(users.bannedAt)))
+      .orderBy(desc(follows.createdAt))
+      .limit(100);
+    const infos = await this.sellerInfos(rows.map((r) => r.u));
+    return rows.map((r) => infos.get(r.u.id)!);
+  }
+
+  /**
    * "Цена снижена" for everyone who saved the listing (Vinted / Mercari / Avito do the same): one alert per
    * user and listing per day, only while the listing is still active at that price.
    */
@@ -581,6 +706,7 @@ export class ListingService {
           eq(favorites.listingId, listingId),
           sql`${users.id} <> ${l.sellerUserId}`,
           sql`${users.bannedAt} is null`,
+          sql`not ('price_drop' = any(${users.notifyOff}))`,
           sql`not exists (select 1 from events e where e.user_id = ${users.id} and e.name = 'price_drop_alert'
                 and e.props->>'listingId' = ${listingId} and e.created_at > now() - interval '24 hours')`,
         ),
@@ -591,7 +717,7 @@ export class ListingService {
       const lang = u.language as Lang;
       const text = t(lang, "favorites.price_drop", { title: listingTitle(l, lang), old: formatUzs(l.previousPrice), price: formatUzs(price) });
       const sent = await this.d.notifier
-        .send(u.telegramId, text, url ? [[{ text: t(lang, "favorites.open"), url }]] : [])
+        .send(u.telegramId, text, [...(url ? [[{ text: t(lang, "favorites.open"), url }]] : []), unsubscribeRow(lang, "price_drop")])
         .then(() => true)
         .catch((err) => (console.error("price drop alert failed", err), false));
       if (sent) await this.d.repo.event(u.id, "price_drop_alert", { listingId });
@@ -680,6 +806,20 @@ export class ListingService {
   }
 
   // ---------- management ----------
+  /**
+   * The buyer reported buying the item at a meeting arranged on Ishonch (stage 18). Not counted in
+   * "platform sales" — those are delivered orders only, which Ishonch sees itself.
+   */
+  async soldAtMeeting(id: string) {
+    const done = await this.db
+      .update(listings)
+      .set({ status: "sold", soldVia: "platform", soldAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(listings.id, id), eq(listings.status, "active")))
+      .returning({ id: listings.id });
+    if (done.length) await this.d.onUnavailable?.(id, "listing_unavailable");
+    return done.length > 0;
+  }
+
   async markSold(user: User, id: string, via: "platform" | "elsewhere") {
     const l = await this.own(user, id);
     // A reserved listing is sold through its delivery order (or the order is cancelled first).
@@ -737,7 +877,12 @@ export class ListingService {
         ...(expired ? { bumpedAt: now } : {}),
         updatedAt: now,
       })
-      .where(eq(listings.id, id));
+      // Compare-and-set: a listing reserved or hidden by moderation meanwhile must not come back to life.
+      .where(and(eq(listings.id, id), eq(listings.status, l.status), expired ? eq(listings.moderationReason, "expired") : sql`true`))
+      .returning({ id: listings.id })
+      .then((rows) => {
+        if (!rows.length) throw new ListingRejected("bad_state", 409);
+      });
     await this.d.repo.event(user.id, "listing_renewed", { listingId: id, expired });
     return this.dto(id, user.id);
   }
@@ -746,6 +891,61 @@ export class ListingService {
    * Hourly job: reminds sellers 3 days before expiry (button "Renew") and archives expired listings.
    * Returns counts for logs/tests.
    */
+  /**
+   * Автоснижение (Mercari Smart Pricing): live listings whose step is due drop by AUTO_DROP_PCT down to the
+   * seller's floor. A drop is an ordinary price change: favorites are alerted, open requests quoted at the
+   * old price close. The seller is told each time; reaching the floor ends it.
+   */
+  async runAutoDrops(now = new Date()) {
+    const due = await this.db
+      .select()
+      .from(listings)
+      .where(and(eq(listings.status, "active"), sql`${listings.autoDropFloor} is not null`, lte(listings.autoDropAt, now)))
+      .limit(200);
+    let dropped = 0;
+    for (const l of due) {
+      const price = nextAutoDropPrice(l.price!, l.autoDropFloor!);
+      if (!l.price || price >= l.price) {
+        await this.db.update(listings).set({ autoDropFloor: null, autoDropAt: null }).where(eq(listings.id, l.id));
+        continue;
+      }
+      const atFloor = price <= l.autoDropFloor!;
+      const [changed] = await this.db
+        .update(listings)
+        .set({
+          price,
+          ...this.priceChange(l, price, now),
+          autoDropFloor: atFloor ? null : l.autoDropFloor,
+          autoDropAt: atFloor ? null : new Date(now.getTime() + AUTO_DROP_EVERY_DAYS * DAY),
+          updatedAt: now,
+        })
+        // Compare-and-set: a seller editing the price meanwhile wins.
+        .where(and(eq(listings.id, l.id), eq(listings.status, "active"), eq(listings.price, l.price)))
+        .returning({ id: listings.id });
+      if (!changed) continue;
+      dropped++;
+      await this.d.onUnavailable?.(l.id, "price_changed");
+      if (l.price - price >= (l.price * PRICE_DROP_MIN_PCT) / 100) await this.schedule("price_drop_alerts", { listingId: l.id, price }, this.quiet(now));
+      const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
+      if (seller && this.d.notifier) {
+        const lang = seller.language as Lang;
+        const url = this.d.publisher ? await this.d.publisher.miniAppLink("screen_my").catch(() => null) : null;
+        await this.d.notifier
+          .send(
+            seller.telegramId,
+            t(lang, atFloor ? "autodrop.reached_floor" : "autodrop.dropped", {
+              title: listingTitle(l, lang),
+              price: formatUzs(price),
+              floor: formatUzs(l.autoDropFloor!),
+            }),
+            url ? [[{ text: t(lang, "autodrop.manage"), url }]] : [],
+          )
+          .catch(() => undefined);
+      }
+    }
+    return dropped;
+  }
+
   async runExpiry(now = new Date()) {
     const soon = new Date(now.getTime() + EXPIRY_REMINDER_DAYS * DAY);
     const toRemind = await this.db
@@ -858,6 +1058,22 @@ export class ListingService {
     }
   }
 
+  /** Right to erasure: every file of the user's listings, their evidence uploads and the shop photo. */
+  async purgeUserFiles(userId: string) {
+    const own = await this.db.select({ id: listings.id }).from(listings).where(eq(listings.sellerUserId, userId));
+    const ids = own.map((l) => l.id);
+    const photos = ids.length ? await this.db.select().from(listingPhotos).where(inArray(listingPhotos.listingId, ids)) : [];
+    await Promise.all(photos.map((p) => this.deletePhotoFiles(p.storageKey)));
+    const files = await this.db
+      .select({ key: evidence.storageKey })
+      .from(evidence)
+      .where(ids.length ? or(eq(evidence.uploadedBy, userId), inArray(evidence.listingId, ids)) : eq(evidence.uploadedBy, userId));
+    const [shop] = await this.db.select({ key: shops.photoKey }).from(shops).where(eq(shops.ownerUserId, userId));
+    await Promise.all(
+      [...files.map((f) => f.key), ...(shop?.key ? [shop.key] : [])].map((k) => this.d.storage.delete(k).catch(() => undefined)),
+    );
+  }
+
   private async deleteListing(id: string) {
     const photos = await this.db.select().from(listingPhotos).where(eq(listingPhotos.listingId, id));
     await Promise.all(photos.map((p) => this.deletePhotoFiles(p.storageKey)));
@@ -893,7 +1109,7 @@ export class ListingService {
   async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt">>): Promise<Map<string, ListingSeller>> {
     const sellerIds = sellers.map((u) => u.id);
     if (!sellerIds.length) return new Map();
-    const [shopRows, sales, ratings, responseOf, insp] = await Promise.all([
+    const [shopRows, sales, ratings, responseOf, insp, lost, fans] = await Promise.all([
       this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds)),
       // Platform sales = orders actually delivered by an Ishonch courier. The seller's own "sold on Ishonch"
       // mark is not counted: anyone could set it and get the "high trust" badge without a single sale.
@@ -917,7 +1133,19 @@ export class ListingService {
         .from(orders)
         .where(and(inArray(orders.sellerUserId, sellerIds), sql`${orders.inspection} is not null`))
         .groupBy(orders.sellerUserId),
+      this.db
+        .select({ seller: disputes.sellerUserId, n: count() })
+        .from(disputes)
+        .where(and(inArray(disputes.sellerUserId, sellerIds), inArray(disputes.resolution, ["refund", "partial"])))
+        .groupBy(disputes.sellerUserId),
+      this.db
+        .select({ seller: follows.sellerUserId, n: count() })
+        .from(follows)
+        .where(inArray(follows.sellerUserId, sellerIds))
+        .groupBy(follows.sellerUserId),
     ]);
+    const fansOf = new Map(fans.map((r) => [r.seller, Number(r.n)]));
+    const lostOf = new Map(lost.map((r) => [r.seller, Number(r.n)]));
     const shopOf = new Map(shopRows.map((sh) => [sh.ownerUserId, sh]));
     const salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
     const ratingOf = new Map(ratings.map((r) => [r.seller, { avg: Math.round(Number(r.avg) * 10) / 10, count: Number(r.n) }]));
@@ -932,9 +1160,25 @@ export class ListingService {
             registeredAt: u.createdAt.toISOString(),
             platformSales: salesOf.get(u.id) ?? 0,
             rating: ratingOf.get(u.id) ?? { avg: null, count: 0 },
-            shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
+            shop: shop
+              ? {
+                  id: shop.id,
+                  name: shop.name,
+                  verified: shop.verified,
+                  marketLocation: shop.marketLocation,
+                  bundleDiscount: shop.bundle2Pct || shop.bundle3Pct ? { two: shop.bundle2Pct, three: shop.bundle3Pct } : null,
+                }
+              : null,
+            followers: fansOf.get(u.id) ?? 0,
             responseMinutes: responseOf.get(u.id) ?? null,
             inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
+            disputesLost: lostOf.get(u.id) ?? 0,
+            badges: sellerBadges({
+              responseMinutes: responseOf.get(u.id) ?? null,
+              inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
+              platformSales: salesOf.get(u.id) ?? 0,
+              disputesLost: lostOf.get(u.id) ?? 0,
+            }),
           },
         ];
       }),
@@ -1017,6 +1261,7 @@ export class ListingService {
       .orderBy(asc(listingPhotos.position), asc(listingPhotos.id));
     const photosOf = new Map<string, typeof photos>();
     for (const p of photos) photosOf.set(p.listingId, [...(photosOf.get(p.listingId) ?? []), p]);
+    const videoOf = this.d.evidence ? await this.d.evidence.listingVideos(ids) : new Map<string, string>();
 
     const sellerIds = [...new Set(rows.map((r) => r.sellerUserId))];
     const needSellers = opts.withSeller || rows.some((r) => r.sellerUserId === viewerId && r.moderationReason);
@@ -1054,6 +1299,15 @@ export class ListingService {
         ...(isOwner ? { imei: l.imei } : {}),
         imeiTail: l.imei ? l.imei.slice(-4) : null,
         checklist: (l.checklist as ConditionChecklist) ?? {},
+        acceptsTrade: l.acceptsTrade,
+        grade: (l.grade as Grade | null) ?? null,
+        video: videoOf.get(l.id) ?? null,
+        ...(isOwner
+          ? {
+              autoDrop: l.autoDropFloor && l.autoDropAt ? { floor: l.autoDropFloor, nextAt: l.autoDropAt.toISOString() } : null,
+              likersOffer: l.likersOfferPrice && l.likersOfferAt ? { price: l.likersOfferPrice, at: l.likersOfferAt.toISOString() } : null,
+            }
+          : {}),
         verified:
           l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,
@@ -1089,6 +1343,9 @@ export class ListingService {
           shop: null,
           responseMinutes: null,
           inspections: { passed: 0, failed: 0 },
+          disputesLost: 0,
+          followers: 0,
+          badges: [],
         };
       }
       out.push(dto);

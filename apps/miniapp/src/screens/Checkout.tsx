@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  GUARANTEE_DAYS,
   MAX_FLOOR,
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -35,7 +36,7 @@ export function Checkout({ api, listing, onDone }: Props) {
   const [address, setAddress] = useState(() => readPref("address") ?? "");
   const initialAddress = useRef(address);
   const [comment, setComment] = useState("");
-  const [quote, setQuote] = useState<(DeliveryQuote & { bundle: BundleQuote | null }) | null>(null);
+  const [quote, setQuote] = useState<(DeliveryQuote & { bundle: BundleQuote | null; offerId?: string | null }) | null>(null);
   const [candidates, setCandidates] = useState<ListingDto[]>([]);
   const [extras, setExtras] = useState<string[]>([]);
   const extraKey = extras.join(",");
@@ -210,7 +211,19 @@ export function Checkout({ api, listing, onDone }: Props) {
       )}
       <label className="field">
         {t("checkout.comment")}
-        <input value={comment} maxLength={300} onChange={(e) => setComment(e.target.value)} />
+        <input value={comment} maxLength={300} onChange={(e) => setComment(e.target.value)} data-testid="checkout-comment" />
+        <span className="chips">
+          {(["call_ahead", "after_18", "no_intercom"] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              className="chip"
+              onClick={() => setComment((v) => (v.includes(t(`checkout.quick.${c}`)) ? v : [v.trim(), t(`checkout.quick.${c}`)].filter(Boolean).join(", ").slice(0, 300)))}
+            >
+              {t(`checkout.quick.${c}`)}
+            </button>
+          ))}
+        </span>
       </label>
 
       {quote && (
@@ -219,7 +232,7 @@ export function Checkout({ api, listing, onDone }: Props) {
             <span>{all.length > 1 ? t("checkout.bundle_items", { n: all.length }) : t("checkout.item")}</span>
             <span>{formatUzs(sum("itemPrice"))}</span>
           </div>
-          {listing.price != null && quote.itemPrice < listing.price && (
+          {quote.offerId && listing.price != null && quote.itemPrice < listing.price && (
             <p className="hint" data-testid="offer-applied">🤝 {t("checkout.offer_applied", { amount: formatUzs(quote.itemPrice) })}</p>
           )}
           <div className="row between">
@@ -243,6 +256,12 @@ export function Checkout({ api, listing, onDone }: Props) {
               {formatUzs(sum("sellerFee"))} — {t("checkout.paid_by_seller")}
             </p>
           )}
+          {quote.bundle && quote.bundle.discount > 0 && (
+            <div className="row between" data-testid="bundle-discount">
+              <span>{t("checkout.bundle_discount", { pct: quote.bundle.discountPct })}</span>
+              <span>−{formatUzs(quote.bundle.discount)}</span>
+            </div>
+          )}
           {quote.bundle && quote.bundle.saved > 0 && (
             <p className="hint" data-testid="bundle-saved">🧺 {t("checkout.bundle_saved", { amount: formatUzs(quote.bundle.saved) })}</p>
           )}
@@ -255,7 +274,11 @@ export function Checkout({ api, listing, onDone }: Props) {
       )}
 
       {district && !quote && !error && <p className="hint center">⏳ {t("checkout.calculating")}</p>}
-      <p className="hint-card">🔍 {t("checkout.inspection")}</p>
+      <p className="hint-card">
+        🔍 {t("checkout.inspection")}
+        <br />
+        {t("guarantee.checkout", { days: GUARANTEE_DAYS })}
+      </p>
 
       {needPhone && (
         <div className="card stack">

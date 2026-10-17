@@ -5,12 +5,14 @@ import { Empty } from "../components/Empty";
 import { LoadError } from "../components/LoadError";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { useLang, useT } from "../i18n";
+import { BundleBadge, SellerBadges } from "../components/SellerBadges";
 
 /** Public page of a seller: who they are on Ishonch (trust facts) and everything they sell now. */
 export function SellerPage({ api, sellerId, onOpen }: { api: Api; sellerId: string; onOpen: (id: string) => void }) {
   const t = useT();
   const lang = useLang();
-  const [data, setData] = useState<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[] } | null>(null);
+  const [data, setData] = useState<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[]; following: boolean } | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
   const [reviews, setReviews] = useState<ReviewDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -45,6 +47,29 @@ export function SellerPage({ api, sellerId, onOpen }: { api: Api; sellerId: stri
             {s.shop?.verified && <span className="badge">✔️ {t("shop.verified")}</span>}
           </div>
           <span className={`trust trust-${data!.trust}`}>{t(`trust.${data!.trust}`)}</span>
+          <SellerBadges badges={s.badges} />
+          <div className="row between wrap">
+            <button
+              className={data!.following ? "secondary" : "primary"}
+              disabled={followBusy}
+              onClick={() => {
+                setFollowBusy(true);
+                api
+                  .follow(s.id, !data!.following)
+                  .then((r) => setData((d) => d && { ...d, following: r.following, seller: { ...d.seller, followers: r.followers } }))
+                  .catch(() => undefined)
+                  .finally(() => setFollowBusy(false));
+              }}
+              data-testid="follow-toggle"
+            >
+              {data!.following ? t("follow.following") : t("follow.button")}
+            </button>
+            <span className="hint" data-testid="followers">
+              {t("follow.followers", { n: s.followers })}
+            </span>
+          </div>
+          {!data!.following && <span className="hint">{t("follow.hint")}</span>}
+          <BundleBadge discount={s.shop?.bundleDiscount} />
           {s.shop?.marketLocation && <span className="hint">📍 {s.shop.marketLocation}</span>}
           <div className="facts">
             <Fact value={s.rating.count ? `★ ${s.rating.avg}` : "—"} label={t("seller.reviews_n", { n: s.rating.count })} />

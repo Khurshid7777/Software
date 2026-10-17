@@ -1,5 +1,5 @@
 import { buildApp } from "./app.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, productionWarnings } from "./config.js";
 import { createDb } from "./db/client.js";
 import { LOCKS, singleton } from "./jobs/lock.js";
 
@@ -21,6 +21,7 @@ const shutdown = async () => {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
+for (const w of productionWarnings(config)) app.log.warn(`UNSAFE CONFIG: ${w}`);
 await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
 // Background jobs (channel posts, saved-search alerts): every instance works, SKIP LOCKED splits the queue.
@@ -42,8 +43,11 @@ const hourly = () =>
     const r = await step("expiry", () => listings.runExpiry());
     const staleOrders = await step("stale_orders", () => orders.expireStale());
     await step("offers", () => orders.expireOffers());
+    await step("auto_drops", () => listings.runAutoDrops());
+    await step("meetings", () => app.services.meetings.runMaintenance());
     await step("review_reminders", () => orders.remindReviews());
     await step("jobs_cleanup", () => queue.cleanup());
+    await step("privacy_retention", () => app.services.repo.runRetention());
     await step("pending_replies", () => app.services.catalog.cleanupPendingReplies());
     if (r?.reminded || r?.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
   }).catch((err) => app.log.error({ err }, "hourly job failed"));

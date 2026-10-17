@@ -1,5 +1,13 @@
 import { t } from "@ishonch/shared/client";
 import type {
+  MeetingDto,
+  MeetingSpot,
+  Condition,
+  DisputeDto,
+  DisputeReason,
+  DisputeResolution,
+  Inspection,
+  Valuation,
   AssistantMessage,
   AssistantResponse,
   BundleQuote,
@@ -49,6 +57,7 @@ export function filtersToQuery(f: CatalogFilters, sort?: CatalogSort, offset = 0
   if (f.conditions?.length) p.set("conditions", f.conditions.join(","));
   if (f.district) p.set("district", f.district);
   if (f.verifiedOnly) p.set("verifiedOnly", "true");
+  if (f.goodGrade) p.set("goodGrade", "true");
   if (sort) p.set("sort", sort);
   if (offset) p.set("offset", String(offset));
   return p.toString();
@@ -64,6 +73,8 @@ export interface Me {
   role: string;
   acceptedTerms: boolean;
   hasPhone: boolean;
+  /** Optional notification types switched off (stage 20). */
+  notifyOff?: string[];
   checks: { perDay: number; remaining: number };
 }
 
@@ -79,18 +90,27 @@ export class ApiError extends Error {
 }
 
 export interface ShopInfo {
-  shop: { id: string; name: string; marketLocation: string | null; hasPhoto: boolean; verified: boolean } | null;
+  shop: { id: string; name: string; marketLocation: string | null; hasPhoto: boolean; verified: boolean; bundle2Pct: number; bundle3Pct: number } | null;
   channels: Array<{ id: number; telegramChannelId: number; title: string }>;
 }
 
 export type ListingPatch = Partial<
-  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei" | "checklist">
->;
+  Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei" | "checklist" | "acceptsTrade">
+> & { autoDropFloor?: number | null };
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
 export const apiUrl = (path: string) => `${BASE}${path}`;
 /** A signed photo URL at a smaller width (240 / 480 / 960) for cards and thumbnails. */
 export const photoUrl = (path: string, width: 240 | 480 | 960) => `${BASE}${path}${path.includes("?") ? "&" : "?"}w=${width}`;
+
+export interface ChatReport {
+  id: number;
+  reason: string;
+  createdAt: string;
+  listing: { id: string; title: string };
+  reported: { id: string; telegramId: number; role: "buyer" | "seller"; banned: boolean; reports: number };
+  messages: Array<{ from: "buyer" | "seller"; text: string; at: string }>;
+}
 
 export interface QueueItem {
   listing: ListingDto;
@@ -115,6 +135,9 @@ export interface AdminUser {
   bannedAt: string | null;
   banReason: string | null;
   activeListings: number;
+  /** Stage 19: missed meetings and chat reports against the user. */
+  noShows: number;
+  chatReports: number;
   rating: { avg: number | null; count: number };
 }
 export interface PriceRow {
@@ -126,6 +149,18 @@ export interface PriceRow {
   source: string;
   updatedAt: string;
 }
+/** Admin queue row: the dispute plus what the decision needs. */
+export type AdminDispute = DisputeDto & {
+  title: string;
+  listingId: string;
+  itemPrice: number;
+  deliveredAt: string | null;
+  inspection: Inspection | null;
+  inspectionPhotos: string[];
+  buyerPhone: string | null;
+  sellerPhone: string | null;
+};
+
 export type OperatorOrder = OrderDto & {
   contacts: { buyerPhone: string | null; sellerPhone: string | null; courierPhone: string | null };
   imei: string | null;
@@ -172,6 +207,7 @@ export function createApi(initData: string | null) {
 
   return {
     me: () => request<Me>("/me"),
+    setNotification: (type: string, on: boolean) => request<{ notifyOff: string[] }>("/me/notifications", json("PATCH", { type, on })),
     acceptTerms: () => request("/me/accept-terms", { method: "POST" }),
     setLanguage: (language: Lang) => request("/me", json("PATCH", { language })),
     deleteAccount: () => request("/me", { method: "DELETE" }),
@@ -195,10 +231,32 @@ export function createApi(initData: string | null) {
     generate: (id: string, answers: Record<string, string>) =>
       request<ListingDto>(`/listings/${id}/generate`, json("POST", { answers })),
     updateListing: (id: string, patch: ListingPatch) => request<ListingDto>(`/listings/${id}`, json("PATCH", patch)),
+    requestMeeting: (id: string, body: { spot: MeetingSpot | null; place: string | null; at: string; note: string | null }) =>
+      request<MeetingDto>(`/listings/${id}/meetings`, json("POST", body)),
+    meetings: () => request<MeetingDto[]>("/meetings"),
+    meetingAction: (id: string, action: string, body: object = {}) => request<MeetingDto>(`/meetings/${id}/${action}`, json("POST", body)),
+    offerToLikers: (id: string, amount: number) =>
+      request<{ sent: number; price: number; expiresAt: string; deferredUntil: string | null }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {
       const form = new FormData();
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
       return request<ListingDto>(`/listings/${id}/photos`, { method: "POST", body: form });
+    },
+    uploadVideo: (id: string, video: File) => {
+      const form = new FormData();
+      form.append("video", video, video.name || "video.mp4");
+      return request<{ video: string }>(`/listings/${id}/video`, { method: "POST", body: form });
+    },
+    deleteVideo: (id: string) => request<{ video: null }>(`/listings/${id}/video`, { method: "DELETE" }),
+    disputePhotos: (orderId: string, photos: Blob[]) => {
+      const form = new FormData();
+      photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
+      return request<{ photos: string[] }>(`/orders/${orderId}/dispute/photos`, { method: "POST", body: form });
+    },
+    inspectionPhotos: (orderId: string, photos: Blob[]) => {
+      const form = new FormData();
+      photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
+      return request<{ photos: string[] }>(`/operator/orders/${orderId}/inspection/photos`, { method: "POST", body: form });
     },
     deletePhoto: (id: string, photoId: number) => request<ListingDto>(`/listings/${id}/photos/${photoId}`, { method: "DELETE" }),
     publish: (id: string, channelIds: number[]) =>
@@ -214,8 +272,8 @@ export function createApi(initData: string | null) {
     renew: (id: string) => request<ListingDto>(`/listings/${id}/renew`, { method: "POST" }),
     deleteDraft: (id: string) => request(`/listings/${id}`, { method: "DELETE" }),
     shop: () => request<ShopInfo>("/shops/mine"),
-    saveShop: (name: string, marketLocation: string) =>
-      request<ShopInfo["shop"]>("/shops/mine", json("PUT", { name, marketLocation: marketLocation || null })),
+    saveShop: (name: string, marketLocation: string, bundle?: { bundle2Pct: number; bundle3Pct: number }) =>
+      request<ShopInfo["shop"]>("/shops/mine", json("PUT", { name, marketLocation: marketLocation || null, ...bundle })),
     shopPhoto: (photo: Blob) => {
       const form = new FormData();
       form.append("photo", photo, "shop.jpg");
@@ -228,11 +286,19 @@ export function createApi(initData: string | null) {
     catalogItem: (id: string) => request<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
     similar: (listingId: string) => request<CatalogItem[]>(`/catalog/${listingId}/similar`),
     catalogBatch: (ids: string[]) => (ids.length ? request<CatalogItem[]>(`/catalog/batch?ids=${ids.join(",")}`) : Promise.resolve([])),
-    sellerPage: (sellerId: string) => request<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[] }>(`/sellers/${sellerId}/page`),
+    sellerPage: (sellerId: string) =>
+      request<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[]; following: boolean }>(`/sellers/${sellerId}/page`),
+    follow: (sellerId: string, on: boolean) =>
+      request<{ following: boolean; followers: number }>(`/sellers/${sellerId}/follow`, { method: on ? "POST" : "DELETE" }),
+    following: () => request<ListingSeller[]>("/me/following"),
     insights: (listingId: string) => request<ListingInsights>(`/listings/${listingId}/insights`),
     shareLink: (listingId: string) => request<{ url: string | null }>(`/listings/${listingId}/share`),
     myOffer: (listingId: string) => request<{ offer: OfferDto | null }>(`/listings/${listingId}/offers/mine`),
     makeOffer: (listingId: string, amount: number) => request<OfferDto>(`/listings/${listingId}/offers`, json("POST", { amount })),
+    tradeOffer: (listingId: string, input: { title: string; condition: Condition; description?: string; topUp: number }) =>
+      request<OfferDto>(`/listings/${listingId}/trade-offers`, json("POST", input)),
+    valuation: (q: string, condition: Condition) => request<Valuation>(`/valuation?${new URLSearchParams({ q, condition }).toString()}`),
+    valuationModels: (q: string) => request<{ models: string[] }>(`/valuation/models?q=${encodeURIComponent(q)}`),
     setFavorite: (id: string, on: boolean) => request(`/favorites/${id}`, { method: on ? "POST" : "DELETE" }),
     favorites: () => request<CatalogItem[]>("/favorites"),
     searches: () => request<SavedSearch[]>("/searches"),
@@ -245,7 +311,7 @@ export function createApi(initData: string | null) {
 
     // ---- delivery ----
     quote: (listingId: string, district: District, mode: DeliveryMode, extra: string[] = [], lift: LiftInfo | null = null) =>
-      request<DeliveryQuote & { modes: DeliveryMode[]; bundle: BundleQuote | null }>(
+      request<DeliveryQuote & { modes: DeliveryMode[]; bundle: BundleQuote | null; offerId: string | null }>(
         `/orders/quote?${new URLSearchParams({
           listingId,
           district,
@@ -259,6 +325,11 @@ export function createApi(initData: string | null) {
     myOrders: (role: "buyer" | "seller") => request<OrderDto[]>(`/orders/mine?role=${role}`),
     order: (id: string) => request<OrderDto>(`/orders/${encodeURIComponent(id)}`),
     orderAction: (id: string, action: "confirm" | "decline" | "cancel") => request<OrderDto>(`/orders/${id}/${action}`, { method: "POST" }),
+    openDispute: (id: string, reason: DisputeReason, text: string) => request<OrderDto>(`/orders/${id}/dispute`, json("POST", { reason, text })),
+    respondDispute: (id: string, text: string) => request<OrderDto>(`/orders/${id}/dispute/response`, json("POST", { text })),
+    adminDisputes: (all = false) => request<AdminDispute[]>(`/admin/disputes${all ? "?all=1" : ""}`),
+    resolveDispute: (id: string, resolution: DisputeResolution, amount?: number, note?: string) =>
+      request<DisputeDto>(`/admin/disputes/${id}/resolve`, json("POST", { resolution, amount, note: note || undefined })),
     review: (id: string, rating: number, text: string) =>
       request<OrderDto>(`/orders/${id}/review`, json("POST", { rating, text: text.trim() || undefined })),
 
@@ -280,6 +351,11 @@ export function createApi(initData: string | null) {
     complaints: () => request<ComplaintRow[]>("/admin/complaints"),
     findUser: (telegramId: string) => request<AdminUser>(`/admin/users?telegramId=${encodeURIComponent(telegramId)}`),
     bannedUsers: () => request<Array<Pick<AdminUser, "id" | "telegramId" | "bannedAt" | "banReason" | "role">>>("/admin/users/banned"),
+    blocks: () => request<Array<{ userId: string; title: string | null; role: "buyer" | "seller" | null; createdAt: string }>>("/me/blocks"),
+    unblock: (userId: string) => request(`/me/blocks/${userId}`, { method: "DELETE" }),
+    chatReports: () => request<ChatReport[]>("/admin/chat-reports"),
+    resolveChatReport: (id: number, resolution: "dismissed" | "warned" | "banned") =>
+      request(`/admin/chat-reports/${id}/resolve`, json("POST", { resolution })),
     ban: (id: string, reason: string) => request(`/admin/users/${id}/ban`, json("POST", { reason })),
     unban: (id: string) => request(`/admin/users/${id}/unban`, { method: "POST" }),
     prices: () => request<PriceRow[]>("/admin/price-reference"),

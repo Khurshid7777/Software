@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "meetings_open_uq" ON "meetings" USING btree ("listing_id","buyer_user_id") WHERE status in ('pending', 'accepted');

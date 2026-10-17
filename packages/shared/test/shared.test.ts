@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  meetingSlots,
+  meetingTimeError,
+  applyDiscount,
+  bundleDiscountPct,
+  quietUntil,
+  maxLikersOffer,
+  nextAutoDropPrice,
+  sellerBadges,
   canTransition,
   dictionaries,
   inspectionChecklist,
@@ -28,6 +36,8 @@ import {
   repairKinds,
   ConditionChecklistSchema,
   isCargo,
+  computeGrade,
+  prettyModel,
   type CourierTariff,
 } from "../src/index.js";
 
@@ -337,5 +347,101 @@ describe("category-specific condition", () => {
     expect(ConditionChecklistSchema.parse({ mining: "yes", ageYears: 0, deadPixels: "few" })).toEqual({ mining: "yes", ageYears: 0, deadPixels: "few" });
     expect(ConditionChecklistSchema.safeParse({ mining: "maybe" }).success).toBe(false);
     expect(ConditionChecklistSchema.safeParse({ ageYears: 41 }).success).toBe(false);
+  });
+});
+
+describe("prettyModel", () => {
+  it("writes model keys the way people do", () => {
+    expect(prettyModel("apple iphone 13 128gb")).toBe("Apple iPhone 13 128 GB");
+    expect(prettyModel("nvidia geforce rtx 3060 12gb")).toBe("Nvidia Geforce RTX 3060 12 GB");
+    expect(prettyModel("lg f2j3hs0w 7kg")).toBe("LG F2J3HS0W 7KG");
+    expect(prettyModel("samsung galaxy s23 ultra 256gb")).toBe("Samsung Galaxy S23 Ultra 256 GB");
+  });
+});
+
+describe("item passport: condition grade", () => {
+  it("the condition sets the best grade, facts only lower it", () => {
+    expect(computeGrade(null, {})).toEqual({ grade: null, reasons: [] });
+    expect(computeGrade("new", {}).grade).toBe("A");
+    expect(computeGrade("like_new", { batteryPct: 90 }).grade).toBe("A");
+    expect(computeGrade("good", { batteryPct: 100 }).grade).toBe("B");
+    expect(computeGrade("fair", {}).grade).toBe("C");
+    expect(computeGrade("broken", { batteryPct: 100 }).grade).toBe("D");
+  });
+
+  it("names the facts that lowered the grade", () => {
+    expect(computeGrade("like_new", { batteryPct: 82 })).toEqual({ grade: "B", reasons: ["battery_worn"] });
+    expect(computeGrade("like_new", { batteryPct: 75, repairs: ["screen"] })).toEqual({ grade: "C", reasons: ["battery_low"] });
+    expect(computeGrade("new", { repairs: ["none"] }).grade).toBe("A");
+    expect(computeGrade("new", { repairs: ["screen"] })).toEqual({ grade: "B", reasons: ["repaired"] });
+    expect(computeGrade("good", { repairs: ["screen"] })).toEqual({ grade: "B", reasons: [] }); // already B
+    expect(computeGrade("like_new", { deadPixels: "many" }).grade).toBe("C");
+    expect(computeGrade("like_new", { deadPixels: "few" }).grade).toBe("B");
+    expect(computeGrade("like_new", { biometrics: "broken" }).grade).toBe("C");
+    expect(computeGrade("new", { mining: "yes" })).toEqual({ grade: "B", reasons: ["mining"] });
+  });
+});
+
+describe("selling faster (stage 16)", () => {
+  it("auto drop steps 5 % rounded down to 10 000 and never goes under the floor", () => {
+    expect(nextAutoDropPrice(4_000_000, 3_000_000)).toBe(3_800_000);
+    expect(nextAutoDropPrice(4_123_000, 3_000_000)).toBe(3_910_000);
+    expect(nextAutoDropPrice(3_100_000, 3_000_000)).toBe(3_000_000);
+  });
+  it("likers offer is at least 10 % below the price", () => {
+    expect(maxLikersOffer(4_000_000)).toBe(3_600_000);
+    expect(maxLikersOffer(1_234_567)).toBe(1_111_000);
+  });
+  it("badges come from facts only", () => {
+    const base = { responseMinutes: null, inspections: { passed: 0, failed: 0 }, platformSales: 0, disputesLost: 0 };
+    expect(sellerBadges(base)).toEqual([]);
+    expect(sellerBadges({ ...base, responseMinutes: 45 })).toEqual(["fast_reply"]);
+    expect(sellerBadges({ ...base, responseMinutes: 61 })).toEqual([]);
+    expect(sellerBadges({ ...base, inspections: { passed: 3, failed: 0 } })).toEqual(["courier_checked"]);
+    expect(sellerBadges({ ...base, inspections: { passed: 5, failed: 1 } })).toEqual([]);
+    expect(sellerBadges({ ...base, platformSales: 5 })).toEqual(["reliable"]);
+    expect(sellerBadges({ ...base, platformSales: 9, disputesLost: 1 })).toEqual([]);
+  });
+});
+
+describe("coming back (stage 17)", () => {
+  it("quiet hours are 22:00–08:00 in Tashkent and end at the next 08:00", () => {
+    expect(quietUntil(new Date("2026-03-10T07:00:00Z"))).toBeNull(); // 12:00
+    expect(quietUntil(new Date("2026-03-10T16:59:00Z"))).toBeNull(); // 21:59
+    expect(quietUntil(new Date("2026-03-10T17:00:00Z"))?.toISOString()).toBe("2026-03-11T03:00:00.000Z"); // 22:00
+    expect(quietUntil(new Date("2026-03-10T20:00:00Z"))?.toISOString()).toBe("2026-03-11T03:00:00.000Z"); // 01:00
+    expect(quietUntil(new Date("2026-03-11T02:59:00Z"))?.toISOString()).toBe("2026-03-11T03:00:00.000Z"); // 07:59
+    expect(quietUntil(new Date("2026-03-11T03:00:00Z"))).toBeNull(); // 08:00
+    expect(quietUntil(new Date("2026-12-31T19:00:00Z"))?.toISOString()).toBe("2027-01-01T03:00:00.000Z"); // new year
+  });
+  it("set discount by the number of items", () => {
+    const d = { two: 10, three: 15 };
+    expect(bundleDiscountPct(d, 1)).toBe(0);
+    expect(bundleDiscountPct(d, 2)).toBe(10);
+    expect(bundleDiscountPct(d, 5)).toBe(15);
+    expect(bundleDiscountPct({ two: 0, three: 20 }, 2)).toBe(0);
+    expect(bundleDiscountPct({ two: 10, three: 0 }, 3)).toBe(10);
+    expect(bundleDiscountPct(null, 3)).toBe(0);
+    expect(applyDiscount(1_234_567, 10)).toBe(1_111_000);
+    expect(applyDiscount(1_234_567, 0)).toBe(1_234_567);
+  });
+});
+
+describe("meetings (stage 18)", () => {
+  const now = new Date("2026-03-10T05:30:00Z"); // 10:30 in Tashkent
+  it("daytime only, at least an hour ahead, at most 7 days", () => {
+    expect(meetingTimeError(new Date("2026-03-10T06:00:00Z"), now)).toBe("too_soon"); // 11:00
+    expect(meetingTimeError(new Date("2026-03-10T07:00:00Z"), now)).toBeNull(); // 12:00
+    expect(meetingTimeError(new Date("2026-03-10T15:00:00Z"), now)).toBeNull(); // 20:00
+    expect(meetingTimeError(new Date("2026-03-10T16:00:00Z"), now)).toBe("night"); // 21:00
+    expect(meetingTimeError(new Date("2026-03-11T03:00:00Z"), now)).toBe("night"); // 08:00
+    expect(meetingTimeError(new Date("2026-03-11T04:00:00Z"), now)).toBeNull(); // 09:00
+    expect(meetingTimeError(new Date("2026-03-18T07:00:00Z"), now)).toBe("too_far");
+  });
+  it("hourly slots of a day skip the past and the night", () => {
+    const today = meetingSlots(now, 0).map((d) => d.toISOString());
+    expect(today[0]).toBe("2026-03-10T07:00:00.000Z"); // 12:00
+    expect(today.at(-1)).toBe("2026-03-10T15:00:00.000Z"); // 20:00
+    expect(meetingSlots(now, 1)).toHaveLength(12); // 9:00 … 20:00
   });
 });

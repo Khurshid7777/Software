@@ -12,6 +12,9 @@ export interface ShopDto {
   hasPhoto: boolean;
   verified: boolean;
   verifiedAt: string | null;
+  /** % off for 2 items and for 3+ items in one delivery (0 — no discount). */
+  bundle2Pct: number;
+  bundle3Pct: number;
 }
 
 export class ShopService {
@@ -32,6 +35,8 @@ export class ShopService {
       hasPhoto: !!s.photoKey,
       verified: s.verified,
       verifiedAt: s.verifiedAt?.toISOString() ?? null,
+      bundle2Pct: s.bundle2Pct,
+      bundle3Pct: s.bundle3Pct,
     };
   }
 
@@ -41,13 +46,17 @@ export class ShopService {
   }
 
   /** Creating a shop profile switches the account to the "shop" role (no listing limit). */
-  async upsert(user: User, data: { name: string; marketLocation?: string | null }) {
+  async upsert(user: User, data: { name: string; marketLocation?: string | null; bundle2Pct?: number; bundle3Pct?: number }) {
+    const bundle = {
+      ...(data.bundle2Pct !== undefined ? { bundle2Pct: data.bundle2Pct } : {}),
+      ...(data.bundle3Pct !== undefined ? { bundle3Pct: data.bundle3Pct } : {}),
+    };
     const [s] = await this.db
       .insert(shops)
-      .values({ ownerUserId: user.id, name: data.name, marketLocation: data.marketLocation ?? null })
+      .values({ ownerUserId: user.id, name: data.name, marketLocation: data.marketLocation ?? null, ...bundle })
       .onConflictDoUpdate({
         target: shops.ownerUserId,
-        set: { name: data.name, marketLocation: data.marketLocation ?? null },
+        set: { name: data.name, marketLocation: data.marketLocation ?? null, ...bundle },
       })
       .returning();
     if (user.role === "buyer" || user.role === "seller") {

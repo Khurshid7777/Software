@@ -124,6 +124,22 @@ class FakeApi {
     this.calls.push(`mod:${u.id}:${decision}:${id}`);
     return { status: decision === "approve" ? "active" : "rejected", title: "iPhone" };
   }
+  async setNotification(u: { id: number }, type: string, on: boolean) {
+    this.calls.push(`notify:${u.id}:${type}:${on}`);
+    return { notifyOff: [type] };
+  }
+  async blockConversation(u: { id: number }, id: string) {
+    this.calls.push(`block:${u.id}:${id}`);
+    return { ok: true };
+  }
+  async reportConversation(u: { id: number }, id: string, reason: string) {
+    this.calls.push(`report:${u.id}:${id}:${reason}`);
+    return { ok: true };
+  }
+  async meetingAction(u: { id: number }, id: string, action: string) {
+    this.calls.push(`meet:${u.id}:${id}:${action}`);
+    return { status: action === "accept" ? "accepted" : "declined" };
+  }
   async renewListing(u: { id: number }, id: string) {
     this.calls.push(`renew:${u.id}:${id}`);
     return {};
@@ -444,5 +460,69 @@ describe("Reply button state lives in the API", () => {
     await bot.idle();
     expect(String(sent.at(-1)!.payload.text)).toContain("истекло");
     expect(api.calls.some((c) => c.startsWith("checkText:поздний"))).toBe(false);
+  });
+
+  it("meeting request buttons: the seller accepts in the bot", async () => {
+    const { api, bot, sent } = setup();
+    const id = "22222222-2222-2222-2222-222222222222";
+    await bot.handleUpdate({
+      update_id: 4,
+      callback_query: {
+        id: "cb1",
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        chat_instance: "1",
+        data: `meet:accept:${id}`,
+        message: { message_id: 3, date: 0, chat: { id: 5, type: "private", first_name: "A" }, text: "🤝" },
+      },
+    });
+    await bot.idle();
+    expect(api.calls).toContain(`meet:5:${id}:accept`);
+    expect(sent.some((s) => s.method === "answerCallbackQuery" && String(s.payload.text).includes("Договорились"))).toBe(true);
+  });
+
+  it("chat safety: block and report the other side from the relayed message", async () => {
+    const { api, bot, sent } = setup();
+    const id = "33333333-3333-3333-3333-333333333333";
+    const cb = (data: string, n: number): Update => ({
+      update_id: n,
+      callback_query: {
+        id: `cb${n}`,
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        chat_instance: "1",
+        data,
+        message: { message_id: 3, date: 0, chat: { id: 5, type: "private", first_name: "A" }, text: "💬" },
+      },
+    });
+    await bot.handleUpdate(cb(`blk:${id}`, 10));
+    await bot.idle();
+    expect(api.calls).toContain(`block:5:${id}`);
+    expect(sent.some((s) => s.method === "sendMessage" && String(s.payload.text).includes("заблокирован"))).toBe(true);
+
+    await bot.handleUpdate(cb(`rep:${id}`, 11));
+    await bot.idle();
+    const ask = sent.filter((s) => s.method === "sendMessage").at(-1)!;
+    expect(JSON.stringify(ask.payload.reply_markup)).toContain(`rep:${id}:prepayment`);
+    await bot.handleUpdate(cb(`rep:${id}:prepayment`, 12));
+    await bot.idle();
+    expect(api.calls).toContain(`report:5:${id}:prepayment`);
+  });
+
+  it("«Не присылать такое» switches the type off and says how to bring it back", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate({
+      update_id: 20,
+      callback_query: {
+        id: "cb20",
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        chat_instance: "1",
+        data: "unsub:price_drop",
+        message: { message_id: 3, date: 0, chat: { id: 5, type: "private", first_name: "A" }, text: "📉" },
+      },
+    });
+    await bot.idle();
+    expect(api.calls).toContain("notify:5:price_drop:false");
+    const reply = String(sent.filter((s) => s.method === "sendMessage").at(-1)!.payload.text);
+    expect(reply).toContain("Снижение цены на избранное");
+    expect(reply).toContain("Профиль → Уведомления");
   });
 });

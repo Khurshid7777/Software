@@ -1,12 +1,12 @@
 // Seeds the demo catalog (fixtures/assistant.json) with generated photos for local development.
 //   pnpm --filter @ishonch/api dev:seed-catalog
 import { readFileSync } from "node:fs";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql as dsql } from "drizzle-orm";
 import { PROMPTS_DIR } from "@ishonch/shared/node";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
 import { Repo } from "../src/db/repo.js";
-import { listingPhotos, listings, shops, users } from "../src/db/schema.js";
+import { follows, listingPhotos, listings, shops, users } from "../src/db/schema.js";
 import { processImage } from "../src/storage/images.js";
 import { FsStorage, type Storage } from "../src/storage/storage.js";
 import { testPhoto } from "./helpers.js";
@@ -23,10 +23,24 @@ await db.update(users).set({ createdAt: new Date(Date.now() - 200 * 864e5), phon
 const [shop] = await db
   .insert(shops)
   .values({ ownerUserId: shopOwner.id, name: "Malika Tech", marketLocation: "Malika, 3-qator, 12", verified: true, verifiedAt: new Date() })
-  .onConflictDoUpdate({ target: shops.ownerUserId, set: { verified: true } })
+  .onConflictDoUpdate({ target: shops.ownerUserId, set: { verified: true, bundle2Pct: 0, bundle3Pct: 0 } })
   .returning();
+await db.delete(follows).where(inArray(follows.sellerUserId, [shopOwner.id, privateSeller.id]));
+await db.execute(dsql`update users set notify_off = '{}' where telegram_id in (999000001, 999000002, 777000111, 777000222)`);
+await db.execute(dsql`delete from user_blocks where blocker_user_id in (${shopOwner.id}, ${privateSeller.id}) or blocked_user_id in (${shopOwner.id}, ${privateSeller.id})`);
+// Daily quotas of the demo buyer (offers): repeated e2e runs on one day must not hit the limit.
+await db.execute(dsql`delete from events where name = 'offer_made' and user_id in (select id from users where telegram_id in (777000111, 777000222))`);
 await db.delete(listings).where(eq(listings.sellerUserId, shopOwner.id));
 await db.delete(listings).where(eq(listings.sellerUserId, privateSeller.id));
+
+/** A filled-in passport for the demo phones and laptops (the fixture has none). */
+function demoChecklist(category: string, condition: string) {
+  if (category === "smartphone" || category === "tablet") {
+    return { accountUnlocked: true, batteryPct: condition === "new" ? 100 : 88, repairs: ["none"], kit: ["box", "charger"] };
+  }
+  if (category === "laptop") return { accountUnlocked: true, ageYears: 2, repairs: ["none"], kit: ["charger"] };
+  return {};
+}
 
 for (const [i, f] of catalog.entries()) {
   const fromShop = ["mba_m1", "redmi_note13", "airpods_pro2"].includes(f.key);
@@ -44,6 +58,7 @@ for (const [i, f] of catalog.entries()) {
       condition: f.condition,
       price: f.price,
       district: f.district,
+      checklist: demoChecklist(f.category, f.condition),
       status: "active",
       publishedAt: new Date(),
       bumpedAt: new Date(Date.now() - i * 60_000),

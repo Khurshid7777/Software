@@ -70,6 +70,11 @@ export function Dashboard({ api }: { api: Api }) {
             />
           </div>
 
+          {m.system.openDisputes > 0 && (
+            <p className="card kpi-alert" data-testid="open-disputes">
+              ⚖️ Открытых споров покупателей: {m.system.openDisputes} — вкладка «Споры».
+            </p>
+          )}
           {m.system.failedJobs > 0 && (
             <p className="card kpi-alert" data-testid="failed-jobs">
               🧯 Фоновых задач с ошибкой: {m.system.failedJobs} (посты в каналы, уведомления). В очереди: {m.system.queuedJobs}. Причины —
@@ -78,6 +83,23 @@ export function Dashboard({ api }: { api: Api }) {
           )}
           <Funnel title="Воронка покупателя" steps={m.buyerFunnel} />
           <Funnel title="Воронка продавца" steps={m.sellerFunnel} />
+          <Funnel title="Сделки при встрече" steps={m.meetingFunnel} />
+          <section className="card stack-tight" data-testid="search-misses">
+            <h3>🔎 Искали, но не нашли</h3>
+            {m.searchMisses.length === 0 ? (
+              <span className="hint">Все запросы что-то находили</span>
+            ) : (
+              m.searchMisses.map((x) => (
+                <span key={x.q} className="row between">
+                  <span>«{x.q}»</span>
+                  <span className="hint">
+                    {x.count} раз · {x.users} чел.
+                  </span>
+                </span>
+              ))
+            )}
+            <span className="hint">Подсказка: позовите продавцов с таким товаром или добавьте написание в словарь поиска.</span>
+          </section>
 
           <section className="card stack">
             <h3>Заказы</h3>

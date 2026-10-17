@@ -20,6 +20,11 @@ import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
+import { TradeForm } from "../components/TradeForm";
+import { LoadError } from "../components/LoadError";
+import { MeetForm } from "../components/Meeting";
+import { Passport } from "../components/Passport";
+import { BundleBadge, SellerBadges } from "../components/SellerBadges";
 import { useLang, useT } from "../i18n";
 import { canShareStory, ensureWriteAccess, haptic, shareLink, shareToStory } from "../telegram";
 
@@ -39,6 +44,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   const lang = useLang();
   const [item, setItem] = useState<CatalogItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [message, setMessage] = useState("");
@@ -46,10 +52,13 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   const [complaint, setComplaint] = useState<{ reason: ComplaintReason | null; text: string } | null>(null);
   const [offer, setOffer] = useState<OfferDto | null>(null);
   const [offering, setOffering] = useState<string | null>(null);
+  const [trading, setTrading] = useState(false);
+  const [meeting, setMeeting] = useState<"form" | "sent" | null>(null);
   const [reviews, setReviews] = useState<ReviewDto[] | null>(null);
   const [similar, setSimilar] = useState<CatalogItem[]>([]);
 
   useEffect(() => {
+    setError(null);
     api
       .catalogItem(id)
       .then(setItem)
@@ -62,13 +71,13 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
       .similar(id)
       .then(setSimilar)
       .catch(() => undefined);
-  }, [api, id]);
+  }, [api, id, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Recently viewed" on the storefront (own listings are not worth remembering).
   useEffect(() => {
     if (item && item.listing.seller?.id !== meId && item.listing.status === "active") rememberViewed(item.listing.id);
   }, [item, meId]);
 
-  if (error) return <p className="center hint">{error}</p>;
+  if (error) return <LoadError text={error} onRetry={() => setAttempt((a) => a + 1)} />;
   if (!item) return <p className="center hint">{t("common.loading")}</p>;
   const l = item.listing;
   const own = l.seller?.id === meId;
@@ -146,6 +155,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   return (
     <div className={!own && l.status === "active" && l.allowedDeliveryModes.length > 0 ? "stack with-action-bar" : "stack"} data-testid="listing-view">
       <Gallery photos={l.photos} />
+      {l.video && (
+        <section className="stack-tight" data-testid="listing-video">
+          <strong>{t("listing.video")}</strong>
+          <video className="video-check" src={apiUrl(l.video)} controls playsInline preload="metadata" />
+        </section>
+      )}
       <div className="row between">
         <h1>{listingTitle(l, lang)}</h1>
         {!own && (
@@ -179,6 +194,14 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
               <span className="badge">📉 {t("listing.price_dropped")}</span>
             </>
           )}
+          {l.acceptsTrade && (
+            <>
+              {" "}
+              <span className="badge trade-badge" data-testid="trade-badge">
+                {t("trade.badge")}
+              </span>
+            </>
+          )}
         </p>
       )}
       <MarketBadge item={item} />
@@ -191,6 +214,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
         </p>
       )}
+      {item.passport && <Passport passport={item.passport} />}
       <ChecklistView category={l.category} value={l.checklist} />
       {isCargo(l.category) && (
         <p className="hint-card" data-testid="listing-cargo">
@@ -216,6 +240,8 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
         <section className="card stack">
           <h3>{t("listing.seller")}</h3>
           <TrustBadge item={item} />
+          <SellerBadges badges={l.seller.badges} />
+          <BundleBadge discount={l.seller.shop?.bundleDiscount} />
           {l.seller.rating.count > 0 ? (
             <button className="link" onClick={toggleReviews} data-testid="seller-rating">
               {t("listing.rating", { avg: l.seller.rating.avg ?? "—", n: l.seller.rating.count })} ·{" "}
@@ -291,6 +317,15 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           <>
             {writing ? (
               <div className="card stack">
+                {!message && (
+                  <div className="chips" data-testid="quick-questions">
+                    {(["still_selling", "see_today", "bargain"] as const).map((q) => (
+                      <button key={q} className="chip" onClick={() => setMessage(t(`listing.quick.${q}`))}>
+                        {t(`listing.quick.${q}`)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   rows={3}
                   placeholder={t("listing.write_placeholder")}
@@ -321,10 +356,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
             )}
             {offer && (
               <p className={offer.status === "accepted" ? "hint-card center" : "hint center"} data-testid="offer-status">
-                {t(`offer.status.${offer.status}`, {
-                  amount: formatUzs(offer.amount),
-                  until: new Date(offer.expiresAt).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ", { dateStyle: "short", timeStyle: "short" }),
-                })}
+                {offer.kind === "trade" && offer.trade
+                  ? t(`trade.status.${offer.status}`, { item: offer.trade.title })
+                  : t(`offer.status.${offer.status}`, {
+                      amount: formatUzs(offer.amount),
+                      until: new Date(offer.expiresAt).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ", { dateStyle: "short", timeStyle: "short" }),
+                    })}
               </p>
             )}
             {l.price && offer?.status !== "pending" && offer?.status !== "accepted" &&
@@ -346,6 +383,43 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
                     {t("offer.send")}
                   </button>
                 </div>
+              ))}
+            {l.acceptsTrade && offer?.status !== "pending" && offer?.status !== "accepted" &&
+              (trading ? (
+                <TradeForm
+                  api={api}
+                  listingId={l.id}
+                  onSent={(o) => {
+                    setOffer(o);
+                    setTrading(false);
+                    setToast(t("trade.sent"));
+                  }}
+                  onError={setToast}
+                />
+              ) : (
+                <button className="link" onClick={() => setTrading(true)} data-testid="trade-open">
+                  {t("trade.open")}
+                </button>
+              ))}
+            {l.status === "active" &&
+              (meeting === "form" ? (
+                <MeetForm
+                  api={api}
+                  listingId={l.id}
+                  onSent={() => {
+                    setMeeting("sent");
+                    setToast(t("meet.sent"));
+                  }}
+                  onError={setToast}
+                />
+              ) : meeting === "sent" ? (
+                <p className="hint-card center" data-testid="meet-sent">
+                  {t("meet.sent")}
+                </p>
+              ) : (
+                <button className="secondary" onClick={() => setMeeting("form")} data-testid="meet-open">
+                  {t("meet.button")}
+                </button>
               ))}
           </>
         )

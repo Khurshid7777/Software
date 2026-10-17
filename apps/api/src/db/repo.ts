@@ -15,6 +15,9 @@ import { adminAudit, aiBudget, aiUsage, checks, events, priceReference, settings
 import type { AiUsageRecord } from "../ai/aiService.js";
 
 /** Tashkent is UTC+5 with no DST; "today" for limits is a Tashkent calendar day. */
+/** Retention periods (days) for personal data; see Repo.runRetention and the privacy policy. */
+export const RETENTION = { orderPiiDays: 90, chatDays: 365, eventsDays: 400 } as const;
+
 export function startOfTashkentDay(now = new Date()): Date {
   const shifted = new Date(now.getTime() + 5 * 3600_000);
   shifted.setUTCHours(0, 0, 0, 0);
@@ -68,11 +71,33 @@ export class Repo {
     await this.db.update(users).set({ phone }).where(eq(users.id, userId));
   }
 
-  async hasOpenOrders(userId: string) {
+  /**
+   * Orders in progress, a delivery still inside the dispute window, or an open dispute: deleting the
+   * account then would erase the other side's record (and let a seller escape a dispute).
+   */
+  async hasOpenOrders(userId: string, disputeDays: number) {
     const rows = await this.db.execute(sql`
       select 1 from orders where (buyer_user_id = ${userId} or seller_user_id = ${userId})
-        and status in ('new', 'confirmed', 'courier_assigned', 'picked_up') limit 1`);
+        and (status in ('new', 'confirmed', 'courier_assigned', 'picked_up')
+          or (status = 'delivered' and delivered_at > now() - make_interval(days => ${disputeDays})))
+      union all
+      select 1 from disputes where (buyer_user_id = ${userId} or seller_user_id = ${userId}) and status = 'open'
+      limit 1`);
     return (rows as unknown as unknown[]).length > 0;
+  }
+
+  /** Adds or removes an optional notification type from users.notify_off; returns the new list. */
+  async setNotify(userId: string, type: string, on: boolean) {
+    const [row] = await this.db
+      .update(users)
+      .set({
+        notifyOff: on
+          ? sql`array_remove(${users.notifyOff}, ${type})`
+          : sql`case when ${type} = any(${users.notifyOff}) then ${users.notifyOff} else array_append(${users.notifyOff}, ${type}) end`,
+      })
+      .where(eq(users.id, userId))
+      .returning({ notifyOff: users.notifyOff });
+    return row?.notifyOff ?? [];
   }
 
   async acceptTerms(userId: string) {
@@ -82,6 +107,28 @@ export class Repo {
   /** Right to erasure: checks keep only anonymised data and are detached (user_id -> null). */
   async deleteUser(userId: string) {
     await this.db.delete(users).where(eq(users.id, userId));
+  }
+
+  /**
+   * Personal data is kept only as long as it is needed (privacy policy): the delivery address, comment and
+   * courier phone of orders closed more than ORDER_PII_DAYS ago, chat messages older than CHAT_DAYS, and raw
+   * analytics events older than EVENTS_DAYS. Orders themselves stay (sales, reviews, disputes refer to them).
+   */
+  async runRetention(now = new Date()) {
+    const DAY = 864e5;
+    const orders = (await this.db.execute(sql`
+      update orders set address = '', comment = null, courier_phone = null
+      where address <> '' and status not in ('new', 'confirmed', 'courier_assigned', 'picked_up')
+        and updated_at < ${new Date(now.getTime() - RETENTION.orderPiiDays * DAY).toISOString()}
+        and not exists (select 1 from disputes d where d.order_id = orders.id and d.status = 'open')
+      returning id`)) as unknown as unknown[];
+    const messages = (await this.db.execute(sql`
+      delete from conversation_messages where created_at < ${new Date(now.getTime() - RETENTION.chatDays * DAY).toISOString()}
+      returning id`)) as unknown as unknown[];
+    const events = (await this.db.execute(sql`
+      delete from events where created_at < ${new Date(now.getTime() - RETENTION.eventsDays * DAY).toISOString()}
+      returning id`)) as unknown as unknown[];
+    return { orders: orders.length, messages: messages.length, events: events.length };
   }
 
   // ---- settings ----
@@ -144,6 +191,12 @@ export class Repo {
    * but requires the same model numbers / storage (13 vs 13, 128 vs 128).
    */
   async findReferencePrice(modelKey: string): Promise<MarketRange | null> {
+    const row = await this.findReferenceRow(modelKey);
+    return row ? { min: row.min, median: row.median, max: row.max } : null;
+  }
+
+  /** The reference row of the same model (trigram candidates, then the same numbers and modifiers). */
+  async findReferenceRow(modelKey: string): Promise<(MarketRange & { modelKey: string }) | null> {
     const key = normalizeModelKey(modelKey);
     const rows = await this.db
       .select({
@@ -156,8 +209,20 @@ export class Repo {
       .where(sql`${priceReference.modelKey} % ${key}`)
       .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
       .limit(5);
-    const row = rows.find((r) => sameModel(r.modelKey, key));
-    return row ? { min: row.min, median: row.median, max: row.max } : null;
+    return rows.find((r) => sameModel(r.modelKey, key)) ?? null;
+  }
+
+  /** Model names from the price reference for an autocomplete (prefix words first, then similar). */
+  async suggestModels(query: string, limit = 8): Promise<string[]> {
+    const key = normalizeModelKey(query);
+    if (key.length < 2) return [];
+    const rows = await this.db
+      .select({ modelKey: priceReference.modelKey })
+      .from(priceReference)
+      .where(sql`${priceReference.modelKey} ilike ${`%${key.replace(/[%_\\]/g, "")}%`} or ${priceReference.modelKey} % ${key}`)
+      .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
+      .limit(limit);
+    return rows.map((r) => r.modelKey);
   }
 
   listPriceReference() {

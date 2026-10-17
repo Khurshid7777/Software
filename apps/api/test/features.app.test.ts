@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { eq, sql as dsql } from "drizzle-orm";
+import { eq, sql as dsql, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { BundleQuote, CatalogItem, DeliveryQuote, ListingDto, OrderDto } from "@ishonch/shared";
 import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { complaints, conversations, listingPhotos, listings, orders, reviews } from "../src/db/schema.js";
+import { complaints, conversations, listingPhotos, listings, orders, reviews, users } from "../src/db/schema.js";
 import sharp from "sharp";
 import type { CourierProvider, ShipmentRequest } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
@@ -408,6 +408,8 @@ describe.skipIf(!reachable)("reviews reminder, share, checklist, inspection, rep
     for (const [i, tg] of [BUYER, SELLER2, OPERATOR].entries()) {
       await db.insert(complaints).values({ listingId: l.id, userId: await userId(tg), reason: i ? "scam" : "wrong_info" });
     }
+    // Established accounts only count towards hiding (trust service).
+    await db.update(users).set({ createdAt: new Date(Date.now() - 10 * 864e5), phone: "+998901112233" }).where(inArray(users.telegramId, [BUYER, SELLER2, OPERATOR]));
     await opStatus(id, "cancelled");
     expect(await listingStatus(l.id)).toBe("pending");
   });

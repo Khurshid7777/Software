@@ -18,6 +18,9 @@ import { Shop } from "./screens/Shop";
 import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
+import { Blocks } from "./screens/Blocks";
+import { Notifications } from "./screens/Notifications";
+import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
 import { setBackButton, type TelegramEnv } from "./telegram";
@@ -28,6 +31,8 @@ type Screen =
   | { name: "sell"; existing?: ListingDto }
   | { name: "my" }
   | { name: "shop" }
+  | { name: "blocks" }
+  | { name: "notifications" }
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
   | { name: "assistant" }
@@ -36,6 +41,7 @@ type Screen =
   | { name: "orders"; focusId?: string }
   | { name: "profile" }
   | { name: "seller"; id: string }
+  | { name: "valuation" }
   | { name: "admin" };
 
 /** A navigation entry: screens below the top stay mounted (state, loaded lists) and remember their scroll. */
@@ -83,7 +89,9 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_assistant") return { name: "assistant" };
   if (startParam === "screen_favorites") return { name: "favorites" };
   if (startParam === "screen_profile") return { name: "profile" };
+  if (startParam === "screen_notifications") return { name: "notifications" };
   if (startParam === "screen_shop") return { name: "shop" };
+  if (startParam === "screen_valuation") return { name: "valuation" };
   return { name: "home" };
 }
 
@@ -278,6 +286,12 @@ export function App({ env }: { env: TelegramEnv }) {
       case "shop":
         body = <Shop api={api} />;
         break;
+      case "blocks":
+        body = <Blocks api={api} />;
+        break;
+      case "notifications":
+        body = <Notifications api={api} />;
+        break;
       case "listing":
         body = (
           <ListingView
@@ -312,6 +326,7 @@ export function App({ env }: { env: TelegramEnv }) {
             focusId={screen.focusId}
             onOpenListing={(id) => go({ name: "listing", id })}
             onCatalog={() => go({ name: "catalog" })}
+            onSell={() => go({ name: "sell" })}
           />
         );
         break;
@@ -336,8 +351,12 @@ export function App({ env }: { env: TelegramEnv }) {
             onOpen={(id) => go({ name: "listing", id })}
             onSearch={(s) => go({ name: "catalog", filters: s.filters })}
             onCatalog={() => go({ name: "catalog" })}
+            onSeller={(id) => go({ name: "seller", id })}
           />
         );
+        break;
+      case "valuation":
+        body = <Valuation api={api} onSell={() => go({ name: "sell" })} />;
         break;
       case "seller":
         body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;
