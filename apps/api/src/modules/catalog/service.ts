@@ -484,7 +484,8 @@ export class CatalogService {
       rating: seller.rating,
       inspections: seller.inspections,
     });
-    return { seller, trust, items };
+    const following = viewer ? await this.listingsSvc.isFollowing(viewer.id, sellerId) : false;
+    return { seller, trust, items, following };
   }
 
   /**

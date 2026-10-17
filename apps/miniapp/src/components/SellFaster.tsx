@@ -92,7 +92,7 @@ export function SellFaster({ api, listing: l, onDone }: { api: Api; listing: Lis
             disabled={busy || !value || (mode === "autodrop" && value < (l.price * AUTO_DROP_MIN_FLOOR_PCT) / 100)}
             onClick={() =>
               mode === "likers"
-                ? run(() => api.offerToLikers(l.id, value).then((r) => t("likers.sent", { n: r.sent })))
+                ? run(() => api.offerToLikers(l.id, value).then((r) => t("likers.sent", { n: r.sent }) + (r.deferredUntil ? ` ${t("likers.deferred")}` : "")))
                 : run(() => api.updateListing(l.id, { autoDropFloor: value }).then(() => t("autodrop.saved")))
             }
             data-testid={`${mode}-send`}

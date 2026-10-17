@@ -36,7 +36,7 @@ export function Checkout({ api, listing, onDone }: Props) {
   const [address, setAddress] = useState(() => readPref("address") ?? "");
   const initialAddress = useRef(address);
   const [comment, setComment] = useState("");
-  const [quote, setQuote] = useState<(DeliveryQuote & { bundle: BundleQuote | null }) | null>(null);
+  const [quote, setQuote] = useState<(DeliveryQuote & { bundle: BundleQuote | null; offerId?: string | null }) | null>(null);
   const [candidates, setCandidates] = useState<ListingDto[]>([]);
   const [extras, setExtras] = useState<string[]>([]);
   const extraKey = extras.join(",");
@@ -220,7 +220,7 @@ export function Checkout({ api, listing, onDone }: Props) {
             <span>{all.length > 1 ? t("checkout.bundle_items", { n: all.length }) : t("checkout.item")}</span>
             <span>{formatUzs(sum("itemPrice"))}</span>
           </div>
-          {listing.price != null && quote.itemPrice < listing.price && (
+          {quote.offerId && listing.price != null && quote.itemPrice < listing.price && (
             <p className="hint" data-testid="offer-applied">🤝 {t("checkout.offer_applied", { amount: formatUzs(quote.itemPrice) })}</p>
           )}
           <div className="row between">
@@ -243,6 +243,12 @@ export function Checkout({ api, listing, onDone }: Props) {
             <p className="hint">
               {formatUzs(sum("sellerFee"))} — {t("checkout.paid_by_seller")}
             </p>
+          )}
+          {quote.bundle && quote.bundle.discount > 0 && (
+            <div className="row between" data-testid="bundle-discount">
+              <span>{t("checkout.bundle_discount", { pct: quote.bundle.discountPct })}</span>
+              <span>−{formatUzs(quote.bundle.discount)}</span>
+            </div>
           )}
           {quote.bundle && quote.bundle.saved > 0 && (
             <p className="hint" data-testid="bundle-saved">🧺 {t("checkout.bundle_saved", { amount: formatUzs(quote.bundle.saved) })}</p>

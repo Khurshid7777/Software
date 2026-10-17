@@ -339,6 +339,7 @@ export function App({ env }: { env: TelegramEnv }) {
             onOpen={(id) => go({ name: "listing", id })}
             onSearch={(s) => go({ name: "catalog", filters: s.filters })}
             onCatalog={() => go({ name: "catalog" })}
+            onSeller={(id) => go({ name: "seller", id })}
           />
         );
         break;

@@ -314,3 +314,40 @@ export function sellerBadges(s: {
   if (s.platformSales >= 5 && s.disputesLost === 0) out.push("reliable");
   return out;
 }
+
+// ---------- Stage 17: coming back to buy (docs/plan.md) ----------
+
+/** Quiet hours in Tashkent (UTC+5): optional notifications wait until the morning. */
+export const QUIET_FROM_HOUR = 22;
+export const QUIET_TO_HOUR = 8;
+const TASHKENT_OFFSET_MS = 5 * 3600_000;
+
+/** When `now` falls in the quiet hours, the moment they end (next 08:00 Tashkent); otherwise null. */
+export function quietUntil(now: Date): Date | null {
+  const local = new Date(now.getTime() + TASHKENT_OFFSET_MS);
+  const h = local.getUTCHours();
+  if (h >= QUIET_TO_HOUR && h < QUIET_FROM_HOUR) return null;
+  const morning = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + (h >= QUIET_FROM_HOUR ? 1 : 0), QUIET_TO_HOUR));
+  return new Date(morning.getTime() - TASHKENT_OFFSET_MS);
+}
+
+/** A shop's discount for buying several of its items in one delivery: % for 2 items and for 3 or more. */
+export interface BundleDiscount {
+  two: number;
+  three: number;
+}
+export const BUNDLE_DISCOUNT_MAX_PCT = 30;
+
+/** The percentage for `n` items in one delivery (0 when there is no discount). */
+export function bundleDiscountPct(d: BundleDiscount | null | undefined, n: number) {
+  if (!d || n < 2) return 0;
+  return n >= 3 ? Math.max(d.three, d.two) : d.two;
+}
+
+/** The discounted item price, rounded down to 1 000 sum. */
+export function applyDiscount(price: number, pct: number) {
+  return pct > 0 ? Math.floor((price * (100 - pct)) / 100 / 1000) * 1000 : price;
+}
+
+/** At most one "new item from a seller you follow" message per seller and Tashkent day. */
+export const FOLLOW_ALERTS_PER_DAY = 1;

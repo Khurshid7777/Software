@@ -86,7 +86,7 @@ export class ApiError extends Error {
 }
 
 export interface ShopInfo {
-  shop: { id: string; name: string; marketLocation: string | null; hasPhoto: boolean; verified: boolean } | null;
+  shop: { id: string; name: string; marketLocation: string | null; hasPhoto: boolean; verified: boolean; bundle2Pct: number; bundle3Pct: number } | null;
   channels: Array<{ id: number; telegramChannelId: number; title: string }>;
 }
 
@@ -215,7 +215,7 @@ export function createApi(initData: string | null) {
       request<ListingDto>(`/listings/${id}/generate`, json("POST", { answers })),
     updateListing: (id: string, patch: ListingPatch) => request<ListingDto>(`/listings/${id}`, json("PATCH", patch)),
     offerToLikers: (id: string, amount: number) =>
-      request<{ sent: number; price: number; expiresAt: string }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
+      request<{ sent: number; price: number; expiresAt: string; deferredUntil: string | null }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {
       const form = new FormData();
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
@@ -251,8 +251,8 @@ export function createApi(initData: string | null) {
     renew: (id: string) => request<ListingDto>(`/listings/${id}/renew`, { method: "POST" }),
     deleteDraft: (id: string) => request(`/listings/${id}`, { method: "DELETE" }),
     shop: () => request<ShopInfo>("/shops/mine"),
-    saveShop: (name: string, marketLocation: string) =>
-      request<ShopInfo["shop"]>("/shops/mine", json("PUT", { name, marketLocation: marketLocation || null })),
+    saveShop: (name: string, marketLocation: string, bundle?: { bundle2Pct: number; bundle3Pct: number }) =>
+      request<ShopInfo["shop"]>("/shops/mine", json("PUT", { name, marketLocation: marketLocation || null, ...bundle })),
     shopPhoto: (photo: Blob) => {
       const form = new FormData();
       form.append("photo", photo, "shop.jpg");
@@ -265,7 +265,11 @@ export function createApi(initData: string | null) {
     catalogItem: (id: string) => request<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
     similar: (listingId: string) => request<CatalogItem[]>(`/catalog/${listingId}/similar`),
     catalogBatch: (ids: string[]) => (ids.length ? request<CatalogItem[]>(`/catalog/batch?ids=${ids.join(",")}`) : Promise.resolve([])),
-    sellerPage: (sellerId: string) => request<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[] }>(`/sellers/${sellerId}/page`),
+    sellerPage: (sellerId: string) =>
+      request<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[]; following: boolean }>(`/sellers/${sellerId}/page`),
+    follow: (sellerId: string, on: boolean) =>
+      request<{ following: boolean; followers: number }>(`/sellers/${sellerId}/follow`, { method: on ? "POST" : "DELETE" }),
+    following: () => request<ListingSeller[]>("/me/following"),
     insights: (listingId: string) => request<ListingInsights>(`/listings/${listingId}/insights`),
     shareLink: (listingId: string) => request<{ url: string | null }>(`/listings/${listingId}/share`),
     myOffer: (listingId: string) => request<{ offer: OfferDto | null }>(`/listings/${listingId}/offers/mine`),
@@ -286,7 +290,7 @@ export function createApi(initData: string | null) {
 
     // ---- delivery ----
     quote: (listingId: string, district: District, mode: DeliveryMode, extra: string[] = [], lift: LiftInfo | null = null) =>
-      request<DeliveryQuote & { modes: DeliveryMode[]; bundle: BundleQuote | null }>(
+      request<DeliveryQuote & { modes: DeliveryMode[]; bundle: BundleQuote | null; offerId: string | null }>(
         `/orders/quote?${new URLSearchParams({
           listingId,
           district,

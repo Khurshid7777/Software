@@ -36,7 +36,7 @@ import { StaffNotifier } from "./telegram/staff.js";
 import { maybeSendDigest } from "./jobs.js";
 import { JobQueue } from "./jobs/queue.js";
 import { registerRateLimits } from "./rateLimit.js";
-import { DEFAULT_COMPLAINTS_TO_HIDE } from "@ishonch/shared";
+import { DEFAULT_COMPLAINTS_TO_HIDE, quietUntil } from "@ishonch/shared";
 
 export interface AppDeps {
   config: Config;
@@ -172,7 +172,8 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     notifier: gateway,
     staff,
     moderation,
-    enqueue: (kind, payload) => queue.enqueue(kind, payload),
+    enqueue: (kind, payload, runAt) => queue.enqueue(kind, payload, runAt),
+    quietUntil: config.QUIET_HOURS ? quietUntil : undefined,
     onPublished: (id) => catalog.notifySavedSearches(id),
     onUnavailable: (id, reason): Promise<number> => ordersSvc.closeNewOrders(id, reason),
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
@@ -196,6 +197,8 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
     // `trust` is created below; the hook only runs later, on an order cancelled or returned.
     onListingRestored: (id) => trust.holdIfComplained(id),
+    enqueue: (kind, payload, runAt) => queue.enqueue(kind, payload, runAt),
+    quietUntil: config.QUIET_HOURS ? quietUntil : undefined,
   });
   const trust = new TrustService({ repo, listings: listingsSvc, onBanned: (id) => ordersSvc.cancelAllFor(id) });
 
@@ -255,7 +258,8 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     optionalUser: auth.optionalUser,
   });
 
-  for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+  for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts", "follower_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+  queue.register("likers_offer_dms", (p) => ordersSvc.likersOfferDms(String(p.listingId), Number(p.price)));
 
   app.decorate("services", {
     queue,

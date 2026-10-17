@@ -26,6 +26,9 @@ import {
   LIKERS_OFFER_EVERY_DAYS,
   LIKERS_OFFER_HOURS,
   maxLikersOffer,
+  applyDiscount,
+  bundleDiscountPct,
+  type BundleDiscount,
   TRADE_MAX_TOPUP_PCT,
   normalizeModelKey,
   type BundleQuote,
@@ -64,7 +67,9 @@ import {
   orderEvents,
   orders,
   reviews,
+  shops,
   users,
+  type Listing,
   type Order,
   type User,
 } from "../../db/schema.js";
@@ -124,6 +129,9 @@ export interface OrderServiceDeps {
   codPlatformEnabled: boolean;
   /** A reserved listing is back on sale: re-check complaints that arrived meanwhile (TrustService). */
   onListingRestored?: (listingId: string) => Promise<unknown>;
+  /** Background jobs; used to send optional messages after the quiet hours. */
+  enqueue?: (kind: string, payload: Record<string, unknown>, runAt?: Date | null) => Promise<void>;
+  quietUntil?: (now: Date) => Date | null;
 }
 
 /** Drizzle wraps driver errors; the PostgreSQL code may sit on the error or its cause. */
@@ -207,8 +215,17 @@ export class OrderService {
     const tariff = pickTariff(await this.tariffs(), (l.district as District | null) ?? null, district, vehicle);
     // No tariff for the route would mean a free courier trip: refuse (operators fix the tariff table).
     if (!tariff) throw new OrderRejected("no_tariff", 409);
-    const offer = buyerId ? await this.acceptedOffer(l.id, buyerId) : null;
-    const itemPrice = offer ? Math.min(offer.amount, l.price!) : l.price!;
+    // The shop's set discount applies to items without an agreed price (an accepted offer is already a deal).
+    const discountPct = extras.length ? bundleDiscountPct(await this.bundleDiscount(l.sellerUserId), 1 + extras.length) : 0;
+    let discount = 0;
+    const priceFor = async (x: Listing) => {
+      const o = buyerId ? await this.acceptedOffer(x.id, buyerId) : null;
+      if (o) return { offer: o, price: Math.min(o.amount, x.price!) };
+      const price = applyDiscount(x.price!, discountPct);
+      discount += x.price! - price;
+      return { offer: null, price };
+    };
+    const { offer, price: itemPrice } = await priceFor(l);
     const main = quoteDelivery({ tariff, itemPrice, mode, feePayer: l.feePayer as FeePayer, lift });
 
     let bundle: BundleQuote | null = null;
@@ -217,17 +234,23 @@ export class OrderService {
       // One trip: the delivery and lift fees are in the main item, the extras pay only their COD fee.
       const xTariff = { ...tariff, price: 0, liftPerFloor: 0 };
       for (const x of extras) {
-        const xOffer = buyerId ? await this.acceptedOffer(x.id, buyerId) : null;
-        const xPrice = xOffer ? Math.min(xOffer.amount, x.price!) : x.price!;
+        const { price: xPrice } = await priceFor(x);
         items.push({ listingId: x.id, quote: quoteDelivery({ tariff: xTariff, itemPrice: xPrice, mode, feePayer: x.feePayer as FeePayer, lift }) });
       }
       bundle = {
         items,
         buyerTotal: main.buyerTotal + items.reduce((sum, i) => sum + i.quote.buyerTotal, 0),
         saved: main.deliveryFee * items.length,
+        discountPct: discount ? discountPct : 0,
+        discount,
       };
     }
     return { ...main, modes, offerId: offer?.id ?? null, bundle };
+  }
+
+  private async bundleDiscount(sellerId: string): Promise<BundleDiscount | null> {
+    const [shop] = await this.db.select({ two: shops.bundle2Pct, three: shops.bundle3Pct }).from(shops).where(eq(shops.ownerUserId, sellerId));
+    return shop && (shop.two || shop.three) ? shop : null;
   }
 
   /** Other live items of the same seller that can ride in the same delivery (checkout "add to this delivery"). */
@@ -480,10 +503,9 @@ export class OrderService {
    * for LIKERS_OFFER_HOURS — stored as an accepted offer per person, so checkout applies it as after a
    * successful haggle. At least LIKERS_OFFER_MIN_PCT off, once per LIKERS_OFFER_EVERY_DAYS, each lower than the last.
    */
-  async offerToLikers(seller: User, listingId: string, price: number) {
+  async offerToLikers(seller: User, listingId: string, price: number, now = new Date()) {
     const l = await this.availableListing(listingId);
     if (l.sellerUserId !== seller.id) throw new OrderRejected("forbidden", 403);
-    const now = new Date();
     if (price > maxLikersOffer(l.price!) || price < minOffer(l.price!)) throw new OrderRejected("likers_too_high", 400);
     if (l.likersOfferAt && now.getTime() - l.likersOfferAt.getTime() < LIKERS_OFFER_EVERY_DAYS * DAY_MS) throw new OrderRejected("likers_too_soon", 409);
     if (l.likersOfferPrice && l.likersOfferAt && now.getTime() - l.likersOfferAt.getTime() < 90 * DAY_MS && price >= l.likersOfferPrice) {
@@ -495,7 +517,9 @@ export class OrderService {
       .innerJoin(users, eq(users.id, favorites.userId))
       .where(and(eq(favorites.listingId, l.id), ne(favorites.userId, seller.id), sql`${users.bannedAt} is null`));
     if (!likers.length) throw new OrderRejected("no_likers", 409);
-    const expiresAt = new Date(now.getTime() + LIKERS_OFFER_HOURS * 3600_000);
+    // At night the messages wait for the morning, and the 24 hours start then (stage 17, quiet hours).
+    const deferredUntil = this.d.enqueue ? (this.d.quietUntil?.(now) ?? null) : null;
+    const expiresAt = new Date((deferredUntil ?? now).getTime() + LIKERS_OFFER_HOURS * 3600_000);
     await this.db.transaction(async (tx) => {
       await tx.insert(offers).values(
         likers.map(({ u }) => ({
@@ -512,8 +536,31 @@ export class OrderService {
       await tx.update(listings).set({ likersOfferPrice: price, likersOfferAt: now }).where(eq(listings.id, l.id));
     });
     await this.d.repo.event(seller.id, "likers_offer_sent", { listingId: l.id, price, recipients: likers.length });
+    if (deferredUntil) await this.d.enqueue!("likers_offer_dms", { listingId: l.id, price }, deferredUntil);
+    else await this.likersOfferDms(l.id, price);
+    return { sent: likers.length, price, expiresAt: expiresAt.toISOString(), deferredUntil: deferredUntil?.toISOString() ?? null };
+  }
+
+  /** The messages of an offer to likers: to everyone whose personal price is still open. */
+  async likersOfferDms(listingId: string, price: number) {
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.status !== "active" || l.likersOfferPrice !== price) return 0;
+    const rows = await this.db
+      .select({ u: users })
+      .from(offers)
+      .innerJoin(users, eq(users.id, offers.buyerUserId))
+      .where(
+        and(
+          eq(offers.listingId, l.id),
+          eq(offers.kind, "price"),
+          eq(offers.status, "accepted"),
+          eq(offers.amount, price),
+          gt(offers.expiresAt, new Date()),
+          sql`${users.bannedAt} is null`,
+        ),
+      );
     const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
-    for (const { u } of likers) {
+    for (const { u } of rows) {
       const lang = u.language as Lang;
       await this.dm(
         u,
@@ -521,7 +568,7 @@ export class OrderService {
         url ? [[{ text: t(lang, "offer.checkout"), url }]] : [],
       );
     }
-    return { sent: likers.length, price, expiresAt: expiresAt.toISOString() };
+    return rows.length;
   }
 
   /** Hourly tidy-up: offers past their deadline are marked expired. */
@@ -607,7 +654,7 @@ export class OrderService {
         mode: t(lang, `delivery.${input.mode}`),
         district: t(lang, `district.${input.district}`),
         receives: formatUzs(receives),
-      }) + (bundle ? `\n${t(lang, "order.bundle_note", { n: titles.length })}` : "") + (quote.vehicle === "cargo" ? `\n${t(lang, "order.cargo_for_seller")}` : ""), [
+      }) + (bundle ? `\n${t(lang, "order.bundle_note", { n: titles.length })}` : "") + (bundle?.discount ? `\n${t(lang, "order.bundle_discount_note", { pct: bundle.discountPct, amount: formatUzs(bundle.discount) })}` : "") + (quote.vehicle === "cargo" ? `\n${t(lang, "order.cargo_for_seller")}` : ""), [
         [
           { text: t(lang, "order.confirm"), callbackData: `order:confirm:${order.id}` },
           { text: t(lang, "order.decline"), callbackData: `order:decline:${order.id}` },

@@ -1,16 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq, sql as dsql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import type { DeliveryQuote, ListingDto } from "@ishonch/shared";
+import type { BundleQuote, DeliveryQuote, ListingDto, ListingSeller } from "@ishonch/shared";
 import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { favorites, listings, offers, priceReference } from "../src/db/schema.js";
+import { favorites, follows, jobs, listings, offers, priceReference, users } from "../src/db/schema.js";
 import type { CourierProvider } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../src/telegram/publisher.js";
@@ -32,7 +32,7 @@ const MODERATORS = -100_990_160;
 // A model of our own, so the price reference of other tests and seeds does not matter.
 const MODEL = "testbrand phone x16 128gb";
 
-describe.skipIf(!reachable)("selling faster: offer to likers, auto price drops, seller badges (integration)", () => {
+describe.skipIf(!reachable)("selling faster and coming back: likers offers, auto drops, badges, follows, set discount, quiet hours (integration)", () => {
   let app: FastifyInstance;
   let close: () => Promise<unknown>;
   let db: ReturnType<typeof createDb>["db"];
@@ -91,6 +91,7 @@ describe.skipIf(!reachable)("selling faster: offer to likers, auto price drops, 
       OPERATOR_TELEGRAM_IDS: String(OPERATOR),
       ADMIN_TELEGRAM_IDS: String(ADMIN),
       MODERATION_CHAT_ID: String(MODERATORS),
+      QUIET_HOURS: "true",
     } as NodeJS.ProcessEnv);
     const created = createDb(url);
     db = created.db;
@@ -129,7 +130,18 @@ describe.skipIf(!reachable)("selling faster: offer to likers, auto price drops, 
 
   // ---------------- offer to likers ----------------
 
+  afterEach(() => void vi.useRealTimers());
+  /** Today 12:00 in Tashkent: outside the quiet hours whenever the suite runs (only Date is faked). */
+  const middayInTashkent = () => {
+    const d = new Date();
+    d.setUTCHours(7, 0, 0, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(d);
+    return d;
+  };
+
   it("offer to likers: ≥10 % off, only to those who saved it, 24 h accepted offer that checkout applies", async () => {
+    middayInTashkent();
     const l = await liveListing();
     expect((await post(SELLER, `/listings/${l.id}/offer-likers`, { amount: 3_500_000 })).json().error).toBe("no_likers");
     await like(l.id, BUYER, LIKER);
@@ -186,7 +198,9 @@ describe.skipIf(!reachable)("selling faster: offer to likers, auto price drops, 
     // Not due yet → nothing happens.
     expect(await app.services.listings.runAutoDrops()).toBe(0);
 
-    const later = new Date(Date.now() + 3 * 864e5 + 60_000);
+    // A day-time run (12:00 Tashkent) four days later, so the alert is not held for the quiet hours.
+    const later = new Date(Date.now() + 4 * 864e5);
+    later.setUTCHours(7, 0, 0, 0);
     expect(await app.services.listings.runAutoDrops(later)).toBe(1);
     let [row] = await db.select().from(listings).where(eq(listings.id, l.id));
     expect(row!.price).toBe(3_800_000);
@@ -196,7 +210,7 @@ describe.skipIf(!reachable)("selling faster: offer to likers, auto price drops, 
     expect(dmsTo(BUYER).some((d) => d.text.includes("3 800 000"))).toBe(true);
 
     // The next step stops at the floor and turns itself off.
-    const after = new Date(later.getTime() + 3 * 864e5 + 60_000);
+    const after = new Date(later.getTime() + 4 * 864e5);
     expect(await app.services.listings.runAutoDrops(after)).toBe(1);
     [row] = await db.select().from(listings).where(eq(listings.id, l.id));
     expect(row).toMatchObject({ price: 3_700_000, autoDropFloor: null, autoDropAt: null });
@@ -227,5 +241,114 @@ describe.skipIf(!reachable)("selling faster: offer to likers, auto price drops, 
     expect(item.listing.seller!.badges).toEqual([]);
     const page = await get<{ seller: { badges: string[] } }>(BUYER, `/sellers/${l.sellerUserId}/page`);
     expect(page.seller.badges).toEqual([]);
+  });
+
+  // ---------------- stage 17 ----------------
+
+  // 23:30 tonight+1 and 08:00 next morning in Tashkent (UTC+5); in the future, so jobs stay deferred.
+  const NIGHT = new Date(Date.now() + 864e5);
+  NIGHT.setUTCHours(18, 30, 0, 0);
+  const MORNING = new Date(NIGHT.getTime() + 8.5 * 36e5);
+  const dbUser = async (tg: number) => (await db.select().from(users).where(eq(users.telegramId, tg)))[0]!;
+  const deferred = async (kind: string, listingId: string) =>
+    (await db.execute(dsql`select run_at from ${jobs} where kind = ${kind} and payload->>'listingId' = ${listingId} and done_at is null`)) as unknown as Array<{
+      run_at: string;
+    }>;
+
+  it("follow a seller: count and state on the seller page, one message a day about new items, not yourself", async () => {
+    const sellerId = await userId(SELLER);
+    expect((await post(SELLER, `/sellers/${sellerId}/follow`)).statusCode).toBe(400);
+    const res = await post(BUYER, `/sellers/${sellerId}/follow`);
+    expect(res.json()).toEqual({ following: true, followers: 1 });
+    await post(BUYER, `/sellers/${sellerId}/follow`); // idempotent
+    const page = await get<{ seller: ListingSeller; following: boolean }>(BUYER, `/sellers/${sellerId}/page`);
+    expect(page).toMatchObject({ following: true, seller: { followers: 1 } });
+    expect((await get<ListingSeller[]>(BUYER, "/me/following")).map((x) => x.id)).toEqual([sellerId]);
+
+    const l1 = await liveListing();
+    expect(await app.services.listings.followerAlerts(l1.id)).toBe(1);
+    expect(dmsTo(BUYER).at(-1)!.text).toContain("Testbrand X7");
+    expect(callbacks(dmsTo(BUYER).at(-1)!).join(" ")).toContain(l1.id);
+    // The second new item the same day stays quiet.
+    const l2 = await liveListing();
+    expect(await app.services.listings.followerAlerts(l2.id)).toBe(0);
+    // Next day — again.
+    await db.update(follows).set({ lastNotifiedAt: new Date(Date.now() - 2 * 864e5) });
+    expect(await app.services.listings.followerAlerts(l2.id)).toBe(1);
+
+    const off = await app.inject({ method: "DELETE", url: `/sellers/${sellerId}/follow`, headers: tma(BUYER) });
+    expect(off.json()).toEqual({ following: false, followers: 0 });
+    expect(await app.services.listings.followerAlerts(l2.id)).toBe(0);
+  });
+
+  it("set discount: the shop's % for 2 and 3+ items in one delivery, not on top of an agreed price", async () => {
+    expect((await app.inject({ method: "PUT", url: "/shops/mine", headers: tma(SELLER), payload: { name: "Test Shop", bundle2Pct: 10, bundle3Pct: 5 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: "/shops/mine", headers: tma(SELLER), payload: { name: "Test Shop", bundle2Pct: 31 } })).statusCode).toBe(400);
+    const shop = await app.inject({ method: "PUT", url: "/shops/mine", headers: tma(SELLER), payload: { name: "Test Shop", bundle2Pct: 10, bundle3Pct: 15 } });
+    expect(shop.json()).toMatchObject({ bundle2Pct: 10, bundle3Pct: 15 });
+
+    const [a, b, c] = [await liveListing(), await liveListing({ price: 1_000_000 }), await liveListing({ price: 2_000_000 })];
+    const item = await get<{ listing: ListingDto }>(BUYER, `/catalog/${a.id}`);
+    expect(item.listing.seller!.shop!.bundleDiscount).toEqual({ two: 10, three: 15 });
+
+    const quote = (extra: string[]) =>
+      get<DeliveryQuote & { bundle: BundleQuote | null }>(BUYER, `/orders/quote?listingId=${a.id}&district=chilonzor&mode=cod_seller&extra=${extra.join(",")}`);
+    const single = await get<DeliveryQuote & { bundle: BundleQuote | null }>(BUYER, `/orders/quote?listingId=${a.id}&district=chilonzor&mode=cod_seller`);
+    expect(single.itemPrice).toBe(4_000_000);
+
+    const two = await quote([b.id]);
+    expect(two.itemPrice).toBe(3_600_000);
+    expect(two.bundle).toMatchObject({ discountPct: 10, discount: 500_000 });
+    expect(two.bundle!.items[0]!.quote.itemPrice).toBe(900_000);
+
+    const three = await quote([b.id, c.id]);
+    expect(three.bundle).toMatchObject({ discountPct: 15, discount: 1_050_000 });
+
+    // An accepted offer on the main item is a deal already: the discount skips it.
+    await db.insert(offers).values({
+      listingId: a.id,
+      buyerUserId: await userId(BUYER),
+      sellerUserId: a.sellerUserId,
+      amount: 3_500_000,
+      listPrice: 4_000_000,
+      status: "accepted",
+      decidedAt: new Date(),
+      expiresAt: new Date(Date.now() + 864e5),
+    });
+    const withOffer = await quote([b.id]);
+    expect(withOffer.itemPrice).toBe(3_500_000);
+    expect(withOffer.bundle).toMatchObject({ discountPct: 10, discount: 100_000 });
+
+    // The order stores the discounted prices.
+    const order = await post(BUYER, "/orders", { listingId: a.id, extraListingIds: [b.id], mode: "cod_seller", district: "chilonzor", address: "Bunyodkor 1" });
+    expect(order.statusCode).toBe(200);
+    // The seller sees the discount in the order message.
+    expect(dmsTo(SELLER).at(-1)!.text).toContain("Скидка за комплект 10%: −100 000");
+  });
+
+  it("quiet hours: price-drop alerts and likers offers wait until 08:00 Tashkent, and the 24 hours start then", async () => {
+    const l = await liveListing();
+    await like(l.id, BUYER);
+    await patch(SELLER, l.id, { autoDropFloor: 3_000_000 });
+    const night = new Date(Date.now() + 4 * 864e5);
+    night.setUTCHours(18, 30, 0, 0); // 23:30 in Tashkent
+    expect(await app.services.listings.runAutoDrops(night)).toBe(1);
+    const morning = new Date(night);
+    morning.setUTCDate(morning.getUTCDate() + 1);
+    morning.setUTCHours(3, 0, 0, 0);
+    expect((await deferred("price_drop_alerts", l.id)).map((j) => new Date(j.run_at).toISOString())).toEqual([morning.toISOString()]);
+    expect(dmsTo(BUYER)).toHaveLength(0);
+
+    const l2 = await liveListing();
+    await like(l2.id, BUYER);
+    const res = await app.services.orders.offerToLikers(await dbUser(SELLER), l2.id, 3_600_000, NIGHT);
+    expect(res.deferredUntil).toBe(MORNING.toISOString());
+    expect(new Date(res.expiresAt).getTime()).toBe(MORNING.getTime() + 24 * 36e5);
+    expect(dmsTo(BUYER)).toHaveLength(0);
+    expect(await deferred("likers_offer_dms", l2.id)).toHaveLength(1);
+    // The job in the morning sends them.
+    expect(await app.services.orders.likersOfferDms(l2.id, 3_600_000)).toBe(1);
+    expect(dmsTo(BUYER).at(-1)!.text).toContain("3 600 000");
+    await db.delete(jobs).where(dsql`payload->>'listingId' in (${l.id}, ${l2.id})`);
   });
 });

@@ -121,6 +121,9 @@ export const shops = pgTable("shops", {
   photoKey: text("photo_key"),
   verified: boolean("verified").notNull().default(false),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  /** Discount for several items in one delivery (stage 17): % for 2 items and for 3 or more; 0 — none. */
+  bundle2Pct: integer("bundle2_pct").notNull().default(0),
+  bundle3Pct: integer("bundle3_pct").notNull().default(0),
   createdAt: createdAt(),
 });
 
@@ -612,3 +615,22 @@ export type User = typeof users.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
 export type Shop = typeof shops.$inferSelect;
+
+/**
+ * A buyer following a seller or shop (stage 17): new listings come as one message a day at most
+ * (last_notified_at is claimed atomically) and never at night.
+ */
+export const follows = pgTable(
+  "follows",
+  {
+    followerUserId: uuid("follower_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastNotifiedAt: timestamp("last_notified_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.followerUserId, t.sellerUserId] }), index("follows_seller_idx").on(t.sellerUserId)],
+);

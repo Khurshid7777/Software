@@ -3,7 +3,7 @@ import { CHECK_CATEGORIES, type CheckCategory, type Lang } from "./types.js";
 import { formatUzs } from "./price/parsePrice.js";
 import { t } from "./i18n-core.js";
 import type { MarketRange } from "./price/verdict.js";
-import type { ConditionChecklist, Inspection, SellerBadge } from "./market.js";
+import type { BundleDiscount, ConditionChecklist, Inspection, SellerBadge } from "./market.js";
 import type { Grade } from "./passport.js";
 
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
@@ -75,7 +75,9 @@ export interface ListingSeller {
   registeredAt: string;
   platformSales: number;
   rating: { avg: number | null; count: number };
-  shop: { id: string; name: string; verified: boolean; marketLocation: string | null } | null;
+  shop: { id: string; name: string; verified: boolean; marketLocation: string | null; bundleDiscount: BundleDiscount | null } | null;
+  /** Followers on Ishonch (stage 17). */
+  followers: number;
   /** Median minutes to the first reply in chats (last 60 days, at least 3 chats), else null. */
   responseMinutes: number | null;
   /** Courier inspections of this seller's items: passed / failed. */

@@ -148,6 +148,9 @@ export interface BundleQuote {
   buyerTotal: number;
   /** Delivery fees saved compared with separate orders. */
   saved: number;
+  /** The shop's discount for the set (stage 17): its percentage and how much it takes off the items. */
+  discountPct: number;
+  discount: number;
 }
 
 /** Orders placed before cargo delivery stored quotes without the vehicle fields. */

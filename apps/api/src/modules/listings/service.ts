@@ -41,13 +41,14 @@ import {
   type ModerationRecord,
   type PriceSuggestion,
 } from "@ishonch/shared";
-import type { Repo } from "../../db/repo.js";
+import { startOfTashkentDay, type Repo } from "../../db/repo.js";
 import {
   channels,
   complaints,
   disputes,
   conversations,
   favorites,
+  follows,
   listingPhotos,
   listings,
   orders,
@@ -94,7 +95,8 @@ export type ListingError =
   | "contact_info"
   | "duplicate"
   | "ai_quota"
-  | "bad_floor";
+  | "bad_floor"
+  | "bad_request";
 
 export class ListingRejected extends Error {
   constructor(
@@ -169,7 +171,9 @@ export interface ListingServiceDeps {
   /** A listing left sale (sold, archived, hidden, expired): open "new" delivery requests are closed. */
   onUnavailable?: (listingId: string, reason: string) => Promise<unknown>;
   /** Background jobs (channel posts, saved-search alerts). Without it they run inside the request. */
-  enqueue?: (kind: string, payload: Record<string, unknown>) => Promise<void>;
+  enqueue?: (kind: string, payload: Record<string, unknown>, runAt?: Date | null) => Promise<void>;
+  /** End of the quiet hours when `now` is in them (QUIET_HOURS); absent — optional messages go out at once. */
+  quietUntil?: (now: Date) => Date | null;
   /** Hook for saved-search alerts (module A). Failures never block publication. */
   onPublished?: (listingId: string) => Promise<unknown>;
 }
@@ -382,7 +386,7 @@ export class ListingService {
     const baitDrop = priceChanged && patch.price! < l.price! * (1 - BAIT_DROP_PCT / 100);
     if ((textChanged || imeiChanged || baitDrop) && l.status === "active") await this.remoderate(id);
     if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.price! - patch.price! >= (l.price! * PRICE_DROP_MIN_PCT) / 100) {
-      await this.schedule("price_drop_alerts", { listingId: id, price: patch.price });
+      await this.schedule("price_drop_alerts", { listingId: id, price: patch.price }, this.quiet(now));
     }
     return this.dto(id, user.id);
   }
@@ -531,11 +535,18 @@ export class ListingService {
       : [];
     if (own.length) await this.schedule("channel_posts", { listingId: id, channelIds: own.map((c) => c.id), since: now.toISOString() });
     await this.schedule("saved_search_alerts", { listingId: id });
+    // A relisted or restored item is not news: followers hear only about a first publication.
+    if (!l.publishedAt) await this.schedule("follower_alerts", { listingId: id }, this.quiet(now));
     return own;
   }
 
-  private async schedule(kind: string, payload: Record<string, unknown>) {
-    if (this.d.enqueue) return this.d.enqueue(kind, payload);
+  private quiet(now: Date) {
+    return this.d.quietUntil?.(now) ?? null;
+  }
+
+  /** `runAt`: deliver later (quiet hours). Without a queue the job runs now. */
+  private async schedule(kind: string, payload: Record<string, unknown>, runAt?: Date | null) {
+    if (this.d.enqueue) return this.d.enqueue(kind, payload, runAt);
     await this.runJob(kind, payload).catch((err) => console.error(`${kind} failed`, err));
   }
 
@@ -543,6 +554,7 @@ export class ListingService {
   async runJob(kind: string, payload: Record<string, unknown>) {
     if (kind === "saved_search_alerts") return this.d.onPublished?.(String(payload.listingId));
     if (kind === "price_drop_alerts") return this.priceDropAlerts(String(payload.listingId), Number(payload.price));
+    if (kind === "follower_alerts") return this.followerAlerts(String(payload.listingId));
     if (kind === "channel_posts") {
       const id = String(payload.listingId);
       const [l] = await this.db.select().from(listings).where(eq(listings.id, id));
@@ -588,6 +600,81 @@ export class ListingService {
     }
     if (opts.notifySeller !== false) await this.notifySeller(l, status === "pending" ? "moderation.hidden" : "moderation.rejected", record);
     return true;
+  }
+
+  /**
+   * "Новый товар у продавца, на которого вы подписаны" (Depop / Vinted follow): at most one message per
+   * follower and seller a Tashkent day — the day is claimed in follows.last_notified_at before sending.
+   */
+  async followerAlerts(listingId: string, now = new Date()) {
+    if (!this.d.notifier) return 0;
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.status !== "active") return 0;
+    const claimed = await this.db
+      .update(follows)
+      .set({ lastNotifiedAt: now })
+      .where(
+        and(
+          eq(follows.sellerUserId, l.sellerUserId),
+          sql`(${follows.lastNotifiedAt} is null or ${follows.lastNotifiedAt} < ${startOfTashkentDay(now).toISOString()})`,
+          sql`${follows.followerUserId} in (select id from ${users} where banned_at is null)`,
+        ),
+      )
+      .returning({ userId: follows.followerUserId });
+    if (!claimed.length) return 0;
+    const fans = await this.db.select().from(users).where(inArray(users.id, claimed.map((c) => c.userId)));
+    const [shop] = await this.db.select({ name: shops.name }).from(shops).where(eq(shops.ownerUserId, l.sellerUserId));
+    const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+    let sent = 0;
+    for (const u of fans) {
+      const lang = u.language as Lang;
+      const ok = await this.d.notifier
+        .send(
+          u.telegramId,
+          t(lang, "follow.new_listing", {
+            seller: shop?.name ?? t(lang, "seller.private"),
+            title: listingTitle(l, lang),
+            price: l.price ? formatUzs(l.price) : "",
+          }),
+          url ? [[{ text: t(lang, "bot.open_listing"), url }]] : [],
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (ok) sent++;
+    }
+    return sent;
+  }
+
+  /** Follow / unfollow a seller (not yourself, not a banned or unknown user). */
+  async follow(user: User, sellerId: string, on: boolean) {
+    if (sellerId === user.id) throw new ListingRejected("bad_request", 400);
+    const [seller] = await this.db.select().from(users).where(eq(users.id, sellerId));
+    if (!seller || seller.bannedAt) throw new ListingRejected("not_found", 404);
+    if (on) await this.db.insert(follows).values({ followerUserId: user.id, sellerUserId: sellerId }).onConflictDoNothing();
+    else await this.db.delete(follows).where(and(eq(follows.followerUserId, user.id), eq(follows.sellerUserId, sellerId)));
+    const [{ n }] = (await this.db.select({ n: count() }).from(follows).where(eq(follows.sellerUserId, sellerId))) as [{ n: number }];
+    return { following: on, followers: Number(n) };
+  }
+
+  async isFollowing(userId: string, sellerId: string) {
+    const [row] = await this.db
+      .select({ s: follows.sellerUserId })
+      .from(follows)
+      .where(and(eq(follows.followerUserId, userId), eq(follows.sellerUserId, sellerId)));
+    return !!row;
+  }
+
+  /** The sellers a user follows (newest first), as public seller cards. */
+  async following(user: User) {
+    const rows = await this.db
+      .select({ u: users })
+      .from(follows)
+      .innerJoin(users, eq(users.id, follows.sellerUserId))
+      .where(and(eq(follows.followerUserId, user.id), isNull(users.bannedAt)))
+      .orderBy(desc(follows.createdAt))
+      .limit(100);
+    const infos = await this.sellerInfos(rows.map((r) => r.u));
+    return rows.map((r) => infos.get(r.u.id)!);
   }
 
   /**
@@ -806,7 +893,7 @@ export class ListingService {
       if (!changed) continue;
       dropped++;
       await this.d.onUnavailable?.(l.id, "price_changed");
-      if (l.price - price >= (l.price * PRICE_DROP_MIN_PCT) / 100) await this.schedule("price_drop_alerts", { listingId: l.id, price });
+      if (l.price - price >= (l.price * PRICE_DROP_MIN_PCT) / 100) await this.schedule("price_drop_alerts", { listingId: l.id, price }, this.quiet(now));
       const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
       if (seller && this.d.notifier) {
         const lang = seller.language as Lang;
@@ -974,7 +1061,7 @@ export class ListingService {
   async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt">>): Promise<Map<string, ListingSeller>> {
     const sellerIds = sellers.map((u) => u.id);
     if (!sellerIds.length) return new Map();
-    const [shopRows, sales, ratings, responseOf, insp, lost] = await Promise.all([
+    const [shopRows, sales, ratings, responseOf, insp, lost, fans] = await Promise.all([
       this.db.select().from(shops).where(inArray(shops.ownerUserId, sellerIds)),
       // Platform sales = orders actually delivered by an Ishonch courier. The seller's own "sold on Ishonch"
       // mark is not counted: anyone could set it and get the "high trust" badge without a single sale.
@@ -1003,7 +1090,13 @@ export class ListingService {
         .from(disputes)
         .where(and(inArray(disputes.sellerUserId, sellerIds), inArray(disputes.resolution, ["refund", "partial"])))
         .groupBy(disputes.sellerUserId),
+      this.db
+        .select({ seller: follows.sellerUserId, n: count() })
+        .from(follows)
+        .where(inArray(follows.sellerUserId, sellerIds))
+        .groupBy(follows.sellerUserId),
     ]);
+    const fansOf = new Map(fans.map((r) => [r.seller, Number(r.n)]));
     const lostOf = new Map(lost.map((r) => [r.seller, Number(r.n)]));
     const shopOf = new Map(shopRows.map((sh) => [sh.ownerUserId, sh]));
     const salesOf = new Map(sales.map((r) => [r.seller, Number(r.n)]));
@@ -1019,7 +1112,16 @@ export class ListingService {
             registeredAt: u.createdAt.toISOString(),
             platformSales: salesOf.get(u.id) ?? 0,
             rating: ratingOf.get(u.id) ?? { avg: null, count: 0 },
-            shop: shop ? { id: shop.id, name: shop.name, verified: shop.verified, marketLocation: shop.marketLocation } : null,
+            shop: shop
+              ? {
+                  id: shop.id,
+                  name: shop.name,
+                  verified: shop.verified,
+                  marketLocation: shop.marketLocation,
+                  bundleDiscount: shop.bundle2Pct || shop.bundle3Pct ? { two: shop.bundle2Pct, three: shop.bundle3Pct } : null,
+                }
+              : null,
+            followers: fansOf.get(u.id) ?? 0,
             responseMinutes: responseOf.get(u.id) ?? null,
             inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
             disputesLost: lostOf.get(u.id) ?? 0,
@@ -1194,6 +1296,7 @@ export class ListingService {
           responseMinutes: null,
           inspections: { passed: 0, failed: 0 },
           disputesLost: 0,
+          followers: 0,
           badges: [],
         };
       }

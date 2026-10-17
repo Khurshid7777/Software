@@ -76,14 +76,17 @@ const EnvSchema = z.object({
     .string()
     .default("false")
     .transform((v) => v === "true"),
+  // Optional notifications wait from 22:00 to 08:00 Tashkent. Off by default only in tests (time-of-day independent).
+  QUIET_HOURS: z.enum(["true", "false"]).optional(),
 });
 
-export type Config = z.infer<typeof EnvSchema>;
+export type Config = Omit<z.infer<typeof EnvSchema>, "QUIET_HOURS"> & { QUIET_HOURS: boolean };
 
 const WEAK_SECRETS = new Set(["dev-internal-token", "change-me-long-random", ""]);
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const config = EnvSchema.parse(env);
+  const parsed = EnvSchema.parse(env);
+  const config = { ...parsed, QUIET_HOURS: (parsed.QUIET_HOURS ?? (parsed.NODE_ENV === "test" ? "false" : "true")) === "true" };
   if (config.NODE_ENV === "production") {
     // The internal token lets the bot act as any user, admins included: never start with a placeholder.
     if (WEAK_SECRETS.has(config.INTERNAL_API_TOKEN) || config.INTERNAL_API_TOKEN.length < 32) {

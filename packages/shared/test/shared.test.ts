@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyDiscount,
+  bundleDiscountPct,
+  quietUntil,
   maxLikersOffer,
   nextAutoDropPrice,
   sellerBadges,
@@ -396,5 +399,28 @@ describe("selling faster (stage 16)", () => {
     expect(sellerBadges({ ...base, inspections: { passed: 5, failed: 1 } })).toEqual([]);
     expect(sellerBadges({ ...base, platformSales: 5 })).toEqual(["reliable"]);
     expect(sellerBadges({ ...base, platformSales: 9, disputesLost: 1 })).toEqual([]);
+  });
+});
+
+describe("coming back (stage 17)", () => {
+  it("quiet hours are 22:00–08:00 in Tashkent and end at the next 08:00", () => {
+    expect(quietUntil(new Date("2026-03-10T07:00:00Z"))).toBeNull(); // 12:00
+    expect(quietUntil(new Date("2026-03-10T16:59:00Z"))).toBeNull(); // 21:59
+    expect(quietUntil(new Date("2026-03-10T17:00:00Z"))?.toISOString()).toBe("2026-03-11T03:00:00.000Z"); // 22:00
+    expect(quietUntil(new Date("2026-03-10T20:00:00Z"))?.toISOString()).toBe("2026-03-11T03:00:00.000Z"); // 01:00
+    expect(quietUntil(new Date("2026-03-11T02:59:00Z"))?.toISOString()).toBe("2026-03-11T03:00:00.000Z"); // 07:59
+    expect(quietUntil(new Date("2026-03-11T03:00:00Z"))).toBeNull(); // 08:00
+    expect(quietUntil(new Date("2026-12-31T19:00:00Z"))?.toISOString()).toBe("2027-01-01T03:00:00.000Z"); // new year
+  });
+  it("set discount by the number of items", () => {
+    const d = { two: 10, three: 15 };
+    expect(bundleDiscountPct(d, 1)).toBe(0);
+    expect(bundleDiscountPct(d, 2)).toBe(10);
+    expect(bundleDiscountPct(d, 5)).toBe(15);
+    expect(bundleDiscountPct({ two: 0, three: 20 }, 2)).toBe(0);
+    expect(bundleDiscountPct({ two: 10, three: 0 }, 3)).toBe(10);
+    expect(bundleDiscountPct(null, 3)).toBe(0);
+    expect(applyDiscount(1_234_567, 10)).toBe(1_111_000);
+    expect(applyDiscount(1_234_567, 0)).toBe(1_234_567);
   });
 });

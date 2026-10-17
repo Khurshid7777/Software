@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useOnShow } from "../leave";
-import type { CatalogItem } from "@ishonch/shared/client";
+import type { CatalogItem, ListingSeller } from "@ishonch/shared/client";
 import { ApiError, type Api, type SavedSearch } from "../api";
 import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
@@ -15,12 +15,14 @@ interface Props {
   onOpen: (id: string) => void;
   onSearch: (s: SavedSearch) => void;
   onCatalog: () => void;
+  onSeller: (id: string) => void;
 }
 
-export function Favorites({ api, visible = true, onOpen, onSearch, onCatalog }: Props) {
+export function Favorites({ api, visible = true, onOpen, onSearch, onCatalog, onSeller }: Props) {
   const t = useT();
   const [items, setItems] = useState<CatalogItem[] | null>(null);
   const [searches, setSearches] = useState<SavedSearch[]>([]);
+  const [following, setFollowing] = useState<ListingSeller[]>([]);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -33,6 +35,7 @@ export function Favorites({ api, visible = true, onOpen, onSearch, onCatalog }: 
       .then(setItems)
       .catch(() => (setItems([]), setFailed(true)));
     api.searches().then(setSearches).catch(() => undefined);
+    api.following().then(setFollowing).catch(() => undefined);
   }, [api, attempt]);
 
   // Coming back from a listing where the heart was switched off: refresh the list.
@@ -92,6 +95,16 @@ export function Favorites({ api, visible = true, onOpen, onSearch, onCatalog }: 
             {t("searches.delete")}
           </button>
         </div>
+      ))}
+      <h2>👥 {t("follow.list_title")}</h2>
+      {following.length === 0 && <p className="hint">{t("follow.empty")}</p>}
+      {following.map((s) => (
+        <button key={s.id} className="card row between" onClick={() => onSeller(s.id)} data-testid="following-seller">
+          <span>{s.shop ? `🏪 ${s.shop.name}` : `👤 ${t("seller.private")}`}</span>
+          <span className="chevron" aria-hidden>
+            ›
+          </span>
+        </button>
       ))}
       {toast && <Toast text={toast} onClose={() => setToast(null)} />}
     </div>
