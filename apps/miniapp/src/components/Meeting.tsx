@@ -172,7 +172,15 @@ export function MeetingCard({ meeting: m, onAction, onOpenListing }: { meeting: 
             <button className="chip" onClick={() => onAction("report", { bought: false })} data-testid="meeting-not-bought">
               {t("meet.not_bought")}
             </button>
+            <button className="chip" onClick={() => onAction("report", { bought: false, noShow: true })} data-testid="meeting-seller-no-show">
+              {t("meet.seller_no_show")}
+            </button>
           </>
+        )}
+        {m.actions.includes("no_show") && (
+          <button className="chip" onClick={() => onAction("no_show")} data-testid="meeting-buyer-no-show">
+            {t("meet.buyer_no_show")}
+          </button>
         )}
         {m.actions.includes("confirm_sold") && (
           <button className="chip" onClick={() => onAction("confirm_sold")} data-testid="meeting-confirm-sold">

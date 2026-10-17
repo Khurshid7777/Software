@@ -101,6 +101,15 @@ export const apiUrl = (path: string) => `${BASE}${path}`;
 /** A signed photo URL at a smaller width (240 / 480 / 960) for cards and thumbnails. */
 export const photoUrl = (path: string, width: 240 | 480 | 960) => `${BASE}${path}${path.includes("?") ? "&" : "?"}w=${width}`;
 
+export interface ChatReport {
+  id: number;
+  reason: string;
+  createdAt: string;
+  listing: { id: string; title: string };
+  reported: { id: string; telegramId: number; role: "buyer" | "seller"; banned: boolean; reports: number };
+  messages: Array<{ from: "buyer" | "seller"; text: string; at: string }>;
+}
+
 export interface QueueItem {
   listing: ListingDto;
   moderation: { decision: string; source: string; reasons: Array<{ code: string; note: string }>; duplicates?: string[] } | null;
@@ -124,6 +133,9 @@ export interface AdminUser {
   bannedAt: string | null;
   banReason: string | null;
   activeListings: number;
+  /** Stage 19: missed meetings and chat reports against the user. */
+  noShows: number;
+  chatReports: number;
   rating: { avg: number | null; count: number };
 }
 export interface PriceRow {
@@ -336,6 +348,11 @@ export function createApi(initData: string | null) {
     complaints: () => request<ComplaintRow[]>("/admin/complaints"),
     findUser: (telegramId: string) => request<AdminUser>(`/admin/users?telegramId=${encodeURIComponent(telegramId)}`),
     bannedUsers: () => request<Array<Pick<AdminUser, "id" | "telegramId" | "bannedAt" | "banReason" | "role">>>("/admin/users/banned"),
+    blocks: () => request<Array<{ userId: string; title: string | null; role: "buyer" | "seller" | null; createdAt: string }>>("/me/blocks"),
+    unblock: (userId: string) => request(`/me/blocks/${userId}`, { method: "DELETE" }),
+    chatReports: () => request<ChatReport[]>("/admin/chat-reports"),
+    resolveChatReport: (id: number, resolution: "dismissed" | "warned" | "banned") =>
+      request(`/admin/chat-reports/${id}/resolve`, json("POST", { resolution })),
     ban: (id: string, reason: string) => request(`/admin/users/${id}/ban`, json("POST", { reason })),
     unban: (id: string) => request(`/admin/users/${id}/unban`, { method: "POST" }),
     prices: () => request<PriceRow[]>("/admin/price-reference"),

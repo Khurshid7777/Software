@@ -21,6 +21,8 @@ import { ShopService } from "./modules/shops/service.js";
 import { FsStorage, S3Storage, type Storage } from "./storage/storage.js";
 import { DisabledSpeechToText, HttpWhisperSpeechToText, type SpeechToText } from "./stt/speechToText.js";
 import { MeetingService } from "./modules/meetings/service.js";
+import { SafetyService } from "./modules/safety/service.js";
+import { safetyRoutes } from "./modules/safety/routes.js";
 import { meetingRoutes } from "./modules/meetings/routes.js";
 import { BotApiPublisher, type ChannelPublisher, type Notifier } from "./telegram/publisher.js";
 import { AssistantService } from "./modules/catalog/assistant.js";
@@ -263,6 +265,11 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
   meetingRoutes(app, meetingsSvc, { requireUser: auth.requireUser });
+  safetyRoutes(app, new SafetyService({ repo, staff, adminLink }), {
+    requireUser: auth.requireUser,
+    requireInternal: auth.requireInternal,
+    requireAdmin: auth.requireRole("admin"),
+  });
   catalogRoutes(app, catalog, assistant, new ReplySuggestions(repo, aiService, catalog), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,

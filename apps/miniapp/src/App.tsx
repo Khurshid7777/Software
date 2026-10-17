@@ -18,6 +18,7 @@ import { Shop } from "./screens/Shop";
 import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
+import { Blocks } from "./screens/Blocks";
 import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
@@ -29,6 +30,7 @@ type Screen =
   | { name: "sell"; existing?: ListingDto }
   | { name: "my" }
   | { name: "shop" }
+  | { name: "blocks" }
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
   | { name: "assistant" }
@@ -280,6 +282,9 @@ export function App({ env }: { env: TelegramEnv }) {
         break;
       case "shop":
         body = <Shop api={api} />;
+        break;
+      case "blocks":
+        body = <Blocks api={api} />;
         break;
       case "listing":
         body = (

@@ -64,9 +64,18 @@ export const MAX_SAVED_SEARCHES = 20;
 export const MAX_MESSAGES_PER_HOUR = 30;
 const DAY = 24 * 3600_000;
 
+/** True when either user blocked the other (stage 19, user_blocks). */
+export async function blockedBetween(db: Repo["db"], a: string, b: string) {
+  const rows = await db.execute(sql`
+    select 1 from user_blocks
+    where (blocker_user_id = ${a} and blocked_user_id = ${b}) or (blocker_user_id = ${b} and blocked_user_id = ${a}) limit 1`);
+  return (rows as unknown as unknown[]).length > 0;
+}
+
 export class CatalogRejected extends Error {
   constructor(
     public code:
+      | "blocked"
       | "not_found"
       | "own_listing"
       | "contact_limit"
@@ -670,6 +679,7 @@ export class CatalogService {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
     if (!l || l.status !== "active") throw new CatalogRejected("not_found", 404);
     if (l.sellerUserId === buyer.id) throw new CatalogRejected("own_listing", 409);
+    if (await blockedBetween(this.db, buyer.id, l.sellerUserId)) throw new CatalogRejected("blocked", 403);
 
     let [conv] = await this.db
       .select()
@@ -728,6 +738,7 @@ export class CatalogService {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, conv.listingId));
     // Banned users neither receive nor send through the masked chat (old conversations included).
     if (!recipient || !l || recipient.bannedAt) throw new CatalogRejected("not_found", 404);
+    if (await blockedBetween(this.db, sender.id, recipientId)) throw new CatalogRejected("blocked", 403);
 
     const [{ n, mineLastHour }] = (await this.db
       .select({
@@ -753,6 +764,11 @@ export class CatalogService {
     // The seller can let the AI draft the answer (three options, sent with one tap).
     if (fromBuyer) buttons[0]!.push({ text: t(lang, "suggest.button"), callbackData: `sugg:${conversationId}` });
     if (!fromBuyer) buttons.push([{ text: t(lang, "bot.open_listing"), url: await this.notifier.miniAppLink(`listing_${l.id}`) }]);
+    // Stage 19: one tap to report or block the other side (names stay hidden).
+    buttons.push([
+      { text: t(lang, "chat.report"), callbackData: `rep:${conversationId}` },
+      { text: t(lang, "chat.block"), callbackData: `blk:${conversationId}` },
+    ]);
     try {
       await this.notifier.send(recipient.telegramId, t(lang, key, { title, text }), buttons);
     } catch {

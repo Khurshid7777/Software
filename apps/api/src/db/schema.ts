@@ -670,3 +670,44 @@ export const meetings = pgTable(
     uniqueIndex("meetings_open_uq").on(t.listingId, t.buyerUserId).where(sql`status in ('pending', 'accepted')`),
   ],
 );
+
+/**
+ * A user blocked another one (stage 19): no messages and no meeting requests between them, either way.
+ * `listing_id` only reminds the blocker where they met (identities stay masked).
+ */
+export const userBlocks = pgTable(
+  "user_blocks",
+  {
+    blockerUserId: uuid("blocker_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedUserId: uuid("blocked_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.blockerUserId, t.blockedUserId] }), index("user_blocks_blocked_idx").on(t.blockedUserId)],
+);
+
+/** A complaint about a conversation (stage 19): moderators see the last messages and decide. One per reporter. */
+export const chatReports = pgTable(
+  "chat_reports",
+  {
+    id: serial("id").primaryKey(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    reporterUserId: uuid("reporter_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reportedUserId: uuid("reported_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolution: text("resolution"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("chat_reports_conv_reporter_uq").on(t.conversationId, t.reporterUserId)],
+);

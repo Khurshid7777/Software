@@ -17,6 +17,7 @@ import type { ReplySuggestions } from "./suggest.js";
 
 const MESSAGES: Record<string, string> = {
   contact_limit: "listing.contact_limit",
+  blocked: "chat.blocked",
   message_limit: "listing.message_limit",
   not_found: "listing.not_found",
   own_listing: "listing.own",

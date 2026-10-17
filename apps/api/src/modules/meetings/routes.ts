@@ -41,10 +41,11 @@ export function meetingRoutes(app: FastifyInstance, svc: MeetingService, auth: {
       if (action === "accept" || action === "decline") return svc.answer(req.user!, id, action === "accept");
       if (action === "cancel") return svc.cancel(req.user!, id);
       if (action === "confirm_sold") return svc.confirmSold(req.user!, id);
+      if (action === "no_show") return svc.buyerNoShow(req.user!, id);
       if (action === "report") {
-        const body = z.object({ bought: z.boolean() }).safeParse(req.body);
+        const body = z.object({ bought: z.boolean(), noShow: z.boolean().optional() }).safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: "bad_request" });
-        return svc.report(req.user!, id, body.data.bought);
+        return svc.report(req.user!, id, body.data.bought, new Date(), body.data.noShow);
       }
       return reply.code(404).send({ error: "not_found" });
     }),

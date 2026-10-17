@@ -13,6 +13,7 @@ import {
   type MeetingStatus,
 } from "@ishonch/shared";
 import { startOfTashkentDay, type Repo } from "../../db/repo.js";
+import { blockedBetween } from "../catalog/service.js";
 import { listings, meetings, users, type Listing, type User } from "../../db/schema.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
 
@@ -26,7 +27,8 @@ export type MeetingError =
   | "night"
   | "meeting_exists"
   | "too_many_meetings"
-  | "bad_state";
+  | "bad_state"
+  | "blocked";
 
 export class MeetingRejected extends Error {
   constructor(
@@ -88,6 +90,7 @@ export class MeetingService {
     if (!l) throw new MeetingRejected("not_found", 404);
     if (l.sellerUserId === buyer.id) throw new MeetingRejected("own_listing", 409);
     if (l.status !== "active") throw new MeetingRejected("not_available", 409);
+    if (await blockedBetween(this.db, buyer.id, l.sellerUserId)) throw new MeetingRejected("blocked", 403);
     const spot = input.spot && MEETING_SPOTS.includes(input.spot) ? input.spot : null;
     const place = spot ? null : input.place?.trim().slice(0, 200) || null;
     if (!spot && (!place || place.length < 5)) throw new MeetingRejected("bad_place", 400);
@@ -180,11 +183,12 @@ export class MeetingService {
    * After the meeting the buyer says how it went. "Bought" never takes the listing off sale by itself (a
    * buyer alone must not be able to close someone else's listing): the seller confirms with one button.
    */
-  async report(buyer: User, id: string, bought: boolean, now = new Date()) {
+  async report(buyer: User, id: string, bought: boolean, now = new Date(), sellerNoShow = false) {
     const { m: old, l } = await this.load(id);
     if (old.buyerUserId !== buyer.id) throw new MeetingRejected("not_found", 404);
     if (old.at > now) throw new MeetingRejected("bad_state", 409);
-    const m = await this.move(id, ["accepted"], bought ? "bought" : "not_bought", now);
+    const m = await this.move(id, ["accepted"], sellerNoShow ? "seller_no_show" : bought ? "bought" : "not_bought", now);
+    if (sellerNoShow) bought = false;
     await this.d.repo.event(buyer.id, "meeting_reported", { meetingId: m.id, listingId: l.id, bought });
     if (bought && l.status === "active") {
       const [seller] = await this.db.select().from(users).where(eq(users.id, m.sellerUserId));
@@ -196,6 +200,16 @@ export class MeetingService {
       }
     }
     return this.dto(m, l, "buyer", buyer.language as Lang);
+  }
+
+  /** After the time the seller says the buyer did not come (no-shows are counted for moderators). */
+  async buyerNoShow(seller: User, id: string, now = new Date()) {
+    const { m: old, l } = await this.load(id);
+    if (old.sellerUserId !== seller.id) throw new MeetingRejected("not_found", 404);
+    if (old.at > now) throw new MeetingRejected("bad_state", 409);
+    const m = await this.move(id, ["accepted"], "buyer_no_show", now);
+    await this.d.repo.event(seller.id, "meeting_no_show", { meetingId: m.id, who: "buyer" });
+    return this.dto(m, l, "seller", seller.language as Lang);
   }
 
   /** The seller confirms the buyer's "bought": the listing leaves the catalogue. */
@@ -295,6 +309,7 @@ export class MeetingService {
     if (OPEN.includes(m.status as MeetingStatus)) actions.push("cancel");
     if (role === "buyer" && m.status === "accepted" && m.at <= now) actions.push("report");
     if (role === "seller" && m.status === "bought" && l.status === "active") actions.push("confirm_sold");
+    if (role === "seller" && m.status === "accepted" && m.at <= now) actions.push("no_show");
     return {
       id: m.id,
       listingId: l.id,

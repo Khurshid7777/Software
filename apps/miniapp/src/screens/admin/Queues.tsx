@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_INSPECTION_PHOTOS, formatUzs, inspectionChecks, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
-import { ApiError, apiUrl, compressImage, type AdminDispute, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
+import { ApiError, apiUrl, compressImage, type AdminDispute, type Api, type ChatReport, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
+import { Toast } from "../../components/Toast";
 import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
 function useLoad<T>(load: () => Promise<T>) {
@@ -398,6 +399,71 @@ export function OperatorOrders({ api }: { api: Api }) {
           </article>
         );
       })}
+    </div>
+  );
+}
+
+const CHAT_REASON: Record<string, string> = {
+  prepayment: "просит предоплату",
+  scam: "мошенничество",
+  rude: "оскорбления",
+  spam: "спам",
+  other: "другое",
+};
+
+/** Stage 19: reports about masked conversations, with the last messages; warn, ban or dismiss. */
+export function ChatReports({ api, onOpen }: { api: Api; onOpen: (id: string) => void }) {
+  const [items, setItems] = useState<ChatReport[] | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api
+      .chatReports()
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [api]);
+  useEffect(load, [load]);
+  async function resolve(r: ChatReport, resolution: "dismissed" | "warned" | "banned") {
+    try {
+      if (resolution === "banned") await api.ban(r.reported.id, `Жалоба на переписку: ${CHAT_REASON[r.reason] ?? r.reason}`);
+      await api.resolveChatReport(r.id, resolution);
+      load();
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : "Ошибка");
+    }
+  }
+  if (!items) return <p className="hint center">Загрузка…</p>;
+  return (
+    <div className="stack" data-testid="chat-reports">
+      <p className="hint">Жалобы на переписку. Имена скрыты; видно, кто писал — покупатель или продавец.</p>
+      {msg && <Toast text={msg} onClose={() => setMsg(null)} />}
+      {items.length === 0 && <p className="hint center">Жалоб нет</p>}
+      {items.map((r) => (
+        <article key={r.id} className="card stack-tight" data-testid="chat-report">
+          <button className="link" onClick={() => onOpen(r.listing.id)}>
+            <strong>{r.listing.title}</strong>
+          </button>
+          <span>
+            На {r.reported.role === "seller" ? "продавца" : "покупателя"}: {CHAT_REASON[r.reason] ?? r.reason} · всего жалоб на него: {r.reported.reports}
+            {r.reported.banned ? " · уже заблокирован" : ""}
+          </span>
+          <div className="stack-tight">
+            {r.messages.map((m, i) => (
+              <span key={i} className="hint">
+                <b>{m.from === "seller" ? "Продавец" : "Покупатель"}:</b> {m.text}
+              </span>
+            ))}
+          </div>
+          <div className="row wrap">
+            <button className="chip" onClick={() => resolve(r, "warned")}>Предупредить</button>
+            {!r.reported.banned && (
+              <button className="chip" onClick={() => resolve(r, "banned")} data-testid="chat-report-ban">
+                Заблокировать
+              </button>
+            )}
+            <button className="chip" onClick={() => resolve(r, "dismissed")}>Отклонить</button>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }

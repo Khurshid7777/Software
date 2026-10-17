@@ -134,6 +134,13 @@
       "when": 1792241553060,
       "tag": "0018_meetings_open_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792244923763,
+      "tag": "0019_safe_chat",
+      "breakpoints": true
     }
   ]
 }

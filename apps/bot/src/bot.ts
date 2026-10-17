@@ -1,7 +1,7 @@
 import { sequentialize } from "@grammyjs/runner";
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { Message } from "grammy/types";
-import { normalizeLang, t, type CheckResult, type Lang } from "@ishonch/shared";
+import { CHAT_REPORT_REASONS, normalizeLang, t, type CheckResult, type Lang } from "@ishonch/shared";
 import { ApiClient, ApiError, type ImageFile, type TgUser } from "./api.js";
 import { formatCheck } from "./format.js";
 
@@ -249,6 +249,34 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
   );
 
   // Seller: answer a buyer's price offer.
+  // ---- stage 19: safe conversations ----
+  bot.callbackQuery(/^blk:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.blockConversation(user, ctx.match[1]!);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      await ctx.reply(t(lang, "chat.block_done"));
+      return "";
+    }),
+  );
+
+  bot.callbackQuery(/^rep:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (_user, lang) => {
+      const conv = ctx.match[1]!;
+      const keyboard = new InlineKeyboard();
+      for (const r of CHAT_REPORT_REASONS) keyboard.text(t(lang, `chat_report.reason.${r}`), `rep:${conv}:${r}`).row();
+      await ctx.reply(t(lang, "chat.report_question"), { reply_markup: keyboard });
+      return "";
+    }),
+  );
+
+  bot.callbackQuery(/^rep:([0-9a-f-]{36}):([a-z]+)$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.reportConversation(user, ctx.match[1]!, ctx.match[2]!);
+      await ctx.editMessageText(t(lang, "chat.report_done")).catch(() => undefined);
+      return "";
+    }),
+  );
+
   // Seller: answer a request to meet in person (stage 18).
   bot.callbackQuery(/^meet:(accept|decline):([0-9a-f-]{36})$/, (ctx) =>
     buttonAction(ctx, async (user, lang) => {

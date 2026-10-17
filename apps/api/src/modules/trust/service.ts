@@ -245,6 +245,14 @@ export class TrustService {
       .select({ active: count() })
       .from(listings)
       .where(and(eq(listings.sellerUserId, u.id), eq(listings.status, "active")))) as [{ active: number }];
+    // Stage 19: what moderators need to judge a person — missed meetings and chat reports against them.
+    const [safety] = (await this.db.execute(sql`
+      select
+        (select count(*) from meetings where (buyer_user_id = ${u.id} and status = 'buyer_no_show')
+           or (seller_user_id = ${u.id} and status = 'seller_no_show'))::int as "noShows",
+        (select count(*) from chat_reports where reported_user_id = ${u.id})::int as "chatReports"`)) as unknown as [
+      { noShows: number; chatReports: number },
+    ];
     return {
       id: u.id,
       telegramId: u.telegramId,
@@ -253,6 +261,8 @@ export class TrustService {
       bannedAt: u.bannedAt,
       banReason: u.banReason,
       activeListings: active,
+      noShows: safety?.noShows ?? 0,
+      chatReports: safety?.chatReports ?? 0,
       rating: await this.d.listings.sellerRating(u.id),
     };
   }

@@ -26,6 +26,7 @@ const [shop] = await db
   .onConflictDoUpdate({ target: shops.ownerUserId, set: { verified: true, bundle2Pct: 0, bundle3Pct: 0 } })
   .returning();
 await db.delete(follows).where(inArray(follows.sellerUserId, [shopOwner.id, privateSeller.id]));
+await db.execute(dsql`delete from user_blocks where blocker_user_id in (${shopOwner.id}, ${privateSeller.id}) or blocked_user_id in (${shopOwner.id}, ${privateSeller.id})`);
 // Daily quotas of the demo buyer (offers): repeated e2e runs on one day must not hit the limit.
 await db.execute(dsql`delete from events where name = 'offer_made' and user_id in (select id from users where telegram_id in (777000111, 777000222))`);
 await db.delete(listings).where(eq(listings.sellerUserId, shopOwner.id));

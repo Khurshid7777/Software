@@ -369,7 +369,7 @@ export const MEETING_MIN_LEAD_MINUTES = 60;
 export const MEETINGS_PER_DAY = 5;
 export const MEETING_REMIND_HOURS = 2;
 
-export const MEETING_STATUSES = ["pending", "accepted", "declined", "cancelled", "bought", "not_bought"] as const;
+export const MEETING_STATUSES = ["pending", "accepted", "declined", "cancelled", "bought", "not_bought", "seller_no_show", "buyer_no_show"] as const;
 export type MeetingStatus = (typeof MEETING_STATUSES)[number];
 
 export interface MeetingDto {
@@ -385,7 +385,7 @@ export interface MeetingDto {
   at: string;
   note: string | null;
   status: MeetingStatus;
-  actions: Array<"accept" | "decline" | "cancel" | "report" | "confirm_sold">;
+  actions: Array<"accept" | "decline" | "cancel" | "report" | "confirm_sold" | "no_show">;
 }
 
 /** Why a meeting time is not allowed (null — fine). Times are whole hours in Tashkent. */
@@ -408,3 +408,8 @@ export function meetingSlots(now: Date, dayOffset: number): Date[] {
   }
   return out;
 }
+
+// ---------- Stage 19: safe conversations (docs/plan.md) ----------
+
+export const CHAT_REPORT_REASONS = ["prepayment", "scam", "rude", "spam", "other"] as const;
+export type ChatReportReason = (typeof CHAT_REPORT_REASONS)[number];

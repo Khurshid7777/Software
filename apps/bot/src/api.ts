@@ -137,6 +137,20 @@ export class ApiClient {
     return this.request<{ status: string }>(`/offers/${encodeURIComponent(offerId)}/${action}`, { method: "POST", user });
   }
 
+  /** Stage 19: block the other side of a masked conversation / report it to the moderators. */
+  blockConversation(user: TgUser, conversationId: string) {
+    return this.request<{ ok: boolean }>(`/internal/conversations/${encodeURIComponent(conversationId)}/block`, { method: "POST", user });
+  }
+
+  reportConversation(user: TgUser, conversationId: string, reason: string) {
+    return this.request<{ ok: boolean }>(`/internal/conversations/${encodeURIComponent(conversationId)}/report`, {
+      method: "POST",
+      user,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   meetingAction(user: TgUser, meetingId: string, action: "accept" | "decline" | "confirm_sold") {
     return this.request<{ status: string }>(`/meetings/${encodeURIComponent(meetingId)}/${action}`, { method: "POST", user });
   }

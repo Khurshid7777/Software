@@ -124,6 +124,14 @@ class FakeApi {
     this.calls.push(`mod:${u.id}:${decision}:${id}`);
     return { status: decision === "approve" ? "active" : "rejected", title: "iPhone" };
   }
+  async blockConversation(u: { id: number }, id: string) {
+    this.calls.push(`block:${u.id}:${id}`);
+    return { ok: true };
+  }
+  async reportConversation(u: { id: number }, id: string, reason: string) {
+    this.calls.push(`report:${u.id}:${id}:${reason}`);
+    return { ok: true };
+  }
   async meetingAction(u: { id: number }, id: string, action: string) {
     this.calls.push(`meet:${u.id}:${id}:${action}`);
     return { status: action === "accept" ? "accepted" : "declined" };
@@ -466,5 +474,32 @@ describe("Reply button state lives in the API", () => {
     await bot.idle();
     expect(api.calls).toContain(`meet:5:${id}:accept`);
     expect(sent.some((s) => s.method === "answerCallbackQuery" && String(s.payload.text).includes("Договорились"))).toBe(true);
+  });
+
+  it("chat safety: block and report the other side from the relayed message", async () => {
+    const { api, bot, sent } = setup();
+    const id = "33333333-3333-3333-3333-333333333333";
+    const cb = (data: string, n: number): Update => ({
+      update_id: n,
+      callback_query: {
+        id: `cb${n}`,
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        chat_instance: "1",
+        data,
+        message: { message_id: 3, date: 0, chat: { id: 5, type: "private", first_name: "A" }, text: "💬" },
+      },
+    });
+    await bot.handleUpdate(cb(`blk:${id}`, 10));
+    await bot.idle();
+    expect(api.calls).toContain(`block:5:${id}`);
+    expect(sent.some((s) => s.method === "sendMessage" && String(s.payload.text).includes("заблокирован"))).toBe(true);
+
+    await bot.handleUpdate(cb(`rep:${id}`, 11));
+    await bot.idle();
+    const ask = sent.filter((s) => s.method === "sendMessage").at(-1)!;
+    expect(JSON.stringify(ask.payload.reply_markup)).toContain(`rep:${id}:prepayment`);
+    await bot.handleUpdate(cb(`rep:${id}:prepayment`, 12));
+    await bot.idle();
+    expect(api.calls).toContain(`report:5:${id}:prepayment`);
   });
 });
