@@ -13,6 +13,10 @@ import {
   PRICE_DROP_BADGE_DAYS,
   VERIFIED_BADGE_DAYS,
   PRICE_DROP_MIN_PCT,
+  AUTO_DROP_EVERY_DAYS,
+  AUTO_DROP_MIN_FLOOR_PCT,
+  nextAutoDropPrice,
+  sellerBadges,
   PRIVATE_SELLER_ACTIVE_LIMIT,
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -89,7 +93,8 @@ export type ListingError =
   | "bad_image"
   | "contact_info"
   | "duplicate"
-  | "ai_quota";
+  | "ai_quota"
+  | "bad_floor";
 
 export class ListingRejected extends Error {
   constructor(
@@ -125,6 +130,8 @@ export const ListingPatchSchema = z
       .nullable(),
     checklist: ConditionChecklistSchema,
     acceptsTrade: z.boolean(),
+    /** Автоснижение: the floor (null turns it off). */
+    autoDropFloor: z.number().int().positive().max(10_000_000_000).nullable(),
   })
   .partial();
 export type ListingPatch = z.infer<typeof ListingPatchSchema>;
@@ -353,10 +360,19 @@ export class ListingService {
     if (patch.price === null && l.status !== "draft") throw new ListingRejected("fill_required", 400);
     if (textChanged && l.status !== "draft" && hasContactInfo({ ...l, ...patch })) throw new ListingRejected("contact_info", 400);
     const now = new Date();
+    // Автоснижение: the floor must sit below the price and not under half of it; the first step in 3 days.
+    let autoDrop: Partial<Listing> = {};
+    if (patch.autoDropFloor !== undefined) {
+      const price = patch.price ?? l.price;
+      if (patch.autoDropFloor === null) autoDrop = { autoDropAt: null };
+      else if (!price || patch.autoDropFloor >= price || patch.autoDropFloor < (price * AUTO_DROP_MIN_FLOOR_PCT) / 100) {
+        throw new ListingRejected("bad_floor", 400, { min: formatUzs(Math.ceil((price ?? 0) * AUTO_DROP_MIN_FLOOR_PCT / 100)) });
+      } else autoDrop = { autoDropAt: new Date(now.getTime() + AUTO_DROP_EVERY_DAYS * DAY) };
+    }
     const priceChange = l.status === "active" && patch.price != null && l.price != null && patch.price !== l.price ? this.priceChange(l, patch.price, now) : {};
     await this.db
       .update(listings)
-      .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, updatedAt: now })
+      .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, ...autoDrop, updatedAt: now })
       .where(eq(listings.id, id));
     const priceChanged = patch.price != null && l.price != null && patch.price !== l.price;
     // Open delivery requests were quoted at the old price: they close and the buyers are told to re-order.
@@ -756,6 +772,61 @@ export class ListingService {
    * Hourly job: reminds sellers 3 days before expiry (button "Renew") and archives expired listings.
    * Returns counts for logs/tests.
    */
+  /**
+   * Автоснижение (Mercari Smart Pricing): live listings whose step is due drop by AUTO_DROP_PCT down to the
+   * seller's floor. A drop is an ordinary price change: favorites are alerted, open requests quoted at the
+   * old price close. The seller is told each time; reaching the floor ends it.
+   */
+  async runAutoDrops(now = new Date()) {
+    const due = await this.db
+      .select()
+      .from(listings)
+      .where(and(eq(listings.status, "active"), sql`${listings.autoDropFloor} is not null`, lte(listings.autoDropAt, now)))
+      .limit(200);
+    let dropped = 0;
+    for (const l of due) {
+      const price = nextAutoDropPrice(l.price!, l.autoDropFloor!);
+      if (!l.price || price >= l.price) {
+        await this.db.update(listings).set({ autoDropFloor: null, autoDropAt: null }).where(eq(listings.id, l.id));
+        continue;
+      }
+      const atFloor = price <= l.autoDropFloor!;
+      const [changed] = await this.db
+        .update(listings)
+        .set({
+          price,
+          ...this.priceChange(l, price, now),
+          autoDropFloor: atFloor ? null : l.autoDropFloor,
+          autoDropAt: atFloor ? null : new Date(now.getTime() + AUTO_DROP_EVERY_DAYS * DAY),
+          updatedAt: now,
+        })
+        // Compare-and-set: a seller editing the price meanwhile wins.
+        .where(and(eq(listings.id, l.id), eq(listings.status, "active"), eq(listings.price, l.price)))
+        .returning({ id: listings.id });
+      if (!changed) continue;
+      dropped++;
+      await this.d.onUnavailable?.(l.id, "price_changed");
+      if (l.price - price >= (l.price * PRICE_DROP_MIN_PCT) / 100) await this.schedule("price_drop_alerts", { listingId: l.id, price });
+      const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
+      if (seller && this.d.notifier) {
+        const lang = seller.language as Lang;
+        const url = this.d.publisher ? await this.d.publisher.miniAppLink("screen_my").catch(() => null) : null;
+        await this.d.notifier
+          .send(
+            seller.telegramId,
+            t(lang, atFloor ? "autodrop.reached_floor" : "autodrop.dropped", {
+              title: listingTitle(l, lang),
+              price: formatUzs(price),
+              floor: formatUzs(l.autoDropFloor!),
+            }),
+            url ? [[{ text: t(lang, "autodrop.manage"), url }]] : [],
+          )
+          .catch(() => undefined);
+      }
+    }
+    return dropped;
+  }
+
   async runExpiry(now = new Date()) {
     const soon = new Date(now.getTime() + EXPIRY_REMINDER_DAYS * DAY);
     const toRemind = await this.db
@@ -952,6 +1023,12 @@ export class ListingService {
             responseMinutes: responseOf.get(u.id) ?? null,
             inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
             disputesLost: lostOf.get(u.id) ?? 0,
+            badges: sellerBadges({
+              responseMinutes: responseOf.get(u.id) ?? null,
+              inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
+              platformSales: salesOf.get(u.id) ?? 0,
+              disputesLost: lostOf.get(u.id) ?? 0,
+            }),
           },
         ];
       }),
@@ -1075,6 +1152,12 @@ export class ListingService {
         acceptsTrade: l.acceptsTrade,
         grade: (l.grade as Grade | null) ?? null,
         video: videoOf.get(l.id) ?? null,
+        ...(isOwner
+          ? {
+              autoDrop: l.autoDropFloor && l.autoDropAt ? { floor: l.autoDropFloor, nextAt: l.autoDropAt.toISOString() } : null,
+              likersOffer: l.likersOfferPrice && l.likersOfferAt ? { price: l.likersOfferPrice, at: l.likersOfferAt.toISOString() } : null,
+            }
+          : {}),
         verified:
           l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,
@@ -1111,6 +1194,7 @@ export class ListingService {
           responseMinutes: null,
           inspections: { passed: 0, failed: 0 },
           disputesLost: 0,
+          badges: [],
         };
       }
       out.push(dto);

@@ -23,6 +23,9 @@ import {
   t,
   CONDITION_FACTOR,
   GUARANTEE_DAYS,
+  LIKERS_OFFER_EVERY_DAYS,
+  LIKERS_OFFER_HOURS,
+  maxLikersOffer,
   TRADE_MAX_TOPUP_PCT,
   normalizeModelKey,
   type BundleQuote,
@@ -54,6 +57,7 @@ import type { Repo } from "../../db/repo.js";
 import {
   courierTariffs,
   disputes,
+  favorites,
   listingPhotos,
   listings,
   offers,
@@ -94,7 +98,11 @@ export type OrderError =
   | "trade_topup_too_big"
   | "guarantee_expired"
   | "dispute_exists"
-  | "bad_amount";
+  | "bad_amount"
+  | "likers_too_soon"
+  | "likers_not_lower"
+  | "likers_too_high"
+  | "no_likers";
 
 export class OrderRejected extends Error {
   constructor(
@@ -465,6 +473,55 @@ export class OrderService {
       await this.dm(buyer, text, url ? [[{ text: t(lang, button), url }]] : []);
     }
     return this.offerDto(updated);
+  }
+
+  /**
+   * «Предложить избранным» (Poshmark "Offer to Likers"): everyone who saved the item gets a personal price
+   * for LIKERS_OFFER_HOURS — stored as an accepted offer per person, so checkout applies it as after a
+   * successful haggle. At least LIKERS_OFFER_MIN_PCT off, once per LIKERS_OFFER_EVERY_DAYS, each lower than the last.
+   */
+  async offerToLikers(seller: User, listingId: string, price: number) {
+    const l = await this.availableListing(listingId);
+    if (l.sellerUserId !== seller.id) throw new OrderRejected("forbidden", 403);
+    const now = new Date();
+    if (price > maxLikersOffer(l.price!) || price < minOffer(l.price!)) throw new OrderRejected("likers_too_high", 400);
+    if (l.likersOfferAt && now.getTime() - l.likersOfferAt.getTime() < LIKERS_OFFER_EVERY_DAYS * DAY_MS) throw new OrderRejected("likers_too_soon", 409);
+    if (l.likersOfferPrice && l.likersOfferAt && now.getTime() - l.likersOfferAt.getTime() < 90 * DAY_MS && price >= l.likersOfferPrice) {
+      throw new OrderRejected("likers_not_lower", 400);
+    }
+    const likers = await this.db
+      .select({ u: users })
+      .from(favorites)
+      .innerJoin(users, eq(users.id, favorites.userId))
+      .where(and(eq(favorites.listingId, l.id), ne(favorites.userId, seller.id), sql`${users.bannedAt} is null`));
+    if (!likers.length) throw new OrderRejected("no_likers", 409);
+    const expiresAt = new Date(now.getTime() + LIKERS_OFFER_HOURS * 3600_000);
+    await this.db.transaction(async (tx) => {
+      await tx.insert(offers).values(
+        likers.map(({ u }) => ({
+          listingId: l.id,
+          buyerUserId: u.id,
+          sellerUserId: seller.id,
+          amount: price,
+          listPrice: l.price!,
+          status: "accepted",
+          decidedAt: now,
+          expiresAt,
+        })),
+      );
+      await tx.update(listings).set({ likersOfferPrice: price, likersOfferAt: now }).where(eq(listings.id, l.id));
+    });
+    await this.d.repo.event(seller.id, "likers_offer_sent", { listingId: l.id, price, recipients: likers.length });
+    const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+    for (const { u } of likers) {
+      const lang = u.language as Lang;
+      await this.dm(
+        u,
+        t(lang, "likers.offer_for_buyer", { title: listingTitle(l, lang), price: formatUzs(price), old: formatUzs(l.price!), hours: LIKERS_OFFER_HOURS }),
+        url ? [[{ text: t(lang, "offer.checkout"), url }]] : [],
+      );
+    }
+    return { sent: likers.length, price, expiresAt: expiresAt.toISOString() };
   }
 
   /** Hourly tidy-up: offers past their deadline are marked expired. */

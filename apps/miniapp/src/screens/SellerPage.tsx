@@ -5,6 +5,7 @@ import { Empty } from "../components/Empty";
 import { LoadError } from "../components/LoadError";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { useLang, useT } from "../i18n";
+import { SellerBadges } from "../components/SellerBadges";
 
 /** Public page of a seller: who they are on Ishonch (trust facts) and everything they sell now. */
 export function SellerPage({ api, sellerId, onOpen }: { api: Api; sellerId: string; onOpen: (id: string) => void }) {
@@ -45,6 +46,7 @@ export function SellerPage({ api, sellerId, onOpen }: { api: Api; sellerId: stri
             {s.shop?.verified && <span className="badge">✔️ {t("shop.verified")}</span>}
           </div>
           <span className={`trust trust-${data!.trust}`}>{t(`trust.${data!.trust}`)}</span>
+          <SellerBadges badges={s.badges} />
           {s.shop?.marketLocation && <span className="hint">📍 {s.shop.marketLocation}</span>}
           <div className="facts">
             <Fact value={s.rating.count ? `★ ${s.rating.avg}` : "—"} label={t("seller.reviews_n", { n: s.rating.count })} />

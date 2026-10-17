@@ -92,7 +92,7 @@ export interface ShopInfo {
 
 export type ListingPatch = Partial<
   Pick<ListingDto, "titleRu" | "titleUz" | "descriptionRu" | "descriptionUz" | "price" | "condition" | "district" | "allowedDeliveryModes" | "feePayer" | "imei" | "checklist" | "acceptsTrade">
->;
+> & { autoDropFloor?: number | null };
 
 /** Absolute URL for API-relative paths such as signed photo URLs. */
 export const apiUrl = (path: string) => `${BASE}${path}`;
@@ -214,6 +214,8 @@ export function createApi(initData: string | null) {
     generate: (id: string, answers: Record<string, string>) =>
       request<ListingDto>(`/listings/${id}/generate`, json("POST", { answers })),
     updateListing: (id: string, patch: ListingPatch) => request<ListingDto>(`/listings/${id}`, json("PATCH", patch)),
+    offerToLikers: (id: string, amount: number) =>
+      request<{ sent: number; price: number; expiresAt: string }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {
       const form = new FormData();
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));

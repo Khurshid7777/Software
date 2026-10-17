@@ -277,3 +277,40 @@ export const MAX_DISPUTE_PHOTOS = 3;
 export const MAX_INSPECTION_PHOTOS = 4;
 /** The seller's video check: a short clip (switching on, screen, camera), one per listing. */
 export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
+
+// ---------- selling faster (stage 16, docs/plan.md) ----------
+/** «Предложить избранным» (Poshmark "Offer to Likers"): at least this much below the price, 24 h, every 3 days. */
+export const LIKERS_OFFER_MIN_PCT = 10;
+export const LIKERS_OFFER_HOURS = 24;
+export const LIKERS_OFFER_EVERY_DAYS = 3;
+/** Автоснижение (Mercari Smart Pricing): −5 % every 3 days down to the seller's floor (not below half the price). */
+export const AUTO_DROP_PCT = 5;
+export const AUTO_DROP_EVERY_DAYS = 3;
+export const AUTO_DROP_MIN_FLOOR_PCT = 50;
+
+/** The next automatic price: 5 % lower, rounded to 10 000 sum, never below the floor. */
+export function nextAutoDropPrice(price: number, floor: number) {
+  return Math.max(floor, Math.floor((price * (100 - AUTO_DROP_PCT)) / 100 / 10_000) * 10_000);
+}
+
+/** The highest price a likers' offer may have (10 % off, rounded down to 1 000 sum). */
+export function maxLikersOffer(price: number) {
+  return Math.floor((price * (100 - LIKERS_OFFER_MIN_PCT)) / 100 / 1000) * 1000;
+}
+
+/** Seller badges, earned only by facts on Ishonch (eBay Top Rated style); recomputed on every view. */
+export const SELLER_BADGES = ["fast_reply", "courier_checked", "reliable"] as const;
+export type SellerBadge = (typeof SELLER_BADGES)[number];
+
+export function sellerBadges(s: {
+  responseMinutes: number | null;
+  inspections: { passed: number; failed: number };
+  platformSales: number;
+  disputesLost: number;
+}): SellerBadge[] {
+  const out: SellerBadge[] = [];
+  if (s.responseMinutes != null && s.responseMinutes <= 60) out.push("fast_reply");
+  if (s.inspections.passed >= 3 && s.inspections.failed === 0) out.push("courier_checked");
+  if (s.platformSales >= 5 && s.disputesLost === 0) out.push("reliable");
+  return out;
+}

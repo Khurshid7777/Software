@@ -11,6 +11,8 @@ import {
   DisputeResolveSchema,
   DisputeResponseSchema,
   GUARANTEE_DAYS,
+  LIKERS_OFFER_EVERY_DAYS,
+  LIKERS_OFFER_MIN_PCT,
   OfferInputSchema,
   TradeOfferInputSchema,
   ORDER_STATUSES,
@@ -44,6 +46,10 @@ const MESSAGES: Record<string, string> = {
   guarantee_expired: "order.err.guarantee_expired",
   dispute_exists: "order.err.dispute_exists",
   bad_amount: "order.err.bad_amount",
+  likers_too_soon: "likers.err.too_soon",
+  likers_not_lower: "likers.err.not_lower",
+  likers_too_high: "likers.err.too_high",
+  no_likers: "likers.err.none",
 };
 
 const TariffSchema = z.object({
@@ -74,7 +80,7 @@ export function orderRoutes(
         const key = MESSAGES[err.code];
         return reply
           .code(err.status)
-          .send({ error: err.code, message: key ? t(lang, key as Parameters<typeof t>[1], { days: GUARANTEE_DAYS }) : err.code });
+          .send({ error: err.code, message: key ? t(lang, key as Parameters<typeof t>[1], { days: GUARANTEE_DAYS, every: LIKERS_OFFER_EVERY_DAYS, pct: LIKERS_OFFER_MIN_PCT }) : err.code });
       }
       throw err;
     }
@@ -134,6 +140,15 @@ export function orderRoutes(
       return svc.makeOffer(req.user!, req.params.id, parsed.data.amount);
     }),
   );
+  // «Предложить избранным»: a personal price for everyone who saved the item, 24 h.
+  app.post<{ Params: { id: string } }>("/listings/:id/offer-likers", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = OfferInputSchema.safeParse(req.body);
+      if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.offerToLikers(req.user!, req.params.id, parsed.data.amount);
+    }),
+  );
+
   // «Обмен с доплатой»: the buyer's item + a top-up; answered with the same bot buttons as a price offer.
   app.post<{ Params: { id: string } }>("/listings/:id/trade-offers", { preHandler: requireUser }, (req, reply) =>
     handle(req, reply, async () => {

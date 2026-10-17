@@ -42,6 +42,7 @@ const hourly = () =>
     const r = await step("expiry", () => listings.runExpiry());
     const staleOrders = await step("stale_orders", () => orders.expireStale());
     await step("offers", () => orders.expireOffers());
+    await step("auto_drops", () => listings.runAutoDrops());
     await step("review_reminders", () => orders.remindReviews());
     await step("jobs_cleanup", () => queue.cleanup());
     await step("pending_replies", () => app.services.catalog.cleanupPendingReplies());

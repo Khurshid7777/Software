@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  maxLikersOffer,
+  nextAutoDropPrice,
+  sellerBadges,
   canTransition,
   dictionaries,
   inspectionChecklist,
@@ -371,5 +374,27 @@ describe("item passport: condition grade", () => {
     expect(computeGrade("like_new", { deadPixels: "few" }).grade).toBe("B");
     expect(computeGrade("like_new", { biometrics: "broken" }).grade).toBe("C");
     expect(computeGrade("new", { mining: "yes" })).toEqual({ grade: "B", reasons: ["mining"] });
+  });
+});
+
+describe("selling faster (stage 16)", () => {
+  it("auto drop steps 5 % rounded down to 10 000 and never goes under the floor", () => {
+    expect(nextAutoDropPrice(4_000_000, 3_000_000)).toBe(3_800_000);
+    expect(nextAutoDropPrice(4_123_000, 3_000_000)).toBe(3_910_000);
+    expect(nextAutoDropPrice(3_100_000, 3_000_000)).toBe(3_000_000);
+  });
+  it("likers offer is at least 10 % below the price", () => {
+    expect(maxLikersOffer(4_000_000)).toBe(3_600_000);
+    expect(maxLikersOffer(1_234_567)).toBe(1_111_000);
+  });
+  it("badges come from facts only", () => {
+    const base = { responseMinutes: null, inspections: { passed: 0, failed: 0 }, platformSales: 0, disputesLost: 0 };
+    expect(sellerBadges(base)).toEqual([]);
+    expect(sellerBadges({ ...base, responseMinutes: 45 })).toEqual(["fast_reply"]);
+    expect(sellerBadges({ ...base, responseMinutes: 61 })).toEqual([]);
+    expect(sellerBadges({ ...base, inspections: { passed: 3, failed: 0 } })).toEqual(["courier_checked"]);
+    expect(sellerBadges({ ...base, inspections: { passed: 5, failed: 1 } })).toEqual([]);
+    expect(sellerBadges({ ...base, platformSales: 5 })).toEqual(["reliable"]);
+    expect(sellerBadges({ ...base, platformSales: 9, disputesLost: 1 })).toEqual([]);
   });
 });

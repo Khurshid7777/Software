@@ -20,6 +20,7 @@ const I18N_KEY: Record<string, string> = {
   limit_reached: "sell.limit_reached",
   not_found: "listing.not_found",
   contact_info: "sell.contact_info",
+  bad_floor: "autodrop.bad_floor",
   duplicate: "sell.duplicate",
   ai_quota: "sell.ai_quota",
 };

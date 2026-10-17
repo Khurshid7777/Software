@@ -4,6 +4,7 @@ import { photoUrl, ApiError, type Api } from "../api";
 import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
 import { Insights } from "../components/Insights";
+import { SellFaster } from "../components/SellFaster";
 import { LoadError } from "../components/LoadError";
 import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
@@ -191,6 +192,7 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
               )}
             </div>
           )}
+          {l.status === "active" && soldFor !== l.id && <SellFaster api={api} listing={l} onDone={(m) => (setToast(m), load())} />}
           {insightsFor === l.id && (
             <Insights
               api={api}

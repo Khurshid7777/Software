@@ -3,7 +3,7 @@ import { CHECK_CATEGORIES, type CheckCategory, type Lang } from "./types.js";
 import { formatUzs } from "./price/parsePrice.js";
 import { t } from "./i18n-core.js";
 import type { MarketRange } from "./price/verdict.js";
-import type { ConditionChecklist, Inspection } from "./market.js";
+import type { ConditionChecklist, Inspection, SellerBadge } from "./market.js";
 import type { Grade } from "./passport.js";
 
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
@@ -82,6 +82,8 @@ export interface ListingSeller {
   inspections: { passed: number; failed: number };
   /** Guarantee disputes decided against the seller. */
   disputesLost: number;
+  /** Earned by facts on Ishonch (see sellerBadges). */
+  badges: SellerBadge[];
 }
 
 /** Listing as returned by the API. */
@@ -111,6 +113,10 @@ export interface ListingDto {
   grade: Grade | null;
   /** The seller's short video check of the item (signed URL), if any. */
   video: string | null;
+  /** Owner only: automatic price drop down to `floor`, next step at `nextAt`. */
+  autoDrop?: { floor: number; nextAt: string } | null;
+  /** Owner only: the last «Предложить избранным» (price and when). */
+  likersOffer?: { price: number; at: string } | null;
   /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
   verified: Inspection | null;
   district: District | null;

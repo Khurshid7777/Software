@@ -22,6 +22,7 @@ import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
 import { Passport } from "../components/Passport";
+import { SellerBadges } from "../components/SellerBadges";
 import { useLang, useT } from "../i18n";
 import { canShareStory, ensureWriteAccess, haptic, shareLink, shareToStory } from "../telegram";
 
@@ -234,6 +235,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
         <section className="card stack">
           <h3>{t("listing.seller")}</h3>
           <TrustBadge item={item} />
+          <SellerBadges badges={l.seller.badges} />
           {l.seller.rating.count > 0 ? (
             <button className="link" onClick={toggleReviews} data-testid="seller-rating">
               {t("listing.rating", { avg: l.seller.rating.avg ?? "—", n: l.seller.rating.count })} ·{" "}
