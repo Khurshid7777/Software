@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, inspectionChecks, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
-import { ApiError, apiUrl, type AdminDispute, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
+import { MAX_INSPECTION_PHOTOS, formatUzs, inspectionChecks, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
+import { ApiError, apiUrl, compressImage, type AdminDispute, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
 import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
@@ -156,6 +156,27 @@ export function Disputes({ api, onOpen }: { api: Api; onOpen: (id: string) => vo
           <span>⚖️ {DISPUTE_REASON[d.reason] ?? d.reason}</span>
           <span className="hint">Покупатель: «{d.text}»</span>
           <span className="hint">{d.sellerResponse ? `Продавец: «${d.sellerResponse}»` : "Продавец ещё не ответил"}</span>
+          {d.photos.length > 0 && (
+            <div className="evidence-row" data-testid="dispute-photos">
+              {d.photos.map((u) => (
+                <a key={u} href={apiUrl(u)} target="_blank" rel="noreferrer">
+                  <img src={apiUrl(u)} alt="Фото покупателя" />
+                </a>
+              ))}
+            </div>
+          )}
+          {d.inspectionPhotos.length > 0 && (
+            <>
+              <span className="hint">Фото курьера при получении:</span>
+              <div className="evidence-row">
+                {d.inspectionPhotos.map((u) => (
+                  <a key={u} href={apiUrl(u)} target="_blank" rel="noreferrer">
+                    <img src={apiUrl(u)} alt="Фото курьера" />
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
           {d.inspection && (
             <span className="hint">
               🔍 Осмотр курьером: {d.inspection.passed ? "пройден" : "были замечания"}
@@ -334,6 +355,28 @@ export function OperatorOrders({ api }: { api: Api }) {
               ["confirmed", "courier_assigned", "picked_up"].includes(o.status) && (
                 <InspectionForm category={o.category} hasImei={!!o.imei} onSubmit={(checks, note) => api.inspect(o.id, checks, note).then(reload, (e) => setError(e instanceof ApiError ? e.message : "Ошибка"))} />
               )
+            )}
+            {["confirmed", "courier_assigned", "picked_up", "delivered"].includes(o.status) && (
+              <label className="chip" data-testid="op-inspection-photos">
+                📷 Фото осмотра (до {MAX_INSPECTION_PHOTOS}) — попадут в паспорт товара
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (!files.length) return;
+                    try {
+                      const blobs = await Promise.all(files.map((f) => compressImage(f)));
+                      const { photos } = await api.inspectionPhotos(o.id, blobs);
+                      setError(`Фото осмотра сохранены: ${photos.length}`);
+                    } catch (err) {
+                      setError(err instanceof ApiError ? err.message : "Ошибка");
+                    }
+                  }}
+                />
+              </label>
             )}
             {o.courier?.name && <span className="hint">Курьер: {o.courier.name}</span>}
             {next.includes("courier_assigned") && (

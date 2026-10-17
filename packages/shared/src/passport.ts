@@ -42,7 +42,7 @@ export function computeGrade(condition: Condition | null, c: ConditionChecklist)
 /** Who confirmed a check: the courier at pickup, Ishonch itself (data, moderation) or the seller's word. */
 export type CheckSource = "courier" | "ishonch" | "seller";
 export type CheckStatus = "ok" | "warn" | "fail" | "unknown";
-export const PASSPORT_CHECKS = ["inspection", "imei", "account", "battery", "repairs", "photos", "price", "documents"] as const;
+export const PASSPORT_CHECKS = ["inspection", "video", "imei", "account", "battery", "repairs", "photos", "price", "documents"] as const;
 export type PassportCheckCode = (typeof PASSPORT_CHECKS)[number];
 
 export interface PassportCheck {
@@ -69,6 +69,8 @@ export interface ItemPassport {
   passed: number;
   total: number;
   history: ItemHistory | null;
+  /** The courier's photos from the last passed inspection (signed URLs). */
+  inspectionPhotos: string[];
 }
 
 /** Categories whose items sign in to an account (iCloud / Google / Microsoft / Samsung): the "unlinked" check. */

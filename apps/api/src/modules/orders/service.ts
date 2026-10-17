@@ -70,6 +70,7 @@ import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/pu
 import type { StaffNotifier } from "../../telegram/staff.js";
 import type { ListingService } from "../listings/service.js";
 import type { CourierProvider } from "./courier.js";
+import type { EvidenceService } from "../evidence/service.js";
 
 export type OrderError =
   | "not_found"
@@ -109,6 +110,8 @@ export interface OrderServiceDeps {
   listings: ListingService;
   notifier: (Notifier & Pick<ChannelPublisher, "miniAppLink">) | null;
   staff: StaffNotifier;
+  /** Evidence files: dispute photos and the courier's inspection photos. */
+  evidence?: EvidenceService;
   courier: CourierProvider;
   codPlatformEnabled: boolean;
   /** A reserved listing is back on sale: re-check complaints that arrived meanwhile (TrustService). */
@@ -592,7 +595,7 @@ export class OrderService {
   }
 
   // ---------- Ishonch guarantee ----------
-  private disputeDto(d: typeof disputes.$inferSelect): DisputeDto {
+  private disputeDto(d: typeof disputes.$inferSelect, photos: string[] = []): DisputeDto {
     return {
       id: d.id,
       orderId: d.orderId,
@@ -603,6 +606,7 @@ export class OrderService {
       resolution: (d.resolution as DisputeResolution | null) ?? null,
       amount: d.amount,
       note: d.note,
+      photos,
       createdAt: d.createdAt.toISOString(),
       resolvedAt: d.resolvedAt?.toISOString() ?? null,
     };
@@ -685,8 +689,13 @@ export class OrderService {
       .from(users)
       .where(inArray(users.id, [...new Set(rows.flatMap((r) => [r.d.buyerUserId, r.d.sellerUserId]))]));
     const phoneOf = new Map(people.map((u) => [u.id, u.phone]));
+    const orderIds = rows.map((r) => r.d.orderId);
+    const [photosOf, inspectionOf] = this.d.evidence
+      ? await Promise.all([this.d.evidence.orderPhotos(orderIds, "dispute_photo"), this.d.evidence.orderPhotos(orderIds, "inspection_photo")])
+      : [new Map<string, string[]>(), new Map<string, string[]>()];
     return rows.map((r) => ({
-      ...this.disputeDto(r.d),
+      ...this.disputeDto(r.d, photosOf.get(r.d.orderId) ?? []),
+      inspectionPhotos: inspectionOf.get(r.d.orderId) ?? [],
       title: r.titleRu || r.titleUz,
       listingId: r.d.listingId,
       itemPrice: normalizeQuote(r.o.quote as DeliveryQuote).itemPrice,
@@ -1294,6 +1303,8 @@ export class OrderService {
       this.db.select().from(disputes).where(inArray(disputes.orderId, orderIds)),
     ]);
     const disputeOf = new Map(disputeRows.map((d) => [d.orderId, d]));
+    const disputePhotos =
+      this.d.evidence && disputeRows.length ? await this.d.evidence.orderPhotos(disputeRows.map((d) => d.orderId), "dispute_photo") : new Map<string, string[]>();
     const listingOf = new Map(listingRows.map((l) => [l.id, l]));
     const photoOf = new Map(photoRows.map((p) => [p.listingId, p]));
     const reviewOf = new Map(reviewRows.map((r) => [r.orderId, r]));
@@ -1346,7 +1357,7 @@ export class OrderService {
         actions,
         inspection: (o.inspection as Inspection | null) ?? null,
         guaranteeUntil: until?.toISOString() ?? null,
-        dispute: dispute ? this.disputeDto(dispute) : null,
+        dispute: dispute ? this.disputeDto(dispute, disputePhotos.get(o.id) ?? []) : null,
         bundle: siblings
           .filter((b) => o.bundleId && b.bundleId === o.bundleId && b.orderId !== o.id)
           .map((b) => ({ orderId: b.orderId, listingId: b.listingId, status: b.status as OrderStatus, titleRu: b.titleRu, titleUz: b.titleUz })),

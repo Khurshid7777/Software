@@ -744,5 +744,22 @@
   "home.trust.step1": "Паспорт товара: класс состояния и что проверено",
   "home.trust.step2": "Курьер даёт осмотреть товар до оплаты",
   "home.trust.step3": "3 дня гарантии: нашли дефект — откройте спор",
-  "home.trust.close": "Понятно"
+  "home.trust.close": "Понятно",
+  "evidence.err.bad_image": "Не получилось прочитать фото. Пришлите JPG или PNG.",
+  "evidence.err.bad_video": "Нужен видеофайл MP4, WEBM или MOV.",
+  "evidence.err.too_many_photos": "Можно приложить не больше {n} фото.",
+  "evidence.err.too_large": "Файл слишком большой: видео — до {mb} МБ.",
+  "passport.check.video.ok": "Есть видео-проверка: товар включается, экран и корпус видно",
+  "passport.check.video.unknown": "Видео-проверки нет",
+  "passport.inspection_photos": "Фото курьера при осмотре",
+  "listing.video": "🎬 Видео-проверка от продавца",
+  "sell.video.title": "🎬 Видео-проверка",
+  "sell.video.hint": "15 секунд: включите товар, покажите экран, камеру и корпус со всех сторон. Видео попадает в паспорт товара — покупатели доверяют ему больше, чем фото.",
+  "sell.video.add": "Добавить видео (до {mb} МБ)",
+  "sell.video.replace": "Заменить видео",
+  "sell.video.remove": "Удалить видео",
+  "sell.video.uploading": "Загружаем видео…",
+  "guarantee.photos": "Фото проблемы — до {n} штук (необязательно)",
+  "guarantee.add_photos": "📷 Добавить фото к спору",
+  "dispute.photos_added": "Фото добавлены к спору"
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatUzs, listingTitle, type DisputeReason, type OrderDto } from "@ishonch/shared/client";
-import { photoUrl, ApiError, type Api } from "../api";
+import { photoUrl, ApiError, compressImage, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { LoadError } from "../components/LoadError";
 import { Guarantee } from "../components/Guarantee";
@@ -111,6 +111,9 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
           onReview={(rating, text) => act(() => api.review(o.id, rating, text), t("orders.review_thanks"))}
           onDispute={(reason, text) => act(() => api.openDispute(o.id, reason, text), t("guarantee.sent"))}
           onRespond={(text) => act(() => api.respondDispute(o.id, text), t("dispute.responded"))}
+          onPhotos={(files) =>
+            files.length > 0 && act(async () => api.disputePhotos(o.id, await Promise.all(files.map((f) => compressImage(f)))), t("dispute.photos_added"))
+          }
         />
       ))}
     </div>
@@ -125,6 +128,7 @@ function OrderCard({
   onReview,
   onDispute,
   onRespond,
+  onPhotos,
 }: {
   order: OrderDto;
   highlighted: boolean;
@@ -133,6 +137,7 @@ function OrderCard({
   onReview: (rating: number, text: string) => void;
   onDispute: (reason: DisputeReason, text: string) => void;
   onRespond: (text: string) => void;
+  onPhotos: (files: File[]) => void;
 }) {
   const t = useT();
   const lang = useLang();
@@ -225,7 +230,7 @@ function OrderCard({
         </div>
       )}
       {o.review && <p className="hint">{t("orders.your_review", { stars: "⭐".repeat(o.review.rating) })}</p>}
-      <Guarantee order={o} onOpen={onDispute} onRespond={onRespond} />
+      <Guarantee order={o} onOpen={onDispute} onRespond={onRespond} onPhotos={onPhotos} />
     </article>
   );
 }

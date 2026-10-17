@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { BUYER, open, resetDemo } from "./helpers";
+import { BUYER, SHOP_OWNER, catalog, open, resetDemo } from "./helpers";
 
 test.beforeAll(resetDemo);
 
@@ -42,4 +42,18 @@ test("catalog filter «Класс A–B» keeps only good items", async ({ page 
   expect(grades.length).toBeGreaterThan(0);
   expect(grades.every((g) => g === "A" || g === "B")).toBe(true);
   expect(await page.getByTestId("item-card").count()).toBeLessThanOrEqual(before);
+});
+
+test("the seller's video check shows on the listing and in the passport", async ({ page }) => {
+  const coffee = (await catalog()).find((i) => i.listing.titleRu.includes("Кофемашина"))!;
+  await open(page, SHOP_OWNER, "screen=my");
+  const card = page.locator(".card", { hasText: "DeLonghi" }).first();
+  await card.locator(".chip").filter({ hasText: "✏️" }).first().click();
+  await page.getByTestId("video-input").setInputFiles({ name: "check.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(50_000, 1) });
+  await expect(page.getByTestId("video-preview")).toBeVisible();
+
+  await open(page, BUYER, `startapp=listing_${coffee.listing.id}`);
+  await expect(page.getByTestId("listing-video")).toBeVisible();
+  await page.getByTestId("passport-toggle").click();
+  await expect(page.getByTestId("passport-video")).toContainText("Есть видео-проверка");
 });

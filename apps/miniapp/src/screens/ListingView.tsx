@@ -149,6 +149,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   return (
     <div className={!own && l.status === "active" && l.allowedDeliveryModes.length > 0 ? "stack with-action-bar" : "stack"} data-testid="listing-view">
       <Gallery photos={l.photos} />
+      {l.video && (
+        <section className="stack-tight" data-testid="listing-video">
+          <strong>{t("listing.video")}</strong>
+          <video className="video-check" src={apiUrl(l.video)} controls playsInline preload="metadata" />
+        </section>
+      )}
       <div className="row between">
         <h1>{listingTitle(l, lang)}</h1>
         {!own && (

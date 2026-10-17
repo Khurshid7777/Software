@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { GRADES, formatUzs, type CheckStatus, type Grade, type ItemPassport } from "@ishonch/shared/client";
+import { apiUrl } from "../api";
 import { useLang, useT } from "../i18n";
 
 const ICON: Record<CheckStatus, string> = { ok: "✅", warn: "⚠️", fail: "⛔", unknown: "○" };
@@ -73,6 +74,18 @@ export function Passport({ passport: p }: { passport: ItemPassport }) {
               </li>
             ))}
           </ul>
+          {p.inspectionPhotos.length > 0 && (
+            <div className="stack-tight" data-testid="passport-inspection-photos">
+              <h3>{t("passport.inspection_photos")}</h3>
+              <div className="evidence-row">
+                {p.inspectionPhotos.map((u) => (
+                  <a key={u} href={apiUrl(u)} target="_blank" rel="noreferrer">
+                    <img src={apiUrl(u)} alt="" loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           {p.history && (
             <div className="stack-tight" data-testid="passport-history">
               <h3>{t("passport.history")}</h3>

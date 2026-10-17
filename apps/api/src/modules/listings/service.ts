@@ -62,6 +62,7 @@ import { buildCaption, type ChannelPublisher, type Notifier } from "../../telegr
 import type { StaffNotifier } from "../../telegram/staff.js";
 import { hasContactInfo, type ModerationService } from "../moderation/service.js";
 import { analyzeListing, generateListingText } from "./ai.js";
+import type { EvidenceService } from "../evidence/service.js";
 
 export const MAX_PHOTOS = 10;
 /** A price cut deeper than this (percent) sends a live listing back through moderation. */
@@ -153,6 +154,8 @@ export interface ListingServiceDeps {
   /** Duplicate search + AI pre-moderation; null = publish without moderation. */
   moderation?: ModerationService | null;
   photoSecret: string;
+  /** Evidence files: the seller's video check shows on the listing. */
+  evidence?: EvidenceService;
   usdRate: number;
   /** Feature flag: `cod_platform` stays off until there is a legal entity and a courier contract. */
   codPlatformEnabled: boolean;
@@ -166,6 +169,10 @@ export interface ListingServiceDeps {
 
 export class ListingService {
   constructor(private d: ListingServiceDeps) {}
+
+  get evidence() {
+    return this.d.evidence;
+  }
 
   private get db() {
     return this.d.repo.db;
@@ -1027,6 +1034,7 @@ export class ListingService {
       .orderBy(asc(listingPhotos.position), asc(listingPhotos.id));
     const photosOf = new Map<string, typeof photos>();
     for (const p of photos) photosOf.set(p.listingId, [...(photosOf.get(p.listingId) ?? []), p]);
+    const videoOf = this.d.evidence ? await this.d.evidence.listingVideos(ids) : new Map<string, string>();
 
     const sellerIds = [...new Set(rows.map((r) => r.sellerUserId))];
     const needSellers = opts.withSeller || rows.some((r) => r.sellerUserId === viewerId && r.moderationReason);
@@ -1066,6 +1074,7 @@ export class ListingService {
         checklist: (l.checklist as ConditionChecklist) ?? {},
         acceptsTrade: l.acceptsTrade,
         grade: (l.grade as Grade | null) ?? null,
+        video: videoOf.get(l.id) ?? null,
         verified:
           l.verifiedAt && Date.now() - l.verifiedAt.getTime() < VERIFIED_BADGE_DAYS * DAY ? ((l.verification as Inspection | null) ?? null) : null,
         district: (l.district as District | null) ?? null,

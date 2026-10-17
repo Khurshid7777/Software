@@ -744,5 +744,22 @@
   "home.trust.step1": "Tovar pasporti: holat sinfi va nima tekshirilgani",
   "home.trust.step2": "Kuryer to'lovdan oldin tovarni ko'rishga beradi",
   "home.trust.step3": "3 kunlik kafolat: nuqson topsangiz — nizo oching",
-  "home.trust.close": "Tushunarli"
+  "home.trust.close": "Tushunarli",
+  "evidence.err.bad_image": "Suratni o'qib bo'lmadi. JPG yoki PNG yuboring.",
+  "evidence.err.bad_video": "MP4, WEBM yoki MOV video fayl kerak.",
+  "evidence.err.too_many_photos": "{n} tadan ortiq surat qo'shib bo'lmaydi.",
+  "evidence.err.too_large": "Fayl juda katta: video — {mb} MB gacha.",
+  "passport.check.video.ok": "Video-tekshiruv bor: tovar yonadi, ekran va korpus ko'rinadi",
+  "passport.check.video.unknown": "Video-tekshiruv yo'q",
+  "passport.inspection_photos": "Kuryerning tekshiruvdagi suratlari",
+  "listing.video": "🎬 Sotuvchidan video-tekshiruv",
+  "sell.video.title": "🎬 Video-tekshiruv",
+  "sell.video.hint": "15 soniya: tovarni yoqing, ekran, kamera va korpusni har tomondan ko'rsating. Video tovar pasportiga tushadi — xaridorlar unga suratdan ko'ra ko'proq ishonadi.",
+  "sell.video.add": "Video qo'shish ({mb} MB gacha)",
+  "sell.video.replace": "Videoni almashtirish",
+  "sell.video.remove": "Videoni o'chirish",
+  "sell.video.uploading": "Video yuklanmoqda…",
+  "guarantee.photos": "Muammo suratlari — {n} tagacha (ixtiyoriy)",
+  "guarantee.add_photos": "📷 Nizoga surat qo'shish",
+  "dispute.photos_added": "Suratlar nizoga qo'shildi"
 }

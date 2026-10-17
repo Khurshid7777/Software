@@ -109,6 +109,8 @@ export interface ListingDto {
   acceptsTrade: boolean;
   /** Condition grade A–D from the condition and the checklist (see computeGrade); null without a condition. */
   grade: Grade | null;
+  /** The seller's short video check of the item (signed URL), if any. */
+  video: string | null;
   /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
   verified: Inspection | null;
   district: District | null;

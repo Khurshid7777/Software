@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { DISPUTE_REASONS, formatUzs, type DisputeReason, type OrderDto } from "@ishonch/shared/client";
+import { DISPUTE_REASONS, MAX_DISPUTE_PHOTOS, formatUzs, type DisputeReason, type OrderDto } from "@ishonch/shared/client";
+import { apiUrl } from "../api";
 import { useLang, useT } from "../i18n";
 
 /**
@@ -10,10 +11,12 @@ export function Guarantee({
   order: o,
   onOpen,
   onRespond,
+  onPhotos,
 }: {
   order: OrderDto;
   onOpen: (reason: DisputeReason, text: string) => void;
   onRespond: (text: string) => void;
+  onPhotos: (files: File[]) => void;
 }) {
   const t = useT();
   const lang = useLang();
@@ -79,6 +82,28 @@ export function Guarantee({
               : t("dispute.status.resolved", { outcome: t(`dispute.resolution.${d.resolution!}`, { amount: d.amount ? formatUzs(d.amount) : "" }) })}
           </strong>
           <span className="hint">«{d.text}»</span>
+          {d.photos.length > 0 && (
+            <div className="evidence-row" data-testid="dispute-photos">
+              {d.photos.map((u) => (
+                <a key={u} href={apiUrl(u)} target="_blank" rel="noreferrer">
+                  <img src={apiUrl(u)} alt="" />
+                </a>
+              ))}
+            </div>
+          )}
+          {o.role === "buyer" && d.status === "open" && d.photos.length < MAX_DISPUTE_PHOTOS && (
+            <label className="chip" data-testid="dispute-add-photos">
+              {t("guarantee.add_photos")}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => onPhotos(Array.from(e.target.files ?? []).slice(0, MAX_DISPUTE_PHOTOS - d.photos.length))}
+                data-testid="dispute-photo-input"
+              />
+            </label>
+          )}
           {d.sellerResponse && <span className="hint">{t("dispute.seller_response", { text: d.sellerResponse })}</span>}
           {d.note && <span className="hint">{d.note}</span>}
         </div>

@@ -140,6 +140,7 @@ export type AdminDispute = DisputeDto & {
   itemPrice: number;
   deliveredAt: string | null;
   inspection: Inspection | null;
+  inspectionPhotos: string[];
   buyerPhone: string | null;
   sellerPhone: string | null;
 };
@@ -217,6 +218,22 @@ export function createApi(initData: string | null) {
       const form = new FormData();
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
       return request<ListingDto>(`/listings/${id}/photos`, { method: "POST", body: form });
+    },
+    uploadVideo: (id: string, video: File) => {
+      const form = new FormData();
+      form.append("video", video, video.name || "video.mp4");
+      return request<{ video: string }>(`/listings/${id}/video`, { method: "POST", body: form });
+    },
+    deleteVideo: (id: string) => request<{ video: null }>(`/listings/${id}/video`, { method: "DELETE" }),
+    disputePhotos: (orderId: string, photos: Blob[]) => {
+      const form = new FormData();
+      photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
+      return request<{ photos: string[] }>(`/orders/${orderId}/dispute/photos`, { method: "POST", body: form });
+    },
+    inspectionPhotos: (orderId: string, photos: Blob[]) => {
+      const form = new FormData();
+      photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
+      return request<{ photos: string[] }>(`/operator/orders/${orderId}/inspection/photos`, { method: "POST", body: form });
     },
     deletePhoto: (id: string, photoId: number) => request<ListingDto>(`/listings/${id}/photos/${photoId}`, { method: "DELETE" }),
     publish: (id: string, channelIds: number[]) =>

@@ -266,6 +266,14 @@ export interface DisputeDto {
   resolution: DisputeResolution | null;
   amount: number | null;
   note: string | null;
+  /** The buyer's photos (signed URLs). */
+  photos: string[];
   createdAt: string;
   resolvedAt: string | null;
 }
+
+// ---------- evidence (stage 15) ----------
+export const MAX_DISPUTE_PHOTOS = 3;
+export const MAX_INSPECTION_PHOTOS = 4;
+/** The seller's video check: a short clip (switching on, screen, camera), one per listing. */
+export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;

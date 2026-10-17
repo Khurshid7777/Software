@@ -242,7 +242,26 @@ export class CatalogService {
     const { grade, reasons } = computeGrade(l.condition, l.checklist ?? {});
     const c = l.checklist ?? {};
     const fields = checklistFields(l.category);
-    const checks: PassportCheck[] = [{ code: "inspection", source: "courier", status: l.verified?.passed ? "ok" : "unknown" }];
+    // The courier's photos from the passed inspection that gave the badge (the latest one).
+    let inspectionPhotos: string[] = [];
+    if (l.verified?.passed && this.listingsSvc.evidence) {
+      const [last] = await this.db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(and(eq(orders.listingId, l.id), sql`(${orders.inspection}->>'passed')::boolean`))
+        .orderBy(desc(orders.updatedAt))
+        .limit(1);
+      if (last) inspectionPhotos = (await this.listingsSvc.evidence.orderPhotos([last.id], "inspection_photo")).get(last.id) ?? [];
+    }
+    const checks: PassportCheck[] = [
+      {
+        code: "inspection",
+        source: "courier",
+        status: l.verified?.passed ? "ok" : "unknown",
+        ...(inspectionPhotos.length ? { params: { photos: inspectionPhotos.length } } : {}),
+      },
+      { code: "video", source: "seller", status: l.video ? "ok" : "unknown" },
+    ];
     let history: ItemHistory | null = null;
 
     if ((IMEI_CATEGORIES as readonly string[]).includes(l.category)) {
@@ -302,7 +321,7 @@ export class CatalogService {
       const docs = (c.kit ?? []).filter((k) => k === "box" || k === "receipt" || k === "warranty");
       checks.push({ code: "documents", source: "seller", status: docs.length ? "ok" : "unknown" });
     }
-    return { grade, reasons, checks, passed: checks.filter((x) => x.status === "ok").length, total: checks.length, history };
+    return { grade, reasons, checks, passed: checks.filter((x) => x.status === "ok").length, total: checks.length, history, inspectionPhotos };
   }
 
   trust(l: ListingDto) {

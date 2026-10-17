@@ -11,6 +11,8 @@ import { Repo } from "./db/repo.js";
 import type { Db } from "./db/client.js";
 import { adminRoutes } from "./modules/admin/routes.js";
 import { checkRoutes, multipartLimits } from "./modules/checks/routes.js";
+import { EvidenceService } from "./modules/evidence/service.js";
+import { evidenceRoutes } from "./modules/evidence/routes.js";
 import { CheckService } from "./modules/checks/service.js";
 import { userRoutes } from "./modules/users/routes.js";
 import { listingRoutes, MAX_UPLOAD_BYTES } from "./modules/listings/routes.js";
@@ -155,8 +157,10 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     findMarket: async (key) => (await repo.findReferencePrice(key)) ?? (await catalog.findCatalogPrice(key)),
     logger: app.log,
   });
+  const evidenceSvc = new EvidenceService({ repo, storage: store, secret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos` });
   const listingsSvc = new ListingService({
     repo,
+    evidence: evidenceSvc,
     ai: aiService,
     storage: store,
     stt:
@@ -187,6 +191,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     listings: listingsSvc,
     notifier: gateway,
     staff,
+    evidence: evidenceSvc,
     courier: courier ?? createCourierProvider(config.COURIER_PROVIDER),
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
     // `trust` is created below; the hook only runs later, on an order cancelled or returned.
@@ -242,6 +247,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     requireOperator: auth.requireRole("operator", "admin"),
     requireAdmin: auth.requireRole("admin"),
   }, (actor, action, target, details) => repo.audit(actor, action, target, details));
+  evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
   catalogRoutes(app, catalog, assistant, new ReplySuggestions(repo, aiService, catalog), {
     requireUser: auth.requireUser,

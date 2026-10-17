@@ -480,6 +480,29 @@ export const disputes = pgTable(
   (t) => [index("disputes_status_idx").on(t.status, t.createdAt), index("disputes_seller_idx").on(t.sellerUserId, t.resolution)],
 );
 
+/**
+ * Evidence files (docs/plan.md, stage 15): the buyer's photos for a dispute, the courier's photos at the
+ * pickup inspection and the seller's short video check of the item. Served by signed URL (/media/:id).
+ */
+export const evidence = pgTable(
+  "evidence",
+  {
+    id: serial("id").primaryKey(),
+    /** dispute_photo | inspection_photo | listing_video */
+    kind: text("kind").notNull(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    orderId: uuid("order_id").references(() => orders.id, { onDelete: "cascade" }),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    storageKey: text("storage_key").notNull(),
+    mime: text("mime").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("evidence_listing_idx").on(t.listingId, t.kind), index("evidence_order_idx").on(t.orderId, t.kind)],
+);
+
 /** One review per delivered order, written by the buyer about the seller. */
 export const reviews = pgTable(
   "reviews",

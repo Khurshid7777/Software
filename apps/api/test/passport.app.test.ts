@@ -14,7 +14,24 @@ import { listings, orders, priceReference } from "../src/db/schema.js";
 import type { CourierProvider } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../src/telegram/publisher.js";
+import sharp from "sharp";
 import { mockAiByPrompt } from "./helpers.js";
+
+function multipart(parts: Array<{ name: string; value: Buffer; filename: string; type: string }>) {
+  const boundary = "----ishonch-evidence";
+  const chunks: Buffer[] = [];
+  for (const p of parts) {
+    chunks.push(
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${p.name}"; filename="${p.filename}"\r\nContent-Type: ${p.type}\r\n\r\n`),
+      p.value,
+      Buffer.from("\r\n"),
+    );
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return { payload: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+const jpeg = (seed: number) =>
+  sharp({ create: { width: 64, height: 64, channels: 3, background: { r: seed * 40, g: 120, b: 200 } } }).jpeg().toBuffer();
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://ishonch:ishonch@localhost:5432/ishonch";
 const reachable = await postgres(url, { max: 1, connect_timeout: 2 })`select 1`
@@ -211,7 +228,7 @@ describe.skipIf(!reachable)("item passport: grade, checks, IMEI history, grade f
     const monitor = await liveListing({ category: "monitor", condition: "good", checklist: { deadPixels: "few" }, attributes: { modelKey: null, specs: [] } });
     const p = (await get<CatalogItem>(BUYER, `/catalog/${monitor.id}`)).passport!;
     expect(p.grade).toBe("B");
-    expect(p.checks.map((c) => c.code)).toEqual(["inspection", "repairs", "photos", "price", "documents"]);
+    expect(p.checks.map((c) => c.code)).toEqual(["inspection", "video", "repairs", "photos", "price", "documents"]);
     expect(p.checks.find((c) => c.code === "repairs")!.status).toBe("unknown");
     expect(p.checks.find((c) => c.code === "price")!.status).toBe("unknown");
     expect(p.history).toBeNull();
@@ -230,5 +247,79 @@ describe.skipIf(!reachable)("item passport: grade, checks, IMEI history, grade f
     expect(tips).toContain("no_account_check");
     await db.update(listings).set({ checklist: { batteryPct: 95, accountUnlocked: true } }).where(eq(listings.id, good.id));
     expect((await get<ListingInsights>(SELLER, `/listings/${good.id}/insights`)).tips.map((t) => t.code)).not.toContain("no_account_check");
+  });
+
+  // ---------------- evidence (stage 15) ----------------
+
+  it("evidence: dispute photos (buyer, open dispute, up to 3), courier photos in the passport, signed media URLs", async () => {
+    const l = await liveListing({ titleRu: "Evidence phone" });
+    const id = await deliveredOrder(l.id);
+    const upload = (who: number | null, path: string, files: Buffer[], type = "image/jpeg") => {
+      const body = multipart(files.map((value, i) => ({ name: "photos", value, filename: `p${i}.jpg`, type })));
+      return app.inject({
+        method: "POST",
+        url: path,
+        headers: { ...(who === OPERATOR ? internal(OPERATOR) : who ? tma(who) : {}), "content-type": body.contentType },
+        payload: body.payload,
+      });
+    };
+    // No dispute yet → nothing to attach to.
+    expect((await upload(BUYER, `/orders/${id}/dispute/photos`, [await jpeg(1)])).statusCode).toBe(404);
+    await post(BUYER, `/orders/${id}/dispute`, { reason: "hidden_defect", text: "Через день перестал заряжаться" });
+    expect((await upload(SELLER, `/orders/${id}/dispute/photos`, [await jpeg(1)])).statusCode).toBe(404);
+    expect((await upload(BUYER, `/orders/${id}/dispute/photos`, [Buffer.from("not an image")])).json().error).toBe("bad_image");
+    const added = await upload(BUYER, `/orders/${id}/dispute/photos`, [await jpeg(1), await jpeg(2)]);
+    expect(added.statusCode).toBe(200);
+    expect(added.json().photos).toHaveLength(2);
+    expect((await upload(BUYER, `/orders/${id}/dispute/photos`, [await jpeg(3), await jpeg(4)])).json().error).toBe("too_many_photos");
+    const view = await get<OrderDto>(BUYER, `/orders/${id}`);
+    expect(view.dispute!.photos).toHaveLength(2);
+
+    // Signed URL: works without auth, a tampered signature does not.
+    const url = view.dispute!.photos[0]!;
+    const media = await app.inject({ url });
+    expect(media.statusCode).toBe(200);
+    expect(media.headers["content-type"]).toBe("image/jpeg");
+    expect((await app.inject({ url: url.replace(/s=./, "s=x") })).statusCode).toBe(404);
+
+    // The courier's photos: operators only; a passed inspection puts them into the passport.
+    expect((await upload(BUYER, `/operator/orders/${id}/inspection/photos`, [await jpeg(5)])).statusCode).toBe(403);
+    expect((await upload(OPERATOR, `/operator/orders/${id}/inspection/photos`, [await jpeg(5), await jpeg(6)])).json().photos).toHaveLength(2);
+    await db
+      .update(orders)
+      .set({ inspection: { checks: { matches_description: true }, passed: true, note: null, at: new Date().toISOString() } })
+      .where(eq(orders.id, id));
+    await db.update(listings).set({ status: "active", verifiedAt: new Date(), verification: { checks: {}, passed: true, note: null, at: new Date().toISOString() } }).where(eq(listings.id, l.id));
+    const p = (await get<CatalogItem>(BUYER, `/catalog/${l.id}`)).passport!;
+    expect(p.inspectionPhotos).toHaveLength(2);
+    expect(p.checks.find((c) => c.code === "inspection")).toMatchObject({ status: "ok", params: { photos: 2 } });
+    const admin = (await get<Array<{ orderId: string; photos: string[]; inspectionPhotos: string[] }>>(ADMIN, "/admin/disputes")).find((d) => d.orderId === id)!;
+    expect([admin.photos.length, admin.inspectionPhotos.length]).toEqual([2, 2]);
+  });
+
+  it("evidence: the seller's video check — owner only, video types, 20 MB, shown on the listing and in the passport", async () => {
+    const l = await liveListing({ titleRu: "Video phone" });
+    const send = (who: number, value: Buffer, type = "video/mp4") => {
+      const body = multipart([{ name: "video", value, filename: "check.mp4", type }]);
+      return app.inject({ method: "POST", url: `/listings/${l.id}/video`, headers: { ...tma(who), "content-type": body.contentType }, payload: body.payload });
+    };
+    const clip = Buffer.alloc(200_000, 7);
+    expect((await send(BUYER, clip)).statusCode).toBe(404);
+    expect((await send(SELLER, clip, "image/jpeg")).json().error).toBe("bad_video");
+    expect((await send(SELLER, Buffer.alloc(21 * 1024 * 1024, 1))).statusCode).toBe(413);
+    const ok = await send(SELLER, clip);
+    expect(ok.statusCode).toBe(200);
+    const item = await get<CatalogItem>(BUYER, `/catalog/${l.id}`);
+    expect(item.listing.video).toBe(ok.json().video);
+    expect(item.passport!.checks.find((c) => c.code === "video")).toMatchObject({ status: "ok", source: "seller" });
+    const media = await app.inject({ url: item.listing.video! });
+    expect([media.statusCode, media.headers["content-type"], media.rawPayload.length]).toEqual([200, "video/mp4", 200_000]);
+
+    // A new upload replaces the old clip; delete removes it.
+    const second = (await send(SELLER, Buffer.alloc(1000, 9), "video/webm")).json().video;
+    expect(second).not.toBe(ok.json().video);
+    expect((await app.inject({ url: ok.json().video })).statusCode).toBe(404);
+    await app.inject({ method: "DELETE", url: `/listings/${l.id}/video`, headers: tma(SELLER) });
+    expect((await get<CatalogItem>(BUYER, `/catalog/${l.id}`)).listing.video).toBeNull();
   });
 });

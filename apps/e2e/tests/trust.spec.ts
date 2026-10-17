@@ -55,4 +55,12 @@ test("guarantee: a delivered order can be disputed for 3 days", async ({ page })
   await card.getByTestId("dispute-send").click();
   await expect(card.getByTestId("dispute-status")).toContainText("Открыт спор: не работает");
   await expect(card.getByTestId("dispute-open")).toHaveCount(0);
+
+  // A photo of the problem goes with the dispute (stage 15).
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC",
+    "base64",
+  );
+  await card.getByTestId("dispute-photo-input").setInputFiles({ name: "broken.png", mimeType: "image/png", buffer: png });
+  await expect(card.getByTestId("dispute-photos").locator("img")).toHaveCount(1);
 });
