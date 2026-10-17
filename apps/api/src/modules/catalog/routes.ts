@@ -71,7 +71,8 @@ export function catalogRoutes(
     const filters = parseFilters(req.query);
     if (!filters) return reply.code(400).send({ error: "bad_request" });
     const sort = (CATALOG_SORTS as readonly string[]).includes(req.query.sort ?? "") ? (req.query.sort as CatalogSort) : "relevance";
-    const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
+    // Deep OFFSET scans get slow; nobody scrolls 50 pages of a phone catalogue.
+    const offset = Math.min(1000, Math.max(0, Number(req.query.offset ?? 0) || 0));
     const page = await catalog.search(filters, sort, offset, req.user ?? null);
     // First page only: one event per search, with the result count (zero results feed the spelling dictionary).
     if (req.user && offset === 0) {

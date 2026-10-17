@@ -174,6 +174,11 @@ export function MeetingCard({ meeting: m, onAction, onOpenListing }: { meeting: 
             </button>
           </>
         )}
+        {m.actions.includes("confirm_sold") && (
+          <button className="chip" onClick={() => onAction("confirm_sold")} data-testid="meeting-confirm-sold">
+            {t("meet.confirm_sold")}
+          </button>
+        )}
         {m.actions.includes("cancel") && (
           <button className="link danger" onClick={() => onAction("cancel")} data-testid="meeting-cancel">
             {t("meet.cancel")}

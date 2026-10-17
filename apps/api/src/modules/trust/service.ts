@@ -1,4 +1,4 @@
-import { and, count, countDistinct, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, countDistinct, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import {
   DEFAULT_COMPLAINTS_TO_HIDE,
   MAX_COMPLAINTS_PER_DAY,
@@ -29,6 +29,8 @@ export interface TrustDeps {
 }
 
 /** Complaints, moderator decisions and bans. */
+const COMPLAINT_MIN_AGE_DAYS = 3;
+
 export class TrustService {
   constructor(private d: TrustDeps) {}
 
@@ -69,10 +71,20 @@ export class TrustService {
   async holdIfComplained(listingId: string): Promise<boolean> {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
     if (!l || l.status !== "active") return false;
+    // Only established accounts (a phone and at least COMPLAINT_MIN_AGE_DAYS on Ishonch) can hide a listing:
+    // three fresh throwaway accounts must not take down a competitor. All complaints still reach moderators.
     const [{ n }] = (await this.db
       .select({ n: countDistinct(complaints.userId) })
       .from(complaints)
-      .where(and(eq(complaints.listingId, listingId), isNull(complaints.resolvedAt)))) as [{ n: number }];
+      .innerJoin(users, eq(users.id, complaints.userId))
+      .where(
+        and(
+          eq(complaints.listingId, listingId),
+          isNull(complaints.resolvedAt),
+          sql`${users.phone} is not null`,
+          lte(users.createdAt, new Date(Date.now() - COMPLAINT_MIN_AGE_DAYS * 864e5)),
+        ),
+      )) as [{ n: number }];
     const threshold = await this.d.repo.getSetting("complaints_to_hide", DEFAULT_COMPLAINTS_TO_HIDE);
     if (n < threshold) return false;
 

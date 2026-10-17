@@ -385,7 +385,7 @@ export interface MeetingDto {
   at: string;
   note: string | null;
   status: MeetingStatus;
-  actions: Array<"accept" | "decline" | "cancel" | "report">;
+  actions: Array<"accept" | "decline" | "cancel" | "report" | "confirm_sold">;
 }
 
 /** Why a meeting time is not allowed (null — fine). Times are whole hours in Tashkent. */

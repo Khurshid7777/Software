@@ -206,7 +206,7 @@ describe.skipIf(!reachable)("guarantee disputes, valuation, trade-in offers (int
     expect(opened.actions).not.toContain("dispute");
     expect((await post(BUYER, `/orders/${id}/dispute`, body)).json().error).toBe("dispute_exists");
     expect(dmsTo(SELLER).at(-1)!.text).toContain("открыл спор");
-    expect(dmsTo(MODERATORS).at(-1)!.text).toContain("Спор по гарантии");
+    expect(dmsTo(MODERATORS).at(-1)!.text).toContain("Спор покупателя");
 
     expect((await get<OrderDto>(SELLER, `/orders/${id}`)).actions).toContain("dispute_response");
     expect((await post(SELLER, `/orders/${id}/dispute/response`, { text: "При передаче всё работало, курьер проверил" })).statusCode).toBe(200);
@@ -223,7 +223,7 @@ describe.skipIf(!reachable)("guarantee disputes, valuation, trade-in offers (int
     const resolved = await post(ADMIN, `/admin/disputes/${queue.id}/resolve`, { resolution: "partial", amount: 300_000, note: "Компенсация за ремонт" });
     expect(resolved.json()).toMatchObject({ status: "resolved", resolution: "partial", amount: 300_000 });
     expect((await post(ADMIN, `/admin/disputes/${queue.id}/resolve`, { resolution: "rejected" })).statusCode).toBe(409);
-    expect(dmsTo(BUYER).at(-1)!.text).toContain("компенсация 300 000");
+    expect(dmsTo(BUYER).at(-1)!.text).toContain("часть суммы — 300 000");
     expect(dmsTo(SELLER).at(-1)!.text).toContain("Решение по спору");
 
     // A lost dispute shows on the seller's card and keeps them out of "high" trust.

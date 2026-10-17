@@ -1,5 +1,5 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { LANGS, t, type Lang } from "@ishonch/shared";
+import { GUARANTEE_DAYS, LANGS, t, type Lang } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import type { CheckService } from "../checks/service.js";
 
@@ -8,6 +8,8 @@ export function userRoutes(
   repo: Repo,
   checks: CheckService,
   requireUser: preHandlerHookHandler,
+  /** Removes the user's files (listing photos, videos, shop photo) before the rows go. */
+  purgeFiles: (userId: string) => Promise<void> = async () => undefined,
 ) {
   app.get("/me", { preHandler: requireUser }, async (req) => {
     const u = req.user!;
@@ -39,9 +41,10 @@ export function userRoutes(
 
   app.delete("/me", { preHandler: requireUser }, async (req, reply) => {
     // Orders reference both sides; deleting mid-delivery would erase a courier's cash record.
-    if (await repo.hasOpenOrders(req.user!.id)) {
-      return reply.code(409).send({ error: "open_orders", message: t(req.user!.language as Lang, "home.delete_open_orders") });
+    if (await repo.hasOpenOrders(req.user!.id, GUARANTEE_DAYS)) {
+      return reply.code(409).send({ error: "open_orders", message: t(req.user!.language as Lang, "home.delete_open_orders", { days: GUARANTEE_DAYS }) });
     }
+    await purgeFiles(req.user!.id).catch((err) => req.log.error({ err }, "purging files failed"));
     await repo.deleteUser(req.user!.id);
     return { ok: true };
   });

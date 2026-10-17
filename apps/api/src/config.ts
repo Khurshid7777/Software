@@ -84,6 +84,19 @@ export type Config = Omit<z.infer<typeof EnvSchema>, "QUIET_HOURS"> & { QUIET_HO
 
 const WEAK_SECRETS = new Set(["dev-internal-token", "change-me-long-random", ""]);
 
+/**
+ * Settings that work but are unsafe on a public server: logged loudly at start (not fatal, so an
+ * existing deployment keeps running while they are fixed).
+ */
+export function productionWarnings(config: Config): string[] {
+  if (config.NODE_ENV !== "production") return [];
+  const out: string[] = [];
+  if (/:\/\/[^:]+:(ishonch)?@/.test(config.DATABASE_URL)) out.push("DATABASE_URL uses the default database password: set POSTGRES_PASSWORD");
+  if (config.STORAGE_DRIVER === "s3" && config.MINIO_ROOT_PASSWORD === "ishonch-secret") out.push("MINIO_ROOT_PASSWORD is the default one");
+  if (config.CORS_ORIGIN === "*") out.push("CORS_ORIGIN=* lets any site call the API: set it to the Mini App origin");
+  return out;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = EnvSchema.parse(env);
   const config = { ...parsed, QUIET_HOURS: (parsed.QUIET_HOURS ?? (parsed.NODE_ENV === "test" ? "false" : "true")) === "true" };

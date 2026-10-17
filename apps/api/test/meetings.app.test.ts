@@ -165,7 +165,7 @@ describe.skipIf(!reachable)("meetings in person (integration)", () => {
     expect((await meet(BUYER, l.id, { place: "Метро Минор, выход 1", at: at.toISOString() })).json().error).toBe("meeting_exists");
   });
 
-  it("accept → reminder once → after the time the buyer reports «bought»: the item is sold, not counted as a platform sale", async () => {
+  it("accept → reminder once → the buyer reports «bought», the seller confirms: sold, not counted as a platform sale", async () => {
     const l = await liveListing();
     const at = noonTomorrow();
     const m = (await meet(BUYER, l.id, { place: "Метро Минор, выход 1", at: at.toISOString() })).json() as MeetingDto;
@@ -187,9 +187,17 @@ describe.skipIf(!reachable)("meetings in person (integration)", () => {
     await db.update(meetings).set({ at: new Date(Date.now() - 60_000) }).where(eq(meetings.id, m.id));
     expect((await get<MeetingDto[]>(BUYER, "/meetings")).find((x) => x.id === m.id)!.actions).toEqual(["cancel", "report"]);
     expect((await act(BUYER, m.id, "report", { bought: true })).json()).toMatchObject({ status: "bought" });
+    // The buyer alone cannot close the listing: it stays on sale until the seller confirms.
+    expect((await db.select().from(listings).where(eq(listings.id, l.id)))[0]!.status).toBe("active");
+    const ask = dmsTo(SELLER).at(-1)!;
+    expect(ask.text).toContain("снимите объявление");
+    expect(callbacks(ask)).toEqual([`meet:sold:${m.id}`]);
+    expect((await act(BUYER, m.id, "confirm_sold")).statusCode).toBe(404);
+    expect((await get<MeetingDto[]>(SELLER, "/meetings")).find((x) => x.id === m.id)!.actions).toEqual(["confirm_sold"]);
+    expect((await act(SELLER, m.id, "confirm_sold")).statusCode).toBe(200);
     const [row] = await db.select().from(listings).where(eq(listings.id, l.id));
     expect(row).toMatchObject({ status: "sold", soldVia: "platform" });
-    expect(dmsTo(SELLER).at(-1)!.text).toContain("снято с продажи");
+    expect((await act(SELLER, m.id, "confirm_sold")).json().error).toBe("not_available");
     const page = await get<{ seller: ListingSeller }>(BUYER, `/sellers/${l.sellerUserId}/page`);
     expect(page.seller.platformSales).toBe(0);
   });

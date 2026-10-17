@@ -258,6 +258,14 @@ export function createBot(cfg: BotConfig, api: ApiClient) {
     }),
   );
 
+  bot.callbackQuery(/^meet:sold:([0-9a-f-]{36})$/, (ctx) =>
+    buttonAction(ctx, async (user, lang) => {
+      await api.meetingAction(user, ctx.match[1]!, "confirm_sold");
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      return t(lang, "meet.confirmed_sold");
+    }),
+  );
+
   bot.callbackQuery(/^offer:(accept|decline):([0-9a-f-]{36})$/, (ctx) =>
     buttonAction(ctx, async (user, lang) => {
       const offer = await api.offerAction(user, ctx.match[2]!, ctx.match[1] as "accept" | "decline");

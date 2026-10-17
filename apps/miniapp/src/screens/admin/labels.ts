@@ -39,7 +39,7 @@ export const CANCEL_LABEL: Record<string, string> = {
 export const MODE_LABEL: Record<string, string> = {
   delivery_only: "Только доставка",
   cod_seller: "Оплата при получении",
-  cod_platform: "Через Ishonch",
+  cod_platform: "Наличные курьеру Ishonch (не используется)",
 };
 
 export const STATUS_LABEL: Record<string, string> = {

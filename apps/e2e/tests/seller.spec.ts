@@ -14,6 +14,7 @@ test("seller page from a listing: facts, listings, similar items", async ({ page
 
 test("my listings: tips on how to sell faster", async ({ page }) => {
   await open(page, PRIVATE_SELLER, "screen=my");
+  await page.getByTestId("my-more").first().click();
   await page.getByTestId("insights-open").first().click();
   await expect(page.getByTestId("insights")).toBeVisible();
   await expect(page.getByTestId("insights").locator(".tip, .hint-card").first()).toBeVisible();

@@ -137,7 +137,7 @@ export class ApiClient {
     return this.request<{ status: string }>(`/offers/${encodeURIComponent(offerId)}/${action}`, { method: "POST", user });
   }
 
-  meetingAction(user: TgUser, meetingId: string, action: "accept" | "decline") {
+  meetingAction(user: TgUser, meetingId: string, action: "accept" | "decline" | "confirm_sold") {
     return this.request<{ status: string }>(`/meetings/${encodeURIComponent(meetingId)}/${action}`, { method: "POST", user });
   }
 

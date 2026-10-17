@@ -228,7 +228,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     });
   });
-  userRoutes(app, repo, checks, auth.requireUser);
+  userRoutes(app, repo, checks, auth.requireUser, (id) => listingsSvc.purgeUserFiles(id));
   checkRoutes(app, checks, auth.requireUser);
   const metrics = new MetricsService(repo);
   const adminLink = () => (gateway ? gateway.miniAppLink("screen_admin").catch(() => null) : Promise.resolve(null));
@@ -278,6 +278,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     listings: listingsSvc,
     orders: ordersSvc,
     meetings: meetingsSvc,
+    repo,
     trust,
     metrics,
     digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff, adminLink }, config.DIGEST_HOUR, now),
@@ -293,6 +294,7 @@ declare module "fastify" {
       listings: ListingService;
       orders: OrderService;
       meetings: MeetingService;
+      repo: Repo;
       trust: TrustService;
       metrics: MetricsService;
       digest: (now?: Date) => Promise<boolean>;

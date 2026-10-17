@@ -666,5 +666,7 @@ export const meetings = pgTable(
     index("meetings_listing_idx").on(t.listingId),
     index("meetings_buyer_idx").on(t.buyerUserId),
     index("meetings_seller_idx").on(t.sellerUserId),
+    // One open request per buyer and item, also under parallel taps.
+    uniqueIndex("meetings_open_uq").on(t.listingId, t.buyerUserId).where(sql`status in ('pending', 'accepted')`),
   ],
 );

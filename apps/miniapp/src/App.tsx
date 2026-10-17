@@ -315,6 +315,7 @@ export function App({ env }: { env: TelegramEnv }) {
             focusId={screen.focusId}
             onOpenListing={(id) => go({ name: "listing", id })}
             onCatalog={() => go({ name: "catalog" })}
+            onSell={() => go({ name: "sell" })}
           />
         );
         break;

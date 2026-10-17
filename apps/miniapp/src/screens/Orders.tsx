@@ -19,9 +19,10 @@ interface Props {
   focusId?: string;
   onOpenListing: (id: string) => void;
   onCatalog: () => void;
+  onSell?: () => void;
 }
 
-export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog }: Props) {
+export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog, onSell }: Props) {
   const t = useT();
   // A notification link: the order's side (buyer/seller) is resolved before the first load (no flash).
   const [role, setRole] = useState<"buyer" | "seller" | null>(focusId ? null : "buyer");
@@ -112,6 +113,10 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
             role === "buyer" ? (
               <button className="primary" onClick={onCatalog}>
                 {t("common.to_catalog")}
+              </button>
+            ) : onSell ? (
+              <button className="primary" onClick={onSell}>
+                📸 {t("home.sell.title")}
               </button>
             ) : undefined
           }
@@ -234,7 +239,7 @@ function OrderCard({
           <strong>{t("orders.review_title")}</strong>
           <div className="row stars" role="radiogroup">
             {[1, 2, 3, 4, 5].map((n) => (
-              <button key={n} className={n <= rating ? "star active" : "star"} aria-label={`${n}`} onClick={() => setRating(n)}>
+              <button key={n} className={n <= rating ? "star active" : "star"} aria-label={t("orders.star_label", { n })} onClick={() => setRating(n)}>
                 ★
               </button>
             ))}

@@ -48,7 +48,7 @@ test("guarantee: a delivered order can be disputed for 3 days", async ({ page })
 
   await open(page, BUYER, `startapp=order_${order.id}`);
   const card = page.locator(`#order-${order.id}`);
-  await expect(card.getByTestId("guarantee-badge")).toContainText("Гарантия Ishonch");
+  await expect(card.getByTestId("guarantee-badge")).toContainText("Защита покупателя");
   await card.getByTestId("dispute-open").click();
   await card.getByTestId("dispute-reason-not_working").click();
   await card.getByTestId("dispute-text").fill("Через день перестала молоть кофе, гудит и не включается");

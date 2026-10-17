@@ -283,7 +283,7 @@ export class MetricsService {
       num(y.pending) && `🛡 на модерации: ${num(y.pending)}`,
       num(y.complaints) && `⚠️ открытых жалоб: ${num(y.complaints)}`,
       num(y.stuck) && `⏳ заказов без движения > 24 ч: ${num(y.stuck)}`,
-      num(y.disputes) && `⚖️ открытых споров по гарантии: ${num(y.disputes)}`,
+      num(y.disputes) && `⚖️ открытых споров покупателей: ${num(y.disputes)}`,
       pct >= 80 && `💸 AI: ${pct}% месячного лимита`,
       num(y.failed_jobs) && `🧯 фоновых задач с ошибкой: ${num(y.failed_jobs)} (посты в каналы, уведомления)`,
     ].filter(Boolean);

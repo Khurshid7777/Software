@@ -738,7 +738,9 @@ export class CatalogService {
       .from(conversationMessages)
       .where(eq(conversationMessages.conversationId, conversationId))) as [{ n: number; mineLastHour: number }];
     if (mineLastHour >= MAX_MESSAGES_PER_HOUR) throw new CatalogRejected("message_limit", 429);
-    await this.db.insert(conversationMessages).values({ conversationId, senderUserId: sender.id, text: text.slice(0, 1000) });
+    // What is stored is what is sent: a message over Telegram's limit must not be saved and then fail.
+    text = text.slice(0, 1000);
+    await this.db.insert(conversationMessages).values({ conversationId, senderUserId: sender.id, text });
     await this.db.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conversationId));
     if (fromBuyer && n === 0) await this.repo.event(sender.id, "buyer_contacted_seller", { listingId: l.id });
     if (!fromBuyer) this.listingsSvc.forgetResponseTime(sender.id);

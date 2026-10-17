@@ -48,6 +48,7 @@ test("the seller's video check shows on the listing and in the passport", async 
   const coffee = (await catalog()).find((i) => i.listing.titleRu.includes("Кофемашина"))!;
   await open(page, SHOP_OWNER, "screen=my");
   const card = page.locator(".card", { hasText: "DeLonghi" }).first();
+  await card.getByTestId("my-more").click();
   await card.locator(".chip").filter({ hasText: "✏️" }).first().click();
   await page.getByTestId("video-input").setInputFiles({ name: "check.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(50_000, 1) });
   await expect(page.getByTestId("video-preview")).toBeVisible();

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import {
   MAX_OPEN_ORDERS_PER_BUYER,
   MVP_DELIVERY_MODES,
@@ -521,6 +521,13 @@ export class OrderService {
     const deferredUntil = this.d.enqueue ? (this.d.quietUntil?.(now) ?? null) : null;
     const expiresAt = new Date((deferredUntil ?? now).getTime() + LIKERS_OFFER_HOURS * 3600_000);
     await this.db.transaction(async (tx) => {
+      // Compare-and-set on the previous offer time: a double tap sends one round, not two.
+      const [claimed] = await tx
+        .update(listings)
+        .set({ likersOfferPrice: price, likersOfferAt: now })
+        .where(and(eq(listings.id, l.id), l.likersOfferAt ? eq(listings.likersOfferAt, l.likersOfferAt) : isNull(listings.likersOfferAt)))
+        .returning({ id: listings.id });
+      if (!claimed) throw new OrderRejected("likers_too_soon", 409);
       await tx.insert(offers).values(
         likers.map(({ u }) => ({
           listingId: l.id,
@@ -533,7 +540,6 @@ export class OrderService {
           expiresAt,
         })),
       );
-      await tx.update(listings).set({ likersOfferPrice: price, likersOfferAt: now }).where(eq(listings.id, l.id));
     });
     await this.d.repo.event(seller.id, "likers_offer_sent", { listingId: l.id, price, recipients: likers.length });
     if (deferredUntil) await this.d.enqueue!("likers_offer_dms", { listingId: l.id, price }, deferredUntil);
@@ -753,7 +759,7 @@ export class OrderService {
     }
     await this.d.staff.moderators(
       [
-        `⚖️ Спор по гарантии, заказ #${o.id.slice(0, 8)}`,
+        `⚖️ Спор покупателя, заказ #${o.id.slice(0, 8)}`,
         `${l ? listingTitle(l, "ru") : "—"} — ${formatUzs(normalizeQuote(o.quote as DeliveryQuote).itemPrice)}`,
         `Причина: ${t("ru", `dispute.reason.${input.reason}`)}`,
         `«${text}»`,

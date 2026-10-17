@@ -107,7 +107,9 @@ export class MeetingService {
     const [m] = await this.db
       .insert(meetings)
       .values({ listingId: l.id, buyerUserId: buyer.id, sellerUserId: l.sellerUserId, spot, place, at: input.at, note: input.note?.trim().slice(0, 300) || null })
+      .onConflictDoNothing()
       .returning();
+    if (!m) throw new MeetingRejected("meeting_exists", 409);
     await this.d.repo.event(buyer.id, "meeting_requested", { listingId: l.id, meetingId: m!.id, spot: spot ?? "custom" });
     const [seller] = await this.db.select().from(users).where(eq(users.id, l.sellerUserId));
     if (seller) {
@@ -174,18 +176,36 @@ export class MeetingService {
     return this.dto(m, l, role, user.language as Lang);
   }
 
-  /** After the meeting the buyer says how it went; "bought" takes the listing off sale. */
+  /**
+   * After the meeting the buyer says how it went. "Bought" never takes the listing off sale by itself (a
+   * buyer alone must not be able to close someone else's listing): the seller confirms with one button.
+   */
   async report(buyer: User, id: string, bought: boolean, now = new Date()) {
     const { m: old, l } = await this.load(id);
     if (old.buyerUserId !== buyer.id) throw new MeetingRejected("not_found", 404);
     if (old.at > now) throw new MeetingRejected("bad_state", 409);
     const m = await this.move(id, ["accepted"], bought ? "bought" : "not_bought", now);
     await this.d.repo.event(buyer.id, "meeting_reported", { meetingId: m.id, listingId: l.id, bought });
-    if (bought && (await this.d.markSold(l.id))) {
+    if (bought && l.status === "active") {
       const [seller] = await this.db.select().from(users).where(eq(users.id, m.sellerUserId));
-      if (seller) await this.dm(seller, t(seller.language as Lang, "meet.sold_for_seller", { title: listingTitle(l, seller.language as Lang) }));
+      if (seller) {
+        const lang = seller.language as Lang;
+        await this.dm(seller, t(lang, "meet.sold_for_seller", { title: listingTitle(l, lang) }), [
+          [{ text: t(lang, "meet.confirm_sold"), callbackData: `meet:sold:${m.id}` }],
+        ]);
+      }
     }
     return this.dto(m, l, "buyer", buyer.language as Lang);
+  }
+
+  /** The seller confirms the buyer's "bought": the listing leaves the catalogue. */
+  async confirmSold(seller: User, id: string) {
+    const { m, l } = await this.load(id);
+    if (m.sellerUserId !== seller.id) throw new MeetingRejected("not_found", 404);
+    if (m.status !== "bought") throw new MeetingRejected("bad_state", 409);
+    if (!(await this.d.markSold(l.id))) throw new MeetingRejected("not_available", 409);
+    const [fresh] = await this.db.select().from(listings).where(eq(listings.id, l.id));
+    return this.dto(m, fresh!, "seller", seller.language as Lang);
   }
 
   /** The listing left the catalogue (sold, archived, banned): its open meetings are off, both sides are told. */
@@ -274,6 +294,7 @@ export class MeetingService {
     if (role === "seller" && m.status === "pending") actions.push("accept", "decline");
     if (OPEN.includes(m.status as MeetingStatus)) actions.push("cancel");
     if (role === "buyer" && m.status === "accepted" && m.at <= now) actions.push("report");
+    if (role === "seller" && m.status === "bought" && l.status === "active") actions.push("confirm_sold");
     return {
       id: m.id,
       listingId: l.id,

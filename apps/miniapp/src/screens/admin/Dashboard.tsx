@@ -72,7 +72,7 @@ export function Dashboard({ api }: { api: Api }) {
 
           {m.system.openDisputes > 0 && (
             <p className="card kpi-alert" data-testid="open-disputes">
-              ⚖️ Открытых споров по гарантии: {m.system.openDisputes} — вкладка «Споры».
+              ⚖️ Открытых споров покупателей: {m.system.openDisputes} — вкладка «Споры».
             </p>
           )}
           {m.system.failedJobs > 0 && (

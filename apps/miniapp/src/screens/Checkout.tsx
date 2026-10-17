@@ -211,7 +211,19 @@ export function Checkout({ api, listing, onDone }: Props) {
       )}
       <label className="field">
         {t("checkout.comment")}
-        <input value={comment} maxLength={300} onChange={(e) => setComment(e.target.value)} />
+        <input value={comment} maxLength={300} onChange={(e) => setComment(e.target.value)} data-testid="checkout-comment" />
+        <span className="chips">
+          {(["call_ahead", "after_18", "no_intercom"] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              className="chip"
+              onClick={() => setComment((v) => (v.includes(t(`checkout.quick.${c}`)) ? v : [v.trim(), t(`checkout.quick.${c}`)].filter(Boolean).join(", ").slice(0, 300)))}
+            >
+              {t(`checkout.quick.${c}`)}
+            </button>
+          ))}
+        </span>
       </label>
 
       {quote && (

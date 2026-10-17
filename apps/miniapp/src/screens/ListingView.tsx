@@ -21,6 +21,7 @@ import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
+import { LoadError } from "../components/LoadError";
 import { MeetForm } from "../components/Meeting";
 import { Passport } from "../components/Passport";
 import { BundleBadge, SellerBadges } from "../components/SellerBadges";
@@ -43,6 +44,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   const lang = useLang();
   const [item, setItem] = useState<CatalogItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [message, setMessage] = useState("");
@@ -56,6 +58,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   const [similar, setSimilar] = useState<CatalogItem[]>([]);
 
   useEffect(() => {
+    setError(null);
     api
       .catalogItem(id)
       .then(setItem)
@@ -68,13 +71,13 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
       .similar(id)
       .then(setSimilar)
       .catch(() => undefined);
-  }, [api, id]);
+  }, [api, id, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Recently viewed" on the storefront (own listings are not worth remembering).
   useEffect(() => {
     if (item && item.listing.seller?.id !== meId && item.listing.status === "active") rememberViewed(item.listing.id);
   }, [item, meId]);
 
-  if (error) return <p className="center hint">{error}</p>;
+  if (error) return <LoadError text={error} onRetry={() => setAttempt((a) => a + 1)} />;
   if (!item) return <p className="center hint">{t("common.loading")}</p>;
   const l = item.listing;
   const own = l.seller?.id === meId;
@@ -314,6 +317,15 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           <>
             {writing ? (
               <div className="card stack">
+                {!message && (
+                  <div className="chips" data-testid="quick-questions">
+                    {(["still_selling", "see_today", "bargain"] as const).map((q) => (
+                      <button key={q} className="chip" onClick={() => setMessage(t(`listing.quick.${q}`))}>
+                        {t(`listing.quick.${q}`)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   rows={3}
                   placeholder={t("listing.write_placeholder")}

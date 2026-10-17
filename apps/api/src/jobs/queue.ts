@@ -6,7 +6,7 @@ export type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
 
 export const MAX_ATTEMPTS = 5;
 /** How long a claimed job stays invisible to other workers; a crashed worker's job is retried after it. */
-const LOCK_SECONDS = 300;
+const LOCK_SECONDS = 900;
 
 /**
  * Background jobs in PostgreSQL. Workers claim due jobs with FOR UPDATE SKIP LOCKED, so several API

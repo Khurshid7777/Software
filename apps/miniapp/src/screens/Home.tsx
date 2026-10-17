@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
 import type { Api } from "../api";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
+import { LoadError } from "../components/LoadError";
 import { useT } from "../i18n";
 import { readPref, readRecent, writePref } from "../prefs";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
@@ -41,6 +42,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
   const t = useT();
   const [fresh, setFresh] = useState<CatalogItem[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const [homeScreen, setHomeScreen] = useState(false);
   const [recent, setRecent] = useState<CatalogItem[]>([]);
@@ -61,7 +63,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
     return () => {
       current = false;
     };
-  }, [api]);
+  }, [api, attempt]);
 
   return (
     <div className="stack" data-testid="home">
@@ -189,7 +191,11 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
             ))}
           </div>
         ) : (
-          <p className="hint center">{failed ? t("common.error") : t("home.fresh_empty")}</p>
+          failed ? (
+            <LoadError onRetry={() => (setFailed(false), setFresh(null), setAttempt((a) => a + 1))} />
+          ) : (
+            <p className="hint center">{t("home.fresh_empty")}</p>
+          )
         )}
       </section>
 

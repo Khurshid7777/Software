@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
@@ -47,6 +47,7 @@ import {
   complaints,
   disputes,
   conversations,
+  evidence,
   favorites,
   follows,
   listingPhotos,
@@ -377,7 +378,12 @@ export class ListingService {
     await this.db
       .update(listings)
       .set({ ...patch, ...(modes ? { allowedDeliveryModes: modes } : {}), ...priceChange, ...autoDrop, updatedAt: now })
-      .where(eq(listings.id, id));
+      // Compare-and-set on the status read above: an order confirmed meanwhile (reserved) wins.
+      .where(and(eq(listings.id, id), eq(listings.status, l.status)))
+      .returning({ id: listings.id })
+      .then((rows) => {
+        if (!rows.length) throw new ListingRejected("bad_state", 409);
+      });
     const priceChanged = patch.price != null && l.price != null && patch.price !== l.price;
     // Open delivery requests were quoted at the old price: they close and the buyers are told to re-order.
     if (priceChanged && l.status === "active") await this.d.onUnavailable?.(id, "price_changed");
@@ -864,7 +870,12 @@ export class ListingService {
         ...(expired ? { bumpedAt: now } : {}),
         updatedAt: now,
       })
-      .where(eq(listings.id, id));
+      // Compare-and-set: a listing reserved or hidden by moderation meanwhile must not come back to life.
+      .where(and(eq(listings.id, id), eq(listings.status, l.status), expired ? eq(listings.moderationReason, "expired") : sql`true`))
+      .returning({ id: listings.id })
+      .then((rows) => {
+        if (!rows.length) throw new ListingRejected("bad_state", 409);
+      });
     await this.d.repo.event(user.id, "listing_renewed", { listingId: id, expired });
     return this.dto(id, user.id);
   }
@@ -1038,6 +1049,22 @@ export class ListingService {
       if (err instanceof AiLimitExceededError || err instanceof AiOutputError) throw new ListingRejected("ai_unavailable", 503);
       throw err;
     }
+  }
+
+  /** Right to erasure: every file of the user's listings, their evidence uploads and the shop photo. */
+  async purgeUserFiles(userId: string) {
+    const own = await this.db.select({ id: listings.id }).from(listings).where(eq(listings.sellerUserId, userId));
+    const ids = own.map((l) => l.id);
+    const photos = ids.length ? await this.db.select().from(listingPhotos).where(inArray(listingPhotos.listingId, ids)) : [];
+    await Promise.all(photos.map((p) => this.deletePhotoFiles(p.storageKey)));
+    const files = await this.db
+      .select({ key: evidence.storageKey })
+      .from(evidence)
+      .where(ids.length ? or(eq(evidence.uploadedBy, userId), inArray(evidence.listingId, ids)) : eq(evidence.uploadedBy, userId));
+    const [shop] = await this.db.select({ key: shops.photoKey }).from(shops).where(eq(shops.ownerUserId, userId));
+    await Promise.all(
+      [...files.map((f) => f.key), ...(shop?.key ? [shop.key] : [])].map((k) => this.d.storage.delete(k).catch(() => undefined)),
+    );
   }
 
   private async deleteListing(id: string) {
