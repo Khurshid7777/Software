@@ -77,7 +77,7 @@ import {
 const DAY_MS = 86_400_000;
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
 import type { StaffNotifier } from "../../telegram/staff.js";
-import type { ListingService } from "../listings/service.js";
+import { unsubscribeRow, type ListingService } from "../listings/service.js";
 import type { CourierProvider } from "./courier.js";
 import type { EvidenceService } from "../evidence/service.js";
 
@@ -563,6 +563,8 @@ export class OrderService {
           eq(offers.amount, price),
           gt(offers.expiresAt, new Date()),
           sql`${users.bannedAt} is null`,
+          // The personal price still applies at checkout; only the message is skipped.
+          sql`not ('likers_offer' = any(${users.notifyOff}))`,
         ),
       );
     const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
@@ -571,7 +573,7 @@ export class OrderService {
       await this.dm(
         u,
         t(lang, "likers.offer_for_buyer", { title: listingTitle(l, lang), price: formatUzs(price), old: formatUzs(l.price!), hours: LIKERS_OFFER_HOURS }),
-        url ? [[{ text: t(lang, "offer.checkout"), url }]] : [],
+        [...(url ? [[{ text: t(lang, "offer.checkout"), url }]] : []), unsubscribeRow(lang, "likers_offer")],
       );
     }
     return rows.length;
@@ -1109,7 +1111,11 @@ export class OrderService {
       const [buyer, [l]] = await Promise.all([this.user(o.buyerUserId), this.db.select().from(listings).where(eq(listings.id, o.listingId))]);
       if (!buyer) continue;
       const lang = buyer.language as Lang;
-      await this.dm(buyer, t(lang, "order.review_reminder", { title: l ? listingTitle(l, lang) : "" }), await this.openButton(lang, o.id, "order.leave_review"));
+      if (buyer.notifyOff.includes("review_reminder")) continue;
+      await this.dm(buyer, t(lang, "order.review_reminder", { title: l ? listingTitle(l, lang) : "" }), [
+        ...(await this.openButton(lang, o.id, "order.leave_review")),
+        unsubscribeRow(lang, "review_reminder"),
+      ]);
     }
     return due.length;
   }

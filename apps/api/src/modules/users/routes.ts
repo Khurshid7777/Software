@@ -1,5 +1,5 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { GUARANTEE_DAYS, LANGS, t, type Lang } from "@ishonch/shared";
+import { GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, t, type Lang, type NotifyType } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import type { CheckService } from "../checks/service.js";
 
@@ -21,6 +21,7 @@ export function userRoutes(
       role: u.role,
       acceptedTerms: u.acceptedTermsAt !== null,
       hasPhone: !!u.phone,
+      notifyOff: u.notifyOff,
       createdAt: u.createdAt,
       checks: limit,
     };
@@ -37,6 +38,15 @@ export function userRoutes(
     if (!lang || !LANGS.includes(lang)) return reply.code(400).send({ error: "bad_language" });
     await repo.setLanguage(req.user!.id, lang);
     return { ok: true, language: lang };
+  });
+
+  // Stage 20: switch an optional notification type on or off (Mini App settings and the bot's «Не присылать»).
+  app.patch<{ Body: { type?: string; on?: boolean } }>("/me/notifications", { preHandler: requireUser }, async (req, reply) => {
+    const type = req.body?.type as NotifyType | undefined;
+    if (!type || !NOTIFY_TYPES.includes(type) || typeof req.body?.on !== "boolean") return reply.code(400).send({ error: "bad_request" });
+    const notifyOff = await repo.setNotify(req.user!.id, type, req.body.on);
+    await repo.event(req.user!.id, req.body.on ? "notify_on" : "notify_off", { type });
+    return { notifyOff };
   });
 
   app.delete("/me", { preHandler: requireUser }, async (req, reply) => {

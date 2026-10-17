@@ -909,5 +909,16 @@
   "blocks.unknown": "Foydalanuvchi",
   "blocks.unblock": "Blokdan chiqarish",
   "blocks.open": "Bloklanganlar",
-  "blocks.desc": "Sizga yozishni taqiqlaganlar"
+  "blocks.desc": "Sizga yozishni taqiqlaganlar",
+  "notify.unsub": "🔕 Bunday yubormang",
+  "notify.unsubscribed": "Endi yubormaymiz: {type}. Qaytarish — Mini App’da: Profil → Bildirishnomalar.",
+  "notify.title": "🔔 Bildirishnomalar",
+  "notify.hint": "Buyurtmalar, uchrashuvlar, nizolar va xaridor-sotuvchi xabarlari doim keladi. Qolganini o‘zingiz tanlaysiz. Tunda (22:00–8:00) ixtiyoriy bildirishnomalar kelmaydi.",
+  "notify.open": "Bildirishnomalar",
+  "notify.desc": "Botga nimani yuborish",
+  "notify.type.price_drop": "Sevimlilardagi narx tushishi",
+  "notify.type.follow": "Obuna bo‘lgan sotuvchilarning yangi mahsulotlari",
+  "notify.type.likers_offer": "Sevimlilar sotuvchilaridan narx takliflari",
+  "notify.type.saved_search": "Saqlangan qidiruvlar bo‘yicha yangi mahsulotlar",
+  "notify.type.review_reminder": "Sharh qoldirish eslatmasi"
 }

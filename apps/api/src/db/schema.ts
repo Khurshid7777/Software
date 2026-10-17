@@ -28,6 +28,8 @@ export const users = pgTable("users", {
   createdAt: createdAt(),
   bannedAt: timestamp("banned_at", { withTimezone: true }),
   banReason: text("ban_reason"),
+  /** Optional notification types the user switched off (NOTIFY_TYPES, stage 20). */
+  notifyOff: text("notify_off").array().notNull().default(sql`'{}'::text[]`),
 });
 
 export const categories = pgTable("categories", {

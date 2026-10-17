@@ -52,7 +52,7 @@ import {
   type User,
 } from "../../db/schema.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
-import type { ListingService } from "../listings/service.js";
+import { unsubscribeRow, type ListingService } from "../listings/service.js";
 
 export const PAGE_SIZE = 20;
 /** Statuses anyone may see. */
@@ -625,7 +625,7 @@ export class CatalogService {
       .innerJoin(users, eq(users.id, savedSearches.userId))
       // Cheap pre-filter in SQL on the structured filters; only the survivors run the full search below.
       .where(
-        sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null
+        sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null and not ('saved_search' = any(${users.notifyOff}))
           and (${savedSearches.filters}->>'category' is null or ${savedSearches.filters}->>'category' = ${l.category})
           and (${savedSearches.filters}->>'district' is null or ${savedSearches.filters}->>'district' = ${l.district ?? ""})
           and (${savedSearches.filters}->>'priceMax' is null or (${savedSearches.filters}->>'priceMax')::bigint >= ${l.price ?? 0})
@@ -659,7 +659,7 @@ export class CatalogService {
         await this.notifier.send(
           telegramId,
           t(lang, "bot.saved_search_hit", { query: s.title, title, price: l.price ? formatUzs(l.price) : "" }),
-          url ? [[{ text: t(lang, "bot.open_listing"), url }]] : [],
+          [...(url ? [[{ text: t(lang, "bot.open_listing"), url }]] : []), unsubscribeRow(lang, "saved_search")],
         );
         sent++;
         notifiedUsers.add(s.userId);

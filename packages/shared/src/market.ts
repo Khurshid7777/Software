@@ -413,3 +413,9 @@ export function meetingSlots(now: Date, dayOffset: number): Date[] {
 
 export const CHAT_REPORT_REASONS = ["prepayment", "scam", "rude", "spam", "other"] as const;
 export type ChatReportReason = (typeof CHAT_REPORT_REASONS)[number];
+
+// ---------- Stage 20: notifications under control (docs/plan.md) ----------
+
+/** Optional messages a user can switch off. Orders, meetings, disputes and chat messages always come. */
+export const NOTIFY_TYPES = ["price_drop", "follow", "likers_offer", "saved_search", "review_reminder"] as const;
+export type NotifyType = (typeof NOTIFY_TYPES)[number];

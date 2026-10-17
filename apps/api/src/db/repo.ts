@@ -86,6 +86,20 @@ export class Repo {
     return (rows as unknown as unknown[]).length > 0;
   }
 
+  /** Adds or removes an optional notification type from users.notify_off; returns the new list. */
+  async setNotify(userId: string, type: string, on: boolean) {
+    const [row] = await this.db
+      .update(users)
+      .set({
+        notifyOff: on
+          ? sql`array_remove(${users.notifyOff}, ${type})`
+          : sql`case when ${type} = any(${users.notifyOff}) then ${users.notifyOff} else array_append(${users.notifyOff}, ${type}) end`,
+      })
+      .where(eq(users.id, userId))
+      .returning({ notifyOff: users.notifyOff });
+    return row?.notifyOff ?? [];
+  }
+
   async acceptTerms(userId: string) {
     await this.db.update(users).set({ acceptedTermsAt: new Date() }).where(eq(users.id, userId));
   }

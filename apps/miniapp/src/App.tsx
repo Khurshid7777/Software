@@ -19,6 +19,7 @@ import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
 import { Blocks } from "./screens/Blocks";
+import { Notifications } from "./screens/Notifications";
 import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
@@ -31,6 +32,7 @@ type Screen =
   | { name: "my" }
   | { name: "shop" }
   | { name: "blocks" }
+  | { name: "notifications" }
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
   | { name: "assistant" }
@@ -87,6 +89,7 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_assistant") return { name: "assistant" };
   if (startParam === "screen_favorites") return { name: "favorites" };
   if (startParam === "screen_profile") return { name: "profile" };
+  if (startParam === "screen_notifications") return { name: "notifications" };
   if (startParam === "screen_shop") return { name: "shop" };
   if (startParam === "screen_valuation") return { name: "valuation" };
   return { name: "home" };
@@ -285,6 +288,9 @@ export function App({ env }: { env: TelegramEnv }) {
         break;
       case "blocks":
         body = <Blocks api={api} />;
+        break;
+      case "notifications":
+        body = <Notifications api={api} />;
         break;
       case "listing":
         body = (

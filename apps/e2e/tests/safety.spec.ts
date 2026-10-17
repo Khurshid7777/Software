@@ -18,3 +18,17 @@ test("a seller blocks a buyer from the chat, then lifts the block in the profile
   await expect(page.getByTestId("block-row")).toHaveCount(0);
   await asBot("POST", `/listings/${l!.id}/contact`, BUYER, { text: "Снова здравствуйте" });
 });
+
+test("notification settings: a type switched off stays off after reopening", async ({ page }) => {
+  await open(page, BUYER, "startapp=screen_profile");
+  await page.getByTestId("open-notifications").click();
+  const priceDrop = page.getByTestId("notify-price_drop");
+  await expect(priceDrop).toBeChecked();
+  await priceDrop.uncheck();
+  await expect(priceDrop).not.toBeChecked();
+  await open(page, BUYER, "startapp=screen_notifications");
+  await expect(page.getByTestId("notify-price_drop")).not.toBeChecked();
+  await expect(page.getByTestId("notify-follow")).toBeChecked();
+  const me = await asBot<{ notifyOff: string[] }>("GET", "/me", BUYER);
+  expect(me.notifyOff).toEqual(["price_drop"]);
+});

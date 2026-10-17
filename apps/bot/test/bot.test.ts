@@ -124,6 +124,10 @@ class FakeApi {
     this.calls.push(`mod:${u.id}:${decision}:${id}`);
     return { status: decision === "approve" ? "active" : "rejected", title: "iPhone" };
   }
+  async setNotification(u: { id: number }, type: string, on: boolean) {
+    this.calls.push(`notify:${u.id}:${type}:${on}`);
+    return { notifyOff: [type] };
+  }
   async blockConversation(u: { id: number }, id: string) {
     this.calls.push(`block:${u.id}:${id}`);
     return { ok: true };
@@ -501,5 +505,24 @@ describe("Reply button state lives in the API", () => {
     await bot.handleUpdate(cb(`rep:${id}:prepayment`, 12));
     await bot.idle();
     expect(api.calls).toContain(`report:5:${id}:prepayment`);
+  });
+
+  it("«Не присылать такое» switches the type off and says how to bring it back", async () => {
+    const { api, bot, sent } = setup();
+    await bot.handleUpdate({
+      update_id: 20,
+      callback_query: {
+        id: "cb20",
+        from: { id: 5, is_bot: false, first_name: "A", language_code: "ru" },
+        chat_instance: "1",
+        data: "unsub:price_drop",
+        message: { message_id: 3, date: 0, chat: { id: 5, type: "private", first_name: "A" }, text: "📉" },
+      },
+    });
+    await bot.idle();
+    expect(api.calls).toContain("notify:5:price_drop:false");
+    const reply = String(sent.filter((s) => s.method === "sendMessage").at(-1)!.payload.text);
+    expect(reply).toContain("Снижение цены на избранное");
+    expect(reply).toContain("Профиль → Уведомления");
   });
 });

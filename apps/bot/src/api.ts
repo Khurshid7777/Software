@@ -137,6 +137,16 @@ export class ApiClient {
     return this.request<{ status: string }>(`/offers/${encodeURIComponent(offerId)}/${action}`, { method: "POST", user });
   }
 
+  /** Stage 20: switch an optional notification type off («Не присылать такое»). */
+  setNotification(user: TgUser, type: string, on: boolean) {
+    return this.request<{ notifyOff: string[] }>("/me/notifications", {
+      method: "PATCH",
+      user,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type, on }),
+    });
+  }
+
   /** Stage 19: block the other side of a masked conversation / report it to the moderators. */
   blockConversation(user: TgUser, conversationId: string) {
     return this.request<{ ok: boolean }>(`/internal/conversations/${encodeURIComponent(conversationId)}/block`, { method: "POST", user });

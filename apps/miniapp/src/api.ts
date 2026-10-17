@@ -73,6 +73,8 @@ export interface Me {
   role: string;
   acceptedTerms: boolean;
   hasPhone: boolean;
+  /** Optional notification types switched off (stage 20). */
+  notifyOff?: string[];
   checks: { perDay: number; remaining: number };
 }
 
@@ -205,6 +207,7 @@ export function createApi(initData: string | null) {
 
   return {
     me: () => request<Me>("/me"),
+    setNotification: (type: string, on: boolean) => request<{ notifyOff: string[] }>("/me/notifications", json("PATCH", { type, on })),
     acceptTerms: () => request("/me/accept-terms", { method: "POST" }),
     setLanguage: (language: Lang) => request("/me", json("PATCH", { language })),
     deleteAccount: () => request("/me", { method: "DELETE" }),

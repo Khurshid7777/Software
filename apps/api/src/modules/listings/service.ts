@@ -17,6 +17,7 @@ import {
   AUTO_DROP_MIN_FLOOR_PCT,
   nextAutoDropPrice,
   sellerBadges,
+  type NotifyType,
   PRIVATE_SELLER_ACTIVE_LIMIT,
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -98,6 +99,11 @@ export type ListingError =
   | "ai_quota"
   | "bad_floor"
   | "bad_request";
+
+/** «🔕 Не присылать такое» under an optional message (stage 20); the bot switches the type off. */
+export function unsubscribeRow(lang: Lang, type: NotifyType) {
+  return [{ text: t(lang, "notify.unsub"), callbackData: `unsub:${type}` }];
+}
 
 export class ListingRejected extends Error {
   constructor(
@@ -623,7 +629,7 @@ export class ListingService {
         and(
           eq(follows.sellerUserId, l.sellerUserId),
           sql`(${follows.lastNotifiedAt} is null or ${follows.lastNotifiedAt} < ${startOfTashkentDay(now).toISOString()})`,
-          sql`${follows.followerUserId} in (select id from ${users} where banned_at is null)`,
+          sql`${follows.followerUserId} in (select id from ${users} where banned_at is null and not ('follow' = any(notify_off)))`,
         ),
       )
       .returning({ userId: follows.followerUserId });
@@ -642,7 +648,7 @@ export class ListingService {
             title: listingTitle(l, lang),
             price: l.price ? formatUzs(l.price) : "",
           }),
-          url ? [[{ text: t(lang, "bot.open_listing"), url }]] : [],
+          [...(url ? [[{ text: t(lang, "bot.open_listing"), url }]] : []), unsubscribeRow(lang, "follow")],
         )
         .then(() => true)
         .catch(() => false);
@@ -700,6 +706,7 @@ export class ListingService {
           eq(favorites.listingId, listingId),
           sql`${users.id} <> ${l.sellerUserId}`,
           sql`${users.bannedAt} is null`,
+          sql`not ('price_drop' = any(${users.notifyOff}))`,
           sql`not exists (select 1 from events e where e.user_id = ${users.id} and e.name = 'price_drop_alert'
                 and e.props->>'listingId' = ${listingId} and e.created_at > now() - interval '24 hours')`,
         ),
@@ -710,7 +717,7 @@ export class ListingService {
       const lang = u.language as Lang;
       const text = t(lang, "favorites.price_drop", { title: listingTitle(l, lang), old: formatUzs(l.previousPrice), price: formatUzs(price) });
       const sent = await this.d.notifier
-        .send(u.telegramId, text, url ? [[{ text: t(lang, "favorites.open"), url }]] : [])
+        .send(u.telegramId, text, [...(url ? [[{ text: t(lang, "favorites.open"), url }]] : []), unsubscribeRow(lang, "price_drop")])
         .then(() => true)
         .catch((err) => (console.error("price drop alert failed", err), false));
       if (sent) await this.d.repo.event(u.id, "price_drop_alert", { listingId });
