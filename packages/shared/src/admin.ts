@@ -13,6 +13,10 @@ export interface AdminMetrics {
   checks: { users: number };
   buyerFunnel: FunnelStep[];
   sellerFunnel: FunnelStep[];
+  /** Stage 21: deals that happen in person — contact → meeting asked → agreed → bought. */
+  meetingFunnel: FunnelStep[];
+  /** Stage 21: what people searched for and found nothing (most frequent first) — gaps in supply or spelling. */
+  searchMisses: Array<{ q: string; count: number; users: number }>;
   listings: {
     active: number;
     pending: number;

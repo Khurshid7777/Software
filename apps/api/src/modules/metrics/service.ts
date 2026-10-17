@@ -69,6 +69,12 @@ export class MetricsService {
                filter (where exists (select 1 from order_events e where e.order_id = orders.id and e.status = 'confirmed')) as confirmed,
              count(distinct seller_user_id) filter (where status = 'delivered') as sold
       from orders where created_at >= ${ts(from)}`);
+    // Meetings (stage 18): distinct buyers per step, from the meetings table.
+    const meetings = await this.one(sql`
+      select count(distinct buyer_user_id) as requested,
+        count(distinct buyer_user_id) filter (where status in ('accepted', 'bought', 'not_bought', 'seller_no_show', 'buyer_no_show')) as accepted,
+        count(distinct buyer_user_id) filter (where status = 'bought') as bought
+      from meetings where created_at >= ${ts(from)}`);
     const funnel = (steps: Array<[string, number]>): FunnelStep[] =>
       steps.map(([step, users], i) => ({
         step,
@@ -169,6 +175,13 @@ export class MetricsService {
         banned: num(users.banned),
       },
       checks: { users: byEvent.get("check_created") ?? 0 },
+      meetingFunnel: funnel([
+        ["buyer_contacted_seller", byEvent.get("buyer_contacted_seller") ?? 0],
+        ["meeting_requested", num(meetings.requested)],
+        ["meeting_accepted", num(meetings.accepted)],
+        ["meeting_bought", num(meetings.bought)],
+      ]),
+      searchMisses: await this.searchMisses(from, 15),
       buyerFunnel: funnel(BUYER_FUNNEL.map((s) => [s, byEvent.get(s) ?? 0])),
       sellerFunnel: funnel([
         ["listing_draft_created", byEvent.get("listing_draft_created") ?? 0],
@@ -256,6 +269,17 @@ export class MetricsService {
   }
 
   /** Morning digest for admins (yesterday, Tashkent time) + what needs attention now. */
+  /** Searches with no results since `from`, grouped by the normalised query (stage 21). */
+  async searchMisses(from: Date, limit: number, to?: Date) {
+    const rows = await this.rows(sql`
+      select lower(trim(props->>'q')) as q, count(*) as n, count(distinct user_id) as users
+      from events
+      where name = 'catalog_search' and created_at >= ${ts(from)} ${to ? sql`and created_at < ${ts(to)}` : sql``}
+        and (props->>'results')::int = 0 and coalesce(trim(props->>'q'), '') <> ''
+      group by 1 order by n desc, q limit ${limit}`);
+    return rows.map((r) => ({ q: String(r.q), count: num(r.n), users: num(r.users) }));
+  }
+
   async digest(now = new Date()) {
     const today = startOfTashkentDay(now);
     const yesterday = new Date(today.getTime() - DAY);
@@ -279,6 +303,7 @@ export class MetricsService {
     const limit = await this.repo.getSetting("ai_monthly_limit_usd", 50);
     const pct = limit ? Math.round((month / limit) * 100) : 0;
     const date = yesterday.toLocaleDateString("ru-RU", { timeZone: "Asia/Tashkent", day: "numeric", month: "long" });
+    const misses = await this.searchMisses(yesterday, 5, today);
     const attention = [
       num(y.pending) && `🛡 на модерации: ${num(y.pending)}`,
       num(y.complaints) && `⚠️ открытых жалоб: ${num(y.complaints)}`,
@@ -293,6 +318,8 @@ export class MetricsService {
       `Заказов: ${num(y.orders)} · доставлено: ${num(y.delivered)} (${formatUzs(num(y.gmv))}) · возвратов: ${num(y.returned)}`,
       `AI: $${num(y.ai_usd).toFixed(2)} за день, $${month.toFixed(2)} из $${limit} за месяц (${pct}%)`,
       ...(attention.length ? ["", "Требует внимания:", ...attention] : []),
+      // What buyers wanted and did not find: a hint for sellers and shops, or a spelling to teach the search.
+      ...(misses.length ? ["", `🔎 Искали, но не нашли: ${misses.map((m) => `«${m.q}» ×${m.count}`).join(", ")}`] : []),
     ].join("\n");
   }
 }
