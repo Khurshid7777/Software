@@ -23,7 +23,8 @@ const reachable = await postgres(url, { max: 1, connect_timeout: 2 })`select 1`
 const BOT_TOKEN = "123456:TEST";
 const SELLER = 975_000_001;
 const BUYER = 975_000_002;
-const ALL = [SELLER, BUYER];
+const ADMIN = 975_000_003;
+const ALL = [SELLER, BUYER, ADMIN];
 const CLEAN = "352099001761481";
 const LISTED = "353322110098762";
 const SILENT = "354444556677880";
@@ -106,7 +107,7 @@ describe.skipIf(!reachable)("lost/stolen IMEI registry in moderation and the pas
   beforeAll(async () => {
     for (const imei of [CLEAN, LISTED, SILENT]) expect(isValidImei(imei)).toBe(true);
     storageDir = mkdtempSync(join(tmpdir(), "ishonch-imei-registry-"));
-    const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: url, BOT_TOKEN, INTERNAL_API_TOKEN: "internal-secret" } as NodeJS.ProcessEnv);
+    const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: url, BOT_TOKEN, INTERNAL_API_TOKEN: "internal-secret", ADMIN_TELEGRAM_IDS: String(ADMIN) } as NodeJS.ProcessEnv);
     const created = createDb(url);
     db = created.db;
     close = () => created.sql.end();
@@ -126,13 +127,23 @@ describe.skipIf(!reachable)("lost/stolen IMEI registry in moderation and the pas
     rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it("a listed IMEI goes to a moderator with the reason; nothing else happens on its own", async () => {
+  it("a listed IMEI goes to a moderator with the reason; once approved, edits don't send it back", async () => {
     const l = await liveListing();
     expect((await patch(SELLER, l.id, { imei: LISTED })).statusCode).toBe(200);
     const held = await fetchRow(l.id);
     expect(held.status).toBe("pending");
     expect(held.moderationReason).toBe("imei_listed");
     expect(held.imeiRegistry).toMatchObject({ imei: LISTED, status: "listed", provider: "fake" });
+
+    const approve = await app.inject({ method: "POST", url: `/admin/listings/${l.id}/moderate`, headers: tma(ADMIN), payload: { decision: "approve" } });
+    expect(approve.statusCode).toBe(200);
+    expect((await patch(SELLER, l.id, { descriptionRu: "Хорошее состояние, есть коробка" })).statusCode).toBe(200);
+    const after = await fetchRow(l.id);
+    expect(after.status).toBe("active");
+    expect(after.imeiRegistry).toMatchObject({ status: "listed", cleared: true });
+    // The buyer still sees what the registry says.
+    const check = (await card(BUYER, l.id)).passport!.checks.find((c) => c.code === "imei_registry");
+    expect(check?.status).toBe("fail");
   });
 
   it("a clean IMEI shows in the passport with the registry as its source, and the answer is reused", async () => {

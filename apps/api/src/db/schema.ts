@@ -163,8 +163,11 @@ export const listings = pgTable(
     priceDroppedAt: timestamp("price_dropped_at", { withTimezone: true }),
     /** Phones: 15-digit IMEI (Luhn-checked). Only the owner and operators see it; buyers see the last 4 digits. */
     imei: text("imei"),
-    /** Last answer of the lost/stolen registry for `imei` (IMEI_REGISTRY); stale once the IMEI changes. */
-    imeiRegistry: jsonb("imei_registry").$type<{ imei: string; status: "clean" | "listed"; provider: string; at: string }>(),
+    /**
+     * Last answer of the lost/stolen registry for `imei` (IMEI_REGISTRY); stale once the IMEI changes.
+     * `cleared`: a moderator approved the listing despite "listed", so edits don't send it back for the same reason.
+     */
+    imeiRegistry: jsonb("imei_registry").$type<{ imei: string; status: "clean" | "listed"; provider: string; at: string; cleared?: boolean }>(),
     /** Phones/tablets: structured condition (battery %, biometrics, repairs, kit), see ConditionChecklist. */
     checklist: jsonb("checklist").notNull().default({}),
     /** "Рассмотрю обмен": buyers may propose their item plus a top-up. */

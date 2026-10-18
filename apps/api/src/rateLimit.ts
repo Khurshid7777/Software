@@ -76,7 +76,16 @@ export async function registerRateLimits(app: FastifyInstance, secrets: RateKeyS
   if (redisUrl) {
     // Fail fast instead of queueing: a request must not wait for Redis to come back.
     redis = new Redis(redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1, enableOfflineQueue: false });
-    redis.on("error", (err) => app.log.warn({ err: err.message }, "rate limit redis error"));
+    // ioredis keeps reconnecting with a backoff: log the outage and the recovery once, not every attempt.
+    let down = false;
+    redis.on("error", (err) => {
+      if (!down) app.log.warn({ err: err.message }, "rate limit redis unavailable, limits are off until it is back");
+      down = true;
+    });
+    redis.on("ready", () => {
+      if (down) app.log.info("rate limit redis is back");
+      down = false;
+    });
     app.addHook("onClose", async () => {
       redis?.disconnect();
     });

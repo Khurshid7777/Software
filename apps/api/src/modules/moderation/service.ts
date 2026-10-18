@@ -135,7 +135,8 @@ export class ModerationService {
       record.decision = "needs_review";
       record.reasons.push({ code: "duplicate_imei", note: "Такой IMEI уже есть в объявлении другого продавца" });
     }
-    if ((await this.checkRegistry(l))?.status === "listed") {
+    const registry = await this.checkRegistry(l);
+    if (registry?.status === "listed" && !registry.cleared) {
       // The registry may be out of date (a found phone, a resold insurance case): a person decides, never the rule alone.
       record.decision = "needs_review";
       record.reasons.push({ code: "imei_listed", note: "IMEI найден в базе утерянных или украденных устройств" });
@@ -170,7 +171,9 @@ export class ModerationService {
       this.d.logger?.warn({ listingId: l.id, provider: this.d.imeiRegistry.name }, "IMEI registry did not answer");
       return null;
     }
-    const stored = { imei: l.imei, status: res.status, provider: res.provider, at: now.toISOString() };
+    // A moderator's clearance survives a refresh while the registry still says the same thing about the same IMEI.
+    const cleared = cached?.imei === l.imei && cached.cleared === true && res.status === "listed";
+    const stored = { imei: l.imei, status: res.status, provider: res.provider, at: now.toISOString(), ...(cleared ? { cleared } : {}) };
     await this.db.update(listings).set({ imeiRegistry: stored }).where(eq(listings.id, l.id));
     return stored;
   }
