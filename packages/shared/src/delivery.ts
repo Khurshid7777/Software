@@ -231,6 +231,7 @@ export const MODERATION_REASONS = [
   "duplicate_photos", // photos match another seller's listing
   "duplicate_text",
   "duplicate_imei", // the same IMEI in another seller's listing
+  "imei_listed", // the IMEI is in the lost/stolen registry
   "complaints", // hidden after user complaints
   "other",
 ] as const;

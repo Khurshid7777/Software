@@ -38,6 +38,10 @@ const EnvSchema = z.object({
   MODERATION_CHAT_ID: optionalNumber,
   // Courier integration. Only "manual" exists: operators arrange couriers themselves.
   COURIER_PROVIDER: z.enum(["manual"]).default("manual"),
+  // Lost/stolen IMEI registry: "none" until a contract exists; "http" calls an adapter (integrations/imeiRegistry.ts).
+  IMEI_REGISTRY: z.enum(["none", "http"]).default("none"),
+  IMEI_REGISTRY_URL: z.string().default(""),
+  IMEI_REGISTRY_TOKEN: z.string().optional(),
   // Hour (Tashkent, 0-23) of the daily digest to admins; empty or -1 turns it off.
   DIGEST_HOUR: z.preprocess((v) => (v === "" ? -1 : v), z.coerce.number().int().min(-1).max(23).default(9)),
   // AI pre-moderation of listings at publication. "false": rules and duplicate checks only.

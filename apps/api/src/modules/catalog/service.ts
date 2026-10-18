@@ -274,7 +274,10 @@ export class CatalogService {
     let history: ItemHistory | null = null;
 
     if ((IMEI_CATEGORIES as readonly string[]).includes(l.category)) {
-      const [row] = await this.db.select({ imei: listings.imei, seller: listings.sellerUserId }).from(listings).where(eq(listings.id, l.id));
+      const [row] = await this.db
+        .select({ imei: listings.imei, seller: listings.sellerUserId, registry: listings.imeiRegistry })
+        .from(listings)
+        .where(eq(listings.id, l.id));
       if (!row?.imei) checks.push({ code: "imei", source: "ishonch", status: "unknown" });
       else {
         const others = await this.db
@@ -283,6 +286,10 @@ export class CatalogService {
           .where(and(eq(listings.imei, row.imei), ne(listings.id, l.id)));
         const clash = others.some((o) => o.seller !== row.seller && ["active", "pending", "reserved"].includes(o.status));
         checks.push({ code: "imei", source: "ishonch", status: clash ? "fail" : "ok" });
+        // Only when a registry answered for this very IMEI: without access there is nothing to show.
+        if (row.registry?.imei === row.imei) {
+          checks.push({ code: "imei_registry", source: "registry", status: row.registry.status === "clean" ? "ok" : "fail" });
+        }
         const past = others.filter((o) => o.publishedAt).sort((a, b) => b.publishedAt!.getTime() - a.publishedAt!.getTime());
         if (past.length) {
           const [insp] = (await this.db

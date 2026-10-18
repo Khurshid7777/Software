@@ -39,6 +39,7 @@ import { TrustService } from "./modules/trust/service.js";
 import { StaffNotifier } from "./telegram/staff.js";
 import { maybeSendDigest } from "./jobs.js";
 import { JobQueue } from "./jobs/queue.js";
+import { createImeiRegistry, type ImeiRegistry } from "./integrations/imeiRegistry.js";
 import { registerRateLimits } from "./rateLimit.js";
 import { DEFAULT_COMPLAINTS_TO_HIDE, quietUntil } from "@ishonch/shared";
 
@@ -51,6 +52,8 @@ export interface AppDeps {
   stt?: SpeechToText;
   publisher?: (ChannelPublisher & Notifier) | null;
   courier?: CourierProvider;
+  /** Tests inject a fake registry; null turns it off whatever the config says. */
+  imeiRegistry?: ImeiRegistry | null;
   /** true in server.ts: jobs go to the queue and a worker runs them. Tests and dev run them inline. */
   backgroundJobs?: boolean;
 }
@@ -65,7 +68,7 @@ export function createStorage(config: Config): Storage {
     : new FsStorage(config.STORAGE_DIR);
 }
 
-export async function buildApp({ config, db, ai, storage, stt, publisher, courier, backgroundJobs = false }: AppDeps) {
+export async function buildApp({ config, db, ai, storage, stt, publisher, courier, imeiRegistry, backgroundJobs = false }: AppDeps) {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
@@ -161,6 +164,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     ai: config.AI_MODERATION ? aiService : null,
     storage: store,
     findMarket: async (key) => (await repo.findReferencePrice(key)) ?? (await catalog.findCatalogPrice(key)),
+    imeiRegistry: imeiRegistry !== undefined ? imeiRegistry : createImeiRegistry(config),
     logger: app.log,
   });
   const evidenceSvc = new EvidenceService({ repo, storage: store, secret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos` });
