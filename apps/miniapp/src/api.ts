@@ -39,12 +39,15 @@ import type {
   OrderDto,
   ReviewDto,
   SellerRating,
+  WantedRequest,
 } from "@ishonch/shared/client";
 
 export interface SavedSearch {
   id: number;
   title: string;
   filters: CatalogFilters;
+  /** «Куплю»: sellers may see it (without the buyer). */
+  public: boolean;
   createdAt: string;
 }
 
@@ -306,6 +309,9 @@ export function createApi(initData: string | null) {
     searches: () => request<SavedSearch[]>("/searches"),
     saveSearch: (f: CatalogFilters) => request<SavedSearch>("/searches", json("POST", f)),
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
+    setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
+    wanted: () => request<WantedRequest[]>("/wanted"),
+    offerToWanted: (id: number, listingId: string) => request<{ ok: true }>(`/wanted/${id}/offer`, json("POST", { listingId })),
     contact: (id: string, text: string) => request<{ ok: true }>(`/listings/${id}/contact`, json("POST", { text })),
     complain: (id: string, reason: ComplaintReason, text: string) =>
       request<{ ok: true; duplicate: boolean; hidden: boolean }>(`/listings/${id}/complaints`, json("POST", { reason, text: text || undefined })),

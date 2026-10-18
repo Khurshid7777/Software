@@ -26,6 +26,11 @@ const MESSAGES: Record<string, string> = {
   ai_unavailable: "check.ai_unavailable",
   suggest_limit: "suggest.limit",
   suggest_expired: "suggest.expired",
+  wanted_closed: "wanted.err.closed",
+  wanted_already: "wanted.err.already",
+  wanted_busy: "wanted.err.busy",
+  wanted_limit: "wanted.err.limit",
+  wanted_no_match: "wanted.err.no_match",
 };
 
 /** Query string → filters (conditions come as a comma-separated list). */
@@ -144,6 +149,22 @@ export function catalogRoutes(
       const parsed = CatalogFiltersSchema.safeParse(req.body ?? {});
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       return catalog.saveSearch(req.user!, parsed.data);
+    }),
+  );
+  app.patch<{ Params: { id: string } }>("/searches/:id", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = z.object({ public: z.boolean() }).safeParse(req.body);
+      if (!parsed.success || !Number.isInteger(Number(req.params.id))) return reply.code(400).send({ error: "bad_request" });
+      return catalog.setSearchPublic(req.user!, Number(req.params.id), parsed.data.public);
+    }),
+  );
+  // «Куплю»: buyers' requests for sellers, and a seller's answer with a live listing.
+  app.get("/wanted", { preHandler: requireUser }, (req) => catalog.wanted(req.user!));
+  app.post<{ Params: { id: string } }>("/wanted/:id/offer", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = z.object({ listingId: z.string().uuid() }).safeParse(req.body);
+      if (!parsed.success || !Number.isInteger(Number(req.params.id))) return reply.code(400).send({ error: "bad_request" });
+      return catalog.offerToWanted(req.user!, Number(req.params.id), parsed.data.listingId);
     }),
   );
   app.delete<{ Params: { id: string } }>("/searches/:id", { preHandler: requireUser }, async (req) => {

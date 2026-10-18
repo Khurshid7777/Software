@@ -19,6 +19,7 @@ import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
 import { Blocks } from "./screens/Blocks";
+import { Wanted } from "./screens/Wanted";
 import { Notifications } from "./screens/Notifications";
 import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
@@ -32,6 +33,7 @@ type Screen =
   | { name: "my" }
   | { name: "shop" }
   | { name: "blocks" }
+  | { name: "wanted" }
   | { name: "notifications" }
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
@@ -84,6 +86,7 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_admin") return { name: "admin" };
   if (startParam === "screen_sell") return { name: "sell" };
   if (startParam === "screen_my") return { name: "my" };
+  if (startParam === "screen_wanted") return { name: "wanted" };
   if (startParam === "screen_check") return { name: "check" };
   if (startParam === "screen_catalog") return { name: "catalog" };
   if (startParam === "screen_assistant") return { name: "assistant" };
@@ -280,6 +283,7 @@ export function App({ env }: { env: TelegramEnv }) {
             onEdit={(l) => go({ name: "sell", existing: l })}
             onOpen={(id) => go({ name: "listing", id })}
             onSell={() => go({ name: "sell" })}
+            onWanted={() => go({ name: "wanted" })}
           />
         );
         break;
@@ -288,6 +292,9 @@ export function App({ env }: { env: TelegramEnv }) {
         break;
       case "blocks":
         body = <Blocks api={api} />;
+        break;
+      case "wanted":
+        body = <Wanted api={api} onSell={() => go({ name: "sell" })} />;
         break;
       case "notifications":
         body = <Notifications api={api} />;

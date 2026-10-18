@@ -436,3 +436,20 @@ export type NotifyType = (typeof NOTIFY_TYPES)[number];
 export const SHOPS_OFFER_EVERY_DAYS = 7;
 /** At most this many shops get one request (the longest-verified first). */
 export const SHOPS_OFFER_MAX = 30;
+
+// ---------- «Куплю»: buyers' requests seen by sellers (stage 25) ----------
+
+/** A saved search opened to sellers stays visible this long after it was saved. */
+export const WANTED_MAX_AGE_DAYS = 30;
+/** One seller answers at most this many requests a day. */
+export const WANTED_OFFERS_PER_DAY = 10;
+
+/** A buyer's request as a seller sees it: no name, only what is wanted, plus the seller's own matching listings. */
+export interface WantedRequest {
+  id: number;
+  title: string;
+  priceMax: number | null;
+  district: string | null;
+  createdAt: string;
+  matches: Array<{ id: string; title: string; price: number | null; offered: boolean }>;
+}

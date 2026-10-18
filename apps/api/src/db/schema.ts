@@ -280,6 +280,8 @@ export const savedSearches = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     filters: jsonb("filters").notNull(),
     title: text("title").notNull(),
+    /** «Куплю» (stage 25): sellers may see this search (without the buyer) and answer with their listing. */
+    public: boolean("public").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [index("saved_searches_user_idx").on(t.userId)],

@@ -1,0 +1,1 @@
+ALTER TABLE "saved_searches" ADD COLUMN "public" boolean DEFAULT false NOT NULL;

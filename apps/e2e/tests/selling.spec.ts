@@ -42,3 +42,23 @@ test("sell to shops: verified shops get the listing, and a second request waits 
   await card.getByTestId("shops-send").click();
   await expect(card.getByTestId("sell-faster-error")).toContainText("раз в 7 дней");
 });
+
+test("«Куплю»: a buyer shows a saved search to sellers, a seller answers with a matching listing", async ({ page, browser }) => {
+  const [l] = await asBot<Array<{ id: string; titleRu: string; price: number }>>("GET", "/listings/mine?status=active", PRIVATE_SELLER);
+  const q = l!.titleRu.split(/[ ,]+/).slice(0, 2).join(" ");
+  await asBot("POST", "/searches", BUYER, { q, priceMax: l!.price + 500_000 });
+
+  await open(page, BUYER, "startapp=screen_favorites");
+  const row = page.getByTestId("saved-search").filter({ hasText: q });
+  await row.getByTestId("search-public").click();
+  await expect(row.getByTestId("search-public")).toHaveAttribute("aria-pressed", "true");
+
+  const seller = await browser.newPage();
+  await open(seller, PRIVATE_SELLER, "startapp=screen_my");
+  await seller.getByTestId("open-wanted").click();
+  const request = seller.getByTestId("wanted-row").filter({ hasText: q });
+  await expect(request).toContainText(l!.titleRu);
+  await request.getByTestId("wanted-offer").first().click();
+  await expect(seller.getByText("Отправили покупателю")).toBeVisible();
+  await expect(request.getByTestId("wanted-offered").first()).toBeVisible();
+});

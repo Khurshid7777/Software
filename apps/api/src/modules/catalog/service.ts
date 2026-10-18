@@ -25,6 +25,9 @@ import {
   sellerTrust,
   t,
   type CatalogFilters,
+  WANTED_MAX_AGE_DAYS,
+  WANTED_OFFERS_PER_DAY,
+  type WantedRequest,
   type CatalogItem,
   type CatalogPage,
   type CatalogSort,
@@ -86,7 +89,12 @@ export class CatalogRejected extends Error {
       | "message_limit"
       | "suggest_limit"
       | "suggest_expired"
-      | "ai_unavailable",
+      | "ai_unavailable"
+      | "wanted_closed"
+      | "wanted_already"
+      | "wanted_busy"
+      | "wanted_limit"
+      | "wanted_no_match",
     public status: number,
   ) {
     super(code);
@@ -666,6 +674,117 @@ export class CatalogService {
     return this.db.select().from(savedSearches).where(eq(savedSearches.userId, user.id)).orderBy(desc(savedSearches.createdAt));
   }
 
+  async setSearchPublic(user: User, id: number, on: boolean) {
+    const [row] = await this.db
+      .update(savedSearches)
+      .set({ public: on })
+      .where(and(eq(savedSearches.id, id), eq(savedSearches.userId, user.id)))
+      .returning();
+    if (!row) throw new CatalogRejected("not_found", 404);
+    return row;
+  }
+
+  /** Open buyer requests a seller may answer: never the seller's own, banned or blocked buyers', or stale ones. */
+  private openWanted(seller: User, extra: SQL[] = []) {
+    return this.db
+      .select({ s: savedSearches })
+      .from(savedSearches)
+      .innerJoin(users, eq(users.id, savedSearches.userId))
+      .where(
+        and(
+          eq(savedSearches.public, true),
+          ne(savedSearches.userId, seller.id),
+          gte(savedSearches.createdAt, new Date(Date.now() - WANTED_MAX_AGE_DAYS * DAY)),
+          sql`${users.bannedAt} is null and not ('saved_search' = any(${users.notifyOff}))`,
+          sql`not exists (select 1 from user_blocks b where (b.blocker_user_id = ${users.id} and b.blocked_user_id = ${seller.id})
+                or (b.blocker_user_id = ${seller.id} and b.blocked_user_id = ${users.id}))`,
+          ...extra,
+        ),
+      );
+  }
+
+  /** «Куплю» for a seller: open requests, the ones their live listings fit first. */
+  async wanted(seller: User): Promise<WantedRequest[]> {
+    const rows = await this.openWanted(seller).orderBy(desc(savedSearches.createdAt)).limit(100);
+    const mine = await this.db
+      .select({ id: listings.id, titleRu: listings.titleRu, titleUz: listings.titleUz, price: listings.price })
+      .from(listings)
+      .where(and(eq(listings.sellerUserId, seller.id), eq(listings.status, "active")));
+    const lang = seller.language as Lang;
+    const byId = new Map(mine.map((m) => [m.id, m]));
+    const out: WantedRequest[] = [];
+    for (const { s } of rows) {
+      const f = s.filters as CatalogFilters;
+      const ids = mine.length ? await this.searchIds(f, "newest", 0, 5, [eq(listings.sellerUserId, seller.id)]) : [];
+      const offered = ids.length
+        ? new Set(
+            (
+              await this.db
+                .select({ listingId: searchNotifications.listingId })
+                .from(searchNotifications)
+                .where(and(eq(searchNotifications.savedSearchId, s.id), inArray(searchNotifications.listingId, ids)))
+            ).map((r) => r.listingId),
+          )
+        : new Set<string>();
+      out.push({
+        id: s.id,
+        title: s.title,
+        priceMax: f.priceMax ?? null,
+        district: f.district ?? null,
+        createdAt: s.createdAt.toISOString(),
+        matches: ids.flatMap((id) => {
+          const m = byId.get(id);
+          return m ? [{ id, title: (lang === "ru" ? m.titleRu || m.titleUz : m.titleUz || m.titleRu) ?? "", price: m.price, offered: offered.has(id) }] : [];
+        }),
+      });
+    }
+    return out.sort((a, b) => Number(b.matches.length > 0) - Number(a.matches.length > 0)).slice(0, 50);
+  }
+
+  /** A seller answers a request with one of their live listings: the buyer gets it like a saved search alert. */
+  async offerToWanted(seller: User, searchId: number, listingId: string) {
+    const [row] = await this.openWanted(seller, [eq(savedSearches.id, searchId)]);
+    if (!row) throw new CatalogRejected("wanted_closed", 404);
+    const s = row.s;
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.sellerUserId !== seller.id || l.status !== "active") throw new CatalogRejected("not_found", 404);
+    if (!(await this.searchIds(s.filters as CatalogFilters, "newest", 0, 1, [eq(listings.id, l.id)])).length) {
+      throw new CatalogRejected("wanted_no_match", 400);
+    }
+    const [heard] = await this.db
+      .select({ id: searchNotifications.id })
+      .from(searchNotifications)
+      .where(and(eq(searchNotifications.userId, s.userId), eq(searchNotifications.listingId, l.id)))
+      .limit(1);
+    if (heard) throw new CatalogRejected("wanted_already", 409);
+    const [{ today }] = (await this.db
+      .select({ today: count() })
+      .from(searchNotifications)
+      .where(and(eq(searchNotifications.userId, s.userId), gte(searchNotifications.createdAt, startOfTashkentDay())))) as [{ today: number }];
+    if (today >= MAX_SEARCH_ALERTS_PER_DAY) throw new CatalogRejected("wanted_busy", 429);
+    const reservation = await this.repo.reserveDaily(seller.id, "wanted_offer", WANTED_OFFERS_PER_DAY);
+    if (reservation == null) throw new CatalogRejected("wanted_limit", 429);
+    const inserted = await this.db.insert(searchNotifications).values({ savedSearchId: s.id, userId: s.userId, listingId: l.id }).onConflictDoNothing().returning();
+    if (!inserted.length) {
+      await this.repo.refundDaily(reservation);
+      throw new CatalogRejected("wanted_already", 409);
+    }
+    const [buyer] = await this.db.select().from(users).where(eq(users.id, s.userId));
+    if (this.notifier && buyer) {
+      const lang = buyer.language as Lang;
+      const title = lang === "ru" ? l.titleRu || l.titleUz : l.titleUz || l.titleRu;
+      const url = await this.notifier.miniAppLink(`listing_${l.id}`).catch(() => null);
+      await this.notifier
+        .send(buyer.telegramId, t(lang, "wanted.offer_for_buyer", { query: s.title, title, price: l.price ? formatUzs(l.price) : "" }), [
+          ...(url ? [[{ text: t(lang, "bot.open_listing"), url }]] : []),
+          unsubscribeRow(lang, "saved_search"),
+        ])
+        .catch((err) => console.error("wanted offer message failed", err));
+    }
+    await this.repo.event(seller.id, "wanted_offer_sent", { searchId: s.id, listingId: l.id });
+    return { ok: true };
+  }
+
   async deleteSearch(user: User, id: number) {
     await this.db.delete(savedSearches).where(and(eq(savedSearches.id, id), eq(savedSearches.userId, user.id)));
   }
@@ -692,6 +811,16 @@ export class CatalogService {
     const notifiedUsers = new Set<string>();
     for (const { s, telegramId, language } of searches) {
       if (notifiedUsers.has(s.userId)) continue; // one alert per user per listing
+      // …also across runs: a price drop re-checks searches, and another search of the same person may match now.
+      const [heard] = await this.db
+        .select({ id: searchNotifications.id })
+        .from(searchNotifications)
+        .where(and(eq(searchNotifications.userId, s.userId), eq(searchNotifications.listingId, listingId)))
+        .limit(1);
+      if (heard) {
+        notifiedUsers.add(s.userId);
+        continue;
+      }
       const ids = await this.searchIds(s.filters as CatalogFilters, "newest", 0, 1, [eq(listings.id, listingId)]);
       if (ids.length === 0) continue;
       const [{ today }] = (await this.db
