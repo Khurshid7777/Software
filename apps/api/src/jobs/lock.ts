@@ -1,17 +1,25 @@
-import { sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 
 /** Stable advisory-lock keys (any 64-bit numbers unique within the app). */
 export const LOCKS = { migrate: 7_100_001, hourly: 7_100_002, digest: 7_100_003 } as const;
 
 /**
- * Runs `fn` on one instance only: a transaction-scoped advisory lock is held while it runs; other
- * instances skip (return null) instead of waiting. The lock is released on commit, even if `fn` throws.
+ * Runs `fn` on one instance only: a session-level advisory lock on a reserved connection; other instances
+ * skip (return null) instead of waiting. No transaction stays open while `fn` sends hundreds of Telegram
+ * messages, so `idle_in_transaction_session_timeout` cannot drop the lock halfway. The lock is released in
+ * `finally` (and by PostgreSQL itself if the process dies and the connection closes).
  */
 export async function singleton<T>(db: Db, key: number, fn: () => Promise<T>): Promise<T | null> {
-  return db.transaction(async (tx) => {
-    const [row] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${key}) as ok`)) as unknown as [{ ok: boolean }];
+  const conn = await db.$client.reserve();
+  try {
+    const [row] = await conn<{ ok: boolean }[]>`select pg_try_advisory_lock(${key}) as ok`;
     if (!row?.ok) return null;
-    return fn();
-  });
+    try {
+      return await fn();
+    } finally {
+      await conn`select pg_advisory_unlock(${key})`.catch(() => undefined);
+    }
+  } finally {
+    conn.release();
+  }
 }

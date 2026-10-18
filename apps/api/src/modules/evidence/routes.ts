@@ -20,8 +20,12 @@ async function readFiles(req: FastifyRequest, accept: RegExp, limits: { fileSize
   try {
     for await (const part of req.parts({ limits })) {
       if (part.type !== "file") continue;
-      const data = await part.toBuffer();
-      if (accept.test(part.mimetype)) files.push({ data, mimeType: part.mimetype });
+      // Wrong type, or more than asked for: drained without reading it into memory.
+      if (!accept.test(part.mimetype) || files.length >= limits.files) {
+        part.file.resume();
+        continue;
+      }
+      files.push({ data: await part.toBuffer(), mimeType: part.mimetype });
     }
   } catch (err) {
     if ((err as { code?: string }).code === "FST_REQ_FILE_TOO_LARGE") throw new EvidenceRejected("too_large", 413);

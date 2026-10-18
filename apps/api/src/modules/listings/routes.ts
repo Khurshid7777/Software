@@ -31,9 +31,16 @@ async function readMultipart(req: FastifyRequest) {
   const fields: Record<string, string> = {};
   for await (const part of req.parts()) {
     if (part.type === "file") {
+      // Decide by type before reading: an unwanted file is drained, never buffered in memory.
+      const isPhoto = IMAGE_TYPES.test(part.mimetype);
+      const isAudio = !isPhoto && !audio && AUDIO_TYPES.test(part.mimetype);
+      if (!isPhoto && !isAudio) {
+        part.file.resume();
+        continue;
+      }
       const data = await part.toBuffer();
-      if (IMAGE_TYPES.test(part.mimetype)) photos.push({ data, mimeType: part.mimetype });
-      else if (AUDIO_TYPES.test(part.mimetype) && !audio) audio = { data, mimeType: part.mimetype };
+      if (isPhoto) photos.push({ data, mimeType: part.mimetype });
+      else audio = { data, mimeType: part.mimetype };
     } else fields[part.fieldname] = String(part.value);
   }
   return { photos, audio, fields };

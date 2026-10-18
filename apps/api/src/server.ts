@@ -9,10 +9,15 @@ const app = await buildApp({ config, db, backgroundJobs: true });
 const { queue, listings, orders, digest } = app.services;
 
 let hourlyTimer: NodeJS.Timeout | undefined;
+let firstHourly: NodeJS.Timeout | undefined;
 let digestTimer: NodeJS.Timeout | undefined;
+/** The hourly run in progress: shutdown waits for it instead of closing the database under it. */
+let hourlyRun: Promise<unknown> = Promise.resolve();
 const shutdown = async () => {
+  clearTimeout(firstHourly);
   clearInterval(hourlyTimer);
   clearInterval(digestTimer);
+  await Promise.race([hourlyRun, new Promise((r) => setTimeout(r, 20_000))]);
   await queue.stop(); // finish the job batch in progress
   await app.close();
   await sql.end();
@@ -30,7 +35,7 @@ queue.start();
 // Hourly, on one instance at a time (advisory lock): listing expiry (reminder 3 days ahead, archive after
 // 30 days), delivery requests unanswered for 48 h, expired price offers, review reminders, cleanup of finished jobs.
 const hourly = () =>
-  singleton(db, LOCKS.hourly, async () => {
+  (hourlyRun = singleton(db, LOCKS.hourly, async () => {
     // Each step on its own: one failing (e.g. expiry) must not skip stale orders, reminders or cleanup.
     const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
       try {
@@ -50,8 +55,8 @@ const hourly = () =>
     await step("privacy_retention", () => app.services.repo.runRetention());
     await step("pending_replies", () => app.services.catalog.cleanupPendingReplies());
     if (r?.reminded || r?.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
-  }).catch((err) => app.log.error({ err }, "hourly job failed"));
-setTimeout(hourly, 30_000);
+  }).catch((err) => app.log.error({ err }, "hourly job failed")));
+firstHourly = setTimeout(hourly, 30_000);
 hourlyTimer = setInterval(hourly, 3600_000);
 
 // Morning digest for admins (DIGEST_HOUR, Tashkent); checked every 10 minutes, sent once a day.

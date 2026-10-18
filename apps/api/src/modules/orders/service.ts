@@ -893,9 +893,14 @@ export class OrderService {
       try {
         await this.confirmOne(item, seller);
       } catch (err) {
-        if (!(err instanceof OrderRejected) || err.code !== "not_available") throw err;
-        // An extra item sold meanwhile: the buyer is told it dropped out; the rest of the trip goes.
-        await this.transition(item, "cancelled", "seller", seller, "listing_unavailable").catch(() => undefined);
+        if (err instanceof OrderRejected && err.code === "not_available") {
+          // An extra item sold meanwhile: the buyer is told it dropped out; the rest of the trip goes.
+          await this.transition(item, "cancelled", "seller", seller, "listing_unavailable").catch(() => undefined);
+        } else {
+          // The main order is already confirmed: never leave it without a courier booking and an operator card
+          // because of one extra item. That item stays "new"; the operator sees it in the bundle.
+          console.error("bundle item confirm failed", item.id, err);
+        }
       }
     }
     // One courier booking, one operator card and one message to the buyer for the whole trip.

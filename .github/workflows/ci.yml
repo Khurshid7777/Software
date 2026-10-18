@@ -81,3 +81,18 @@ jobs:
           name: playwright-report
           path: apps/e2e/playwright-report
           retention-days: 7
+
+  docker:
+    # The production images build and the compose file is valid: a broken Dockerfile shows up here, not on deploy.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file
+        run: cp .env.example .env && docker compose config --quiet
+      - name: API image
+        run: docker build --target api -t ishonch-api:ci .
+      - name: Bot image
+        run: docker build --target bot -t ishonch-bot:ci .
+      - name: Mini App image
+        run: docker build -f apps/miniapp/Dockerfile -t ishonch-miniapp:ci .
