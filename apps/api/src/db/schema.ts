@@ -178,6 +178,8 @@ export const listings = pgTable(
     /** The last «Предложить избранным»: price and time (limits how often and how high the next one is). */
     likersOfferPrice: bigint("likers_offer_price", { mode: "number" }),
     likersOfferAt: timestamp("likers_offer_at", { withTimezone: true }),
+    /** «Предложить магазинам»: last time the listing went to verified shops (once a week). */
+    shopsOfferAt: timestamp("shops_offer_at", { withTimezone: true }),
     /**
      * Condition grade A–D (catalog filter «Класс A–B»). Mirrors computeGrade() in @ishonch/shared/passport —
      * the condition sets the best grade, checklist facts only lower it; a test keeps the two identical.

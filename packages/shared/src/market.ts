@@ -417,5 +417,15 @@ export type ChatReportReason = (typeof CHAT_REPORT_REASONS)[number];
 // ---------- Stage 20: notifications under control (docs/plan.md) ----------
 
 /** Optional messages a user can switch off. Orders, meetings, disputes and chat messages always come. */
-export const NOTIFY_TYPES = ["price_drop", "follow", "likers_offer", "saved_search", "review_reminder"] as const;
+export const NOTIFY_TYPES = ["price_drop", "follow", "likers_offer", "saved_search", "review_reminder", "shops_request"] as const;
 export type NotifyType = (typeof NOTIFY_TYPES)[number];
+
+// ---------- «Предложить магазинам» (stage 23) ----------
+
+/**
+ * A private seller who wants to sell today sends the listing to verified shops (Carousell/Swappa style instant
+ * offers): each shop answers with an ordinary price offer, the seller picks one. Ishonch only connects them.
+ */
+export const SHOPS_OFFER_EVERY_DAYS = 7;
+/** At most this many shops get one request (the longest-verified first). */
+export const SHOPS_OFFER_MAX = 30;

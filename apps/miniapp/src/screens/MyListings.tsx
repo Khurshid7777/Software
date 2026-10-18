@@ -206,7 +206,7 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
               )}
             </div>
           )}
-          {l.status === "active" && soldFor !== l.id && (moreFor === l.id || l.autoDrop || l.likersOffer) && (
+          {l.status === "active" && soldFor !== l.id && (moreFor === l.id || l.autoDrop || l.likersOffer || l.shopsOfferAt) && (
             <SellFaster api={api} listing={l} actions={moreFor === l.id} onDone={(m) => (setToast(m), load())} />
           )}
           {insightsFor === l.id && (

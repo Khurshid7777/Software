@@ -26,3 +26,19 @@ test("sell faster: offer a price to those who saved the item, then turn on the a
   await card.getByTestId("autodrop-stop").click();
   await expect(card.getByTestId("autodrop-status")).toHaveCount(0);
 });
+
+test("sell to shops: verified shops get the listing, and a second request waits a week", async ({ page }) => {
+  await open(page, PRIVATE_SELLER, "startapp=screen_my");
+  const card = page.getByTestId("my-listing").first();
+  await card.getByTestId("my-more").click();
+  await card.getByTestId("shops-open").click();
+  await expect(card.getByTestId("shops-form")).toContainText("раз в неделю");
+  await card.getByTestId("shops-send").click();
+  await expect(page.getByText(/Отправили проверенным магазинам: \d+/)).toBeVisible();
+  await expect(card.getByTestId("shops-last")).toBeVisible();
+
+  // «⋯ Ещё» stays open after the request.
+  await card.getByTestId("shops-open").click();
+  await card.getByTestId("shops-send").click();
+  await expect(card.getByTestId("sell-faster-error")).toContainText("раз в 7 дней");
+});

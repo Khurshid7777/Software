@@ -282,6 +282,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
 
   for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts", "follower_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
   queue.register("likers_offer_dms", (p) => ordersSvc.likersOfferDms(String(p.listingId), Number(p.price)));
+  queue.register("shops_offer_dms", (p) => ordersSvc.shopsOfferDms(String(p.listingId)));
 
   app.decorate("services", {
     queue,

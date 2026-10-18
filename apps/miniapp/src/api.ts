@@ -235,6 +235,8 @@ export function createApi(initData: string | null) {
       request<MeetingDto>(`/listings/${id}/meetings`, json("POST", body)),
     meetings: () => request<MeetingDto[]>("/meetings"),
     meetingAction: (id: string, action: string, body: object = {}) => request<MeetingDto>(`/meetings/${id}/${action}`, json("POST", body)),
+    offerToShops: (id: string) =>
+      request<{ sent: number; deferredUntil: string | null }>(`/listings/${id}/offer-shops`, json("POST", {})),
     offerToLikers: (id: string, amount: number) =>
       request<{ sent: number; price: number; expiresAt: string; deferredUntil: string | null }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {

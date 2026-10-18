@@ -24,6 +24,8 @@ import {
   CONDITION_FACTOR,
   GUARANTEE_DAYS,
   LIKERS_OFFER_EVERY_DAYS,
+  SHOPS_OFFER_EVERY_DAYS,
+  SHOPS_OFFER_MAX,
   LIKERS_OFFER_HOURS,
   maxLikersOffer,
   applyDiscount,
@@ -107,7 +109,9 @@ export type OrderError =
   | "likers_too_soon"
   | "likers_not_lower"
   | "likers_too_high"
-  | "no_likers";
+  | "no_likers"
+  | "shops_too_soon"
+  | "no_shops";
 
 export class OrderRejected extends Error {
   constructor(
@@ -357,6 +361,11 @@ export class OrderService {
     if (seller) {
       const lang = seller.language as Lang;
       const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      // A verified shop says so: the seller who asked shops for offers can tell them from private buyers.
+      const [shop] = await this.db
+        .select({ name: shops.name })
+        .from(shops)
+        .where(and(eq(shops.ownerUserId, buyer.id), eq(shops.verified, true)));
       await this.dm(
         seller,
         t(lang, "offer.new_for_seller", {
@@ -364,7 +373,7 @@ export class OrderService {
           amount: formatUzs(amount),
           price: formatUzs(l.price!),
           hours: OFFER_PENDING_HOURS,
-        }),
+        }) + (shop ? `\n${t(lang, "shops_offer.from_shop", { name: shop.name })}` : ""),
         [
           [
             { text: t(lang, "offer.accept"), callbackData: `offer:accept:${offer.id}` },
@@ -545,6 +554,71 @@ export class OrderService {
     if (deferredUntil) await this.d.enqueue!("likers_offer_dms", { listingId: l.id, price }, deferredUntil);
     else await this.likersOfferDms(l.id, price);
     return { sent: likers.length, price, expiresAt: expiresAt.toISOString(), deferredUntil: deferredUntil?.toISOString() ?? null };
+  }
+
+  /**
+   * «Предложить магазинам»: the listing goes to verified shops (not the seller's own, not banned, not blocked
+   * either way, not switched off), once per SHOPS_OFFER_EVERY_DAYS. Shops answer with an ordinary offer.
+   */
+  async offerToShops(seller: User, listingId: string, now = new Date()) {
+    const l = await this.availableListing(listingId);
+    if (l.sellerUserId !== seller.id) throw new OrderRejected("forbidden", 403);
+    if (l.shopsOfferAt && now.getTime() - l.shopsOfferAt.getTime() < SHOPS_OFFER_EVERY_DAYS * DAY_MS) throw new OrderRejected("shops_too_soon", 409);
+    const recipients = await this.shopsForRequest(l);
+    if (!recipients.length) throw new OrderRejected("no_shops", 409);
+    // Compare-and-set on the previous request time: a double tap sends one round.
+    const [claimed] = await this.db
+      .update(listings)
+      .set({ shopsOfferAt: now })
+      .where(and(eq(listings.id, l.id), l.shopsOfferAt ? eq(listings.shopsOfferAt, l.shopsOfferAt) : isNull(listings.shopsOfferAt)))
+      .returning({ id: listings.id });
+    if (!claimed) throw new OrderRejected("shops_too_soon", 409);
+    await this.d.repo.event(seller.id, "shops_offer_sent", { listingId: l.id, recipients: recipients.length });
+    const deferredUntil = this.d.enqueue ? (this.d.quietUntil?.(now) ?? null) : null;
+    if (deferredUntil) await this.d.enqueue!("shops_offer_dms", { listingId: l.id }, deferredUntil);
+    else await this.shopsOfferDms(l.id);
+    return { sent: recipients.length, deferredUntil: deferredUntil?.toISOString() ?? null };
+  }
+
+  private async shopsForRequest(l: Listing) {
+    return this.db
+      .select({ u: users, shopName: shops.name })
+      .from(shops)
+      .innerJoin(users, eq(users.id, shops.ownerUserId))
+      .where(
+        and(
+          eq(shops.verified, true),
+          ne(shops.ownerUserId, l.sellerUserId),
+          sql`${users.bannedAt} is null`,
+          sql`not ('shops_request' = any(${users.notifyOff}))`,
+          sql`not exists (select 1 from user_blocks b where (b.blocker_user_id = ${users.id} and b.blocked_user_id = ${l.sellerUserId})
+                or (b.blocker_user_id = ${l.sellerUserId} and b.blocked_user_id = ${users.id}))`,
+        ),
+      )
+      .orderBy(asc(shops.verifiedAt))
+      .limit(SHOPS_OFFER_MAX);
+  }
+
+  /** The request messages to shops (now, or in the morning after quiet hours). */
+  async shopsOfferDms(listingId: string) {
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.status !== "active" || !l.price) return 0;
+    const recipients = await this.shopsForRequest(l);
+    const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+    for (const { u } of recipients) {
+      const lang = u.language as Lang;
+      await this.dm(
+        u,
+        t(lang, "shops_offer.for_shop", {
+          title: listingTitle(l, lang),
+          price: formatUzs(l.price),
+          grade: l.grade ? ` · ${t(lang, "passport.grade", { grade: l.grade })}` : "",
+          hours: OFFER_PENDING_HOURS,
+        }),
+        [...(url ? [[{ text: t(lang, "shops_offer.make_offer"), url }]] : []), unsubscribeRow(lang, "shops_request")],
+      );
+    }
+    return recipients.length;
   }
 
   /** The messages of an offer to likers: to everyone whose personal price is still open. */

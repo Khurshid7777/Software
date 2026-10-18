@@ -13,6 +13,7 @@ import { groupDigits } from "../prefs";
 /**
  * «Продавать быстрее» on an active listing (docs/plan.md, stage 16): a one-off price for those who saved the
  * item (Poshmark "Offer to Likers") and a gradual price drop down to the seller's floor (Mercari Smart Pricing).
+ * Stage 23: «Предложить магазинам» — verified shops get the listing and answer with ordinary offers.
  */
 export function SellFaster({
   api,
@@ -28,7 +29,7 @@ export function SellFaster({
 }) {
   const t = useT();
   const lang = useLang();
-  const [mode, setMode] = useState<"likers" | "autodrop" | null>(null);
+  const [mode, setMode] = useState<"likers" | "autodrop" | "shops" | null>(null);
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +40,7 @@ export function SellFaster({
       month: "long",
     });
 
-  function open(m: "likers" | "autodrop") {
+  function open(m: "likers" | "autodrop" | "shops") {
     setError(null);
     setMode(mode === m ? null : m);
     setAmount(
@@ -83,6 +84,11 @@ export function SellFaster({
           })}
         </span>
       )}
+      {l.shopsOfferAt && (
+        <span className="hint" data-testid="shops-last">
+          {t("shops_offer.last", { date: date(l.shopsOfferAt) })}
+        </span>
+      )}
       {actions && (
         <div className="row wrap">
           {l.stats.favorites > 0 && (
@@ -117,9 +123,44 @@ export function SellFaster({
               {t("autodrop.button")}
             </button>
           )}
+          <button
+            className={mode === "shops" ? "chip active" : "chip"}
+            onClick={() => open("shops")}
+            data-testid="shops-open"
+          >
+            {t("shops_offer.button")}
+          </button>
         </div>
       )}
-      {actions && mode && (
+      {actions && mode === "shops" && (
+        <div className="hint-card stack-tight" data-testid="shops-form">
+          <span className="hint">{t("shops_offer.hint")}</span>
+          {error && (
+            <span className="error" data-testid="sell-faster-error">
+              {error}
+            </span>
+          )}
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() =>
+              run(() =>
+                api
+                  .offerToShops(l.id)
+                  .then(
+                    (r) =>
+                      t("shops_offer.sent", { n: r.sent }) +
+                      (r.deferredUntil ? ` ${t("shops_offer.deferred")}` : ""),
+                  ),
+              )
+            }
+            data-testid="shops-send"
+          >
+            {t("shops_offer.send")}
+          </button>
+        </div>
+      )}
+      {actions && (mode === "likers" || mode === "autodrop") && (
         <div className="hint-card stack-tight" data-testid={`${mode}-form`}>
           <strong>
             {t(mode === "likers" ? "likers.title" : "autodrop.title")}
