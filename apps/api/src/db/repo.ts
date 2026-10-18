@@ -104,9 +104,41 @@ export class Repo {
     await this.db.update(users).set({ acceptedTermsAt: new Date() }).where(eq(users.id, userId));
   }
 
-  /** Right to erasure: checks keep only anonymised data and are detached (user_id -> null). */
+  /**
+   * Right to erasure without erasing the other side's history. The user's orders, disputes and the reviews
+   * about them, and the listings those refer to, move to an anonymous "deleted account" placeholder (no
+   * Telegram id, no phone, banned so it never shows up); everything else of the user is deleted. Files are
+   * removed before (ListingService.purgeUserFiles), so the kept listings lose their photo rows too.
+   */
   async deleteUser(userId: string) {
-    await this.db.delete(users).where(eq(users.id, userId));
+    await this.db.transaction(async (tx) => {
+      const [ghost] = await tx
+        .insert(users)
+        .values({
+          // A unique negative id that no Telegram account can have.
+          telegramId: -(Date.now() * 1000 + Math.floor(Math.random() * 1000)),
+          language: "ru",
+          role: "deleted",
+          bannedAt: new Date(),
+          banReason: "account_deleted",
+        })
+        .returning({ id: users.id });
+      const g = ghost!.id;
+      await tx.execute(sql`
+        update listings set seller_user_id = ${g},
+          status = case when status in ('active', 'pending', 'reserved', 'draft', 'rejected') then 'archived' else status end
+        where seller_user_id = ${userId}
+          and (exists (select 1 from orders o where o.listing_id = listings.id)
+            or exists (select 1 from disputes d where d.listing_id = listings.id))`);
+      await tx.execute(sql`
+        delete from listing_photos where listing_id in (select id from listings where seller_user_id = ${g})`);
+      await tx.execute(sql`update orders set buyer_user_id = ${g} where buyer_user_id = ${userId}`);
+      await tx.execute(sql`update orders set seller_user_id = ${g} where seller_user_id = ${userId}`);
+      await tx.execute(sql`update disputes set buyer_user_id = ${g} where buyer_user_id = ${userId}`);
+      await tx.execute(sql`update disputes set seller_user_id = ${g} where seller_user_id = ${userId}`);
+      await tx.execute(sql`update reviews set seller_user_id = ${g} where seller_user_id = ${userId}`);
+      await tx.delete(users).where(eq(users.id, userId));
+    });
   }
 
   /**

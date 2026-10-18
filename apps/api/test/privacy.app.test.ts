@@ -10,7 +10,7 @@ import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig, productionWarnings } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { conversationMessages, conversations, listings, orders, priceReference, users } from "../src/db/schema.js";
+import { conversationMessages, conversations, disputes, listings, orders, priceReference, reviews, users } from "../src/db/schema.js";
 import type { CourierProvider } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../src/telegram/publisher.js";
@@ -186,5 +186,34 @@ describe.skipIf(!reachable)("privacy and account deletion (integration)", () => 
     expect(productionWarnings(loadConfig(base))).toHaveLength(2); // default DB password, CORS *
     const safe = loadConfig({ ...base, DATABASE_URL: "postgres://ishonch:Str0ng-pass@db:5432/ishonch", CORS_ORIGIN: "https://app.example" });
     expect(productionWarnings(safe)).toEqual([]);
+  });
+
+  it("a deleted seller's sales stay in the buyer's history, anonymised; the rest of the account is gone", async () => {
+    const l = await liveListing({ status: "sold" });
+    const other = await liveListing(); // never ordered: deleted with the account
+    const buyer = await userId(BUYER);
+    const [o] = await db
+      .insert(orders)
+      .values({ listingId: l.id, buyerUserId: buyer, sellerUserId: l.sellerUserId, mode: "cod_seller", status: "delivered", deliveredAt: new Date(Date.now() - 10 * 864e5), district: "chilonzor", address: "", quote: { itemPrice: 1 }, feePayer: "buyer" })
+      .returning();
+    await db.insert(reviews).values({ orderId: o!.id, listingId: l.id, sellerUserId: l.sellerUserId, buyerUserId: buyer, rating: 2 });
+    await db.insert(disputes).values({ orderId: o!.id, listingId: l.id, buyerUserId: buyer, sellerUserId: l.sellerUserId, reason: "not_working", text: "Сломался на второй день", status: "resolved", resolution: "refund" });
+
+    expect((await app.inject({ method: "DELETE", url: "/me", headers: tma(SELLER) })).statusCode).toBe(200);
+    expect(await db.select().from(users).where(eq(users.telegramId, SELLER))).toHaveLength(0);
+    expect(await db.select().from(listings).where(eq(listings.id, other.id))).toHaveLength(0);
+
+    const [kept] = await db.select().from(orders).where(eq(orders.id, o!.id));
+    expect(kept).toBeTruthy();
+    const [ghost] = await db.select().from(users).where(eq(users.id, kept!.sellerUserId));
+    expect(ghost).toMatchObject({ role: "deleted", phone: null, banReason: "account_deleted" });
+    expect(ghost!.telegramId).toBeLessThan(0);
+    expect((await db.select().from(disputes).where(eq(disputes.orderId, o!.id)))[0]!.sellerUserId).toBe(ghost!.id);
+    expect((await db.select().from(reviews).where(eq(reviews.orderId, o!.id)))[0]!.sellerUserId).toBe(ghost!.id);
+    // The buyer still sees the order; the placeholder is not listed among banned users.
+    const mine = (await app.inject({ url: "/orders/mine?role=buyer", headers: tma(BUYER) })).json() as Array<{ id: string }>;
+    expect(mine.some((x) => x.id === o!.id)).toBe(true);
+    const banned = (await app.inject({ url: "/admin/users/banned", headers: tma(ADMIN) })).json() as Array<{ id: string }>;
+    expect(banned.some((b) => b.id === ghost!.id)).toBe(false);
   });
 });

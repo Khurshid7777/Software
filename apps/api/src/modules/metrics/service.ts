@@ -52,7 +52,7 @@ export class MetricsService {
         count(*) filter (where created_at >= ${ts(from)}) as new,
         count(*) filter (where banned_at is not null) as banned,
         count(*) filter (where role in ('seller', 'shop')) as sellers
-      from users`);
+      from users where role <> 'deleted'`);
     const active = await this.one(sql`
       select count(distinct user_id) as n from events where created_at >= ${ts(from)} and user_id is not null`);
 
