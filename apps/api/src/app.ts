@@ -269,7 +269,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
   meetingRoutes(app, meetingsSvc, { requireUser: auth.requireUser });
-  safetyRoutes(app, new SafetyService({ repo, staff, adminLink }), {
+  safetyRoutes(app, new SafetyService({ repo, staff, adminLink, recheckImei: (imei, reporter) => listingsSvc.recheckImei(imei, reporter) }), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
     requireAdmin: auth.requireRole("admin"),

@@ -7,7 +7,7 @@ const LINKS = {
   privacy: import.meta.env.VITE_PRIVACY_URL ?? "",
 };
 
-type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications";
+type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications" | "stolen";
 
 interface Props {
   staff?: "admin" | "operator" | null;
@@ -56,6 +56,7 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount }
         {row("check", "🔎", t("home.tekshir.title"), t("home.tekshir.desc"))}
         {row("notifications", "🔔", t("notify.open"), t("notify.desc"))}
         {row("blocks", "🚫", t("blocks.open"), t("blocks.desc"))}
+        {row("stolen", "🚨", t("stolen.open"), t("stolen.desc"))}
         {staff && row("admin", "🛠", staff === "admin" ? "Админка" : "Заказы на доставку", "Ishonch staff")}
       </section>
 

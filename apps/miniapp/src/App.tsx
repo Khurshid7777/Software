@@ -20,6 +20,7 @@ import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
 import { Blocks } from "./screens/Blocks";
 import { Wanted } from "./screens/Wanted";
+import { Stolen } from "./screens/Stolen";
 import { Notifications } from "./screens/Notifications";
 import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
@@ -34,6 +35,7 @@ type Screen =
   | { name: "shop" }
   | { name: "blocks" }
   | { name: "wanted" }
+  | { name: "stolen" }
   | { name: "notifications" }
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
@@ -293,6 +295,9 @@ export function App({ env }: { env: TelegramEnv }) {
         break;
       case "blocks":
         body = <Blocks api={api} />;
+        break;
+      case "stolen":
+        body = <Stolen api={api} />;
         break;
       case "wanted":
         body = <Wanted api={api} onSell={() => go({ name: "sell" })} />;

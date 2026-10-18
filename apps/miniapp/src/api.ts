@@ -39,6 +39,7 @@ import type {
   OrderDto,
   ReviewDto,
   SellerRating,
+  StolenReportDto,
   WantedRequest,
 } from "@ishonch/shared/client";
 
@@ -312,6 +313,10 @@ export function createApi(initData: string | null) {
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
     setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
     wanted: () => request<WantedRequest[]>("/wanted"),
+    stolenReports: () => request<StolenReportDto[]>("/me/stolen"),
+    reportStolen: (body: { imei: string; kind: "stolen" | "lost"; policeReport?: string }) =>
+      request<{ id: number; held: number }>("/me/stolen", json("POST", body)),
+    withdrawStolen: (id: number) => request<{ ok: true }>(`/me/stolen/${id}`, { method: "DELETE" }),
     shopRequests: () => request<CatalogItem[]>("/shops/mine/requests"),
     offerToWanted: (id: number, listingId: string) => request<{ ok: true }>(`/wanted/${id}/offer`, json("POST", { listingId })),
     contact: (id: string, text: string) => request<{ ok: true }>(`/listings/${id}/contact`, json("POST", { text })),

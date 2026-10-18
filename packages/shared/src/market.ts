@@ -453,3 +453,19 @@ export interface WantedRequest {
   createdAt: string;
   matches: Array<{ id: string; title: string; price: number | null; offered: boolean }>;
 }
+
+// ---------- «Украли телефон» (stage 27) ----------
+
+export const STOLEN_KINDS = ["stolen", "lost"] as const;
+export type StolenKind = (typeof STOLEN_KINDS)[number];
+/** Open reports one person may have at a time. */
+export const STOLEN_REPORTS_MAX = 3;
+
+export interface StolenReportDto {
+  id: number;
+  /** Last 4 digits only: the full IMEI is not shown back. */
+  imeiTail: string;
+  kind: StolenKind;
+  policeReport: string | null;
+  createdAt: string;
+}

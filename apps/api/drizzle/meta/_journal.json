@@ -169,6 +169,13 @@
       "when": 1792352029651,
       "tag": "0023_wanted",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792353729446,
+      "tag": "0024_stolen_reports",
+      "breakpoints": true
     }
   ]
 }

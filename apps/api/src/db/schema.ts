@@ -722,3 +722,26 @@ export const chatReports = pgTable(
   },
   (t) => [uniqueIndex("chat_reports_conv_reporter_uq").on(t.conversationId, t.reporterUserId)],
 );
+
+/**
+ * «Украли телефон» (stage 27): an owner reports the IMEI of a stolen or lost phone. A listing with that IMEI goes
+ * to a moderator (a person decides: reports can be wrong); `withdrawnAt` — the owner found it or closed the report.
+ */
+export const stolenReports = pgTable(
+  "stolen_reports",
+  {
+    id: serial("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    imei: text("imei").notNull(),
+    kind: text("kind").notNull(),
+    policeReport: text("police_report"),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("stolen_reports_open_uq").on(t.userId, t.imei).where(sql`${t.withdrawnAt} is null`),
+    index("stolen_reports_imei_idx").on(t.imei).where(sql`${t.withdrawnAt} is null`),
+  ],
+);

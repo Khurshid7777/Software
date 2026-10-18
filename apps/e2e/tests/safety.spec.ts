@@ -32,3 +32,20 @@ test("notification settings: a type switched off stays off after reopening", asy
   const me = await asBot<{ notifyOff: string[] }>("GET", "/me", BUYER);
   expect(me.notifyOff).toEqual(["price_drop"]);
 });
+
+test("stolen phone: the owner reports an IMEI, sees it by its last digits, then marks it found", async ({ page }) => {
+  await open(page, BUYER);
+  await page.getByTestId("tab-profile").click();
+  await page.getByTestId("open-stolen").click();
+  await page.getByTestId("stolen-imei").fill("35 7000 1122 3344 7");
+  await expect(page.getByTestId("stolen-send")).toBeDisabled(); // wrong check digit
+  await page.getByTestId("stolen-imei").fill("356100112233448");
+  await page.getByTestId("stolen-police").fill("123/45");
+  await page.getByTestId("stolen-send").click();
+  await expect(page.getByText("Сообщение принято")).toBeVisible();
+  const row = page.getByTestId("stolen-row").filter({ hasText: "…3448" });
+  await expect(row).toBeVisible();
+  page.once("dialog", (d) => void d.accept());
+  await row.getByTestId("stolen-found").click();
+  await expect(row).toHaveCount(0);
+});

@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, or, sql, ne } from "drizzle-orm";
 import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
@@ -420,6 +420,19 @@ export class ListingService {
     if (price < l.price!) return { previousPrice: reference, priceDroppedAt: now };
     if (price >= reference) return { previousPrice: null, priceDroppedAt: null };
     return {}; // raised, but still below the old price: the badge stays
+  }
+
+  /**
+   * «Украли телефон»: live listings with a newly reported IMEI go through moderation again (and to a moderator,
+   * since the report makes the review hold them). The reporter's own listings are not touched.
+   */
+  async recheckImei(imei: string, reporterId: string) {
+    const rows = await this.db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(and(eq(listings.imei, imei), eq(listings.status, "active"), ne(listings.sellerUserId, reporterId)));
+    for (const r of rows) await this.remoderate(r.id);
+    return rows.length;
   }
 
   private async remoderate(id: string) {
