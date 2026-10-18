@@ -49,6 +49,7 @@ import {
   searchNotifications,
   shops,
   users,
+  type Listing,
   type User,
 } from "../../db/schema.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
@@ -529,7 +530,11 @@ export class CatalogService {
     const tips: ListingInsights["tips"] = [];
     const phone = (IMEI_CATEGORIES as readonly string[]).includes(l.category);
     const checklist = (l.checklist ?? {}) as ConditionChecklist;
+    const demand = await this.demand(l);
     if (market && market.diffPct >= 10) tips.push({ code: "price_above_market", severity: "high", params: { pct: market.diffPct, median: formatUzs(market.median) } });
+    if (demand.cheaper > 0 && demand.cheaperMax) {
+      tips.push({ code: "searchers_cheaper", severity: "high", params: { n: demand.cheaper, max: formatUzs(demand.cheaperMax) } });
+    }
     if (l.favoritesCount >= 3 && l.requestsCount === 0) tips.push({ code: "favorites_no_requests", severity: "high", params: { n: l.favoritesCount } });
     if (days >= 3 && categoryViewsPerDay && viewsPerDay < categoryViewsPerDay * 0.5) {
       tips.push({ code: "low_views", severity: "medium", params: { mine: viewsPerDay, avg: categoryViewsPerDay } });
@@ -546,7 +551,51 @@ export class CatalogService {
     return {
       stats: { daysOnSale: days, views: l.views, viewsPerDay, categoryViewsPerDay, favorites: l.favoritesCount, requests: l.requestsCount },
       market,
+      demand,
       tips,
+    };
+  }
+
+  /** Who is looking for this item: saved searches that match it (with and without their price cap) and model favorites. */
+  private async demand(l: Listing): Promise<ListingInsights["demand"]> {
+    const searches = await this.db
+      .select({ userId: savedSearches.userId, filters: savedSearches.filters })
+      .from(savedSearches)
+      .innerJoin(users, eq(users.id, savedSearches.userId))
+      .where(
+        sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null
+          and (${savedSearches.filters}->>'category' is null or ${savedSearches.filters}->>'category' = ${l.category})
+          and (${savedSearches.filters}->>'district' is null or ${savedSearches.filters}->>'district' = ${l.district ?? ""})`,
+      )
+      .orderBy(desc(savedSearches.createdAt))
+      .limit(300);
+    const searching = new Set<string>();
+    const cheaper = new Map<string, number>();
+    for (const s of searches) {
+      if (searching.has(s.userId)) continue;
+      const { priceMax, priceMin, ...rest } = s.filters as CatalogFilters;
+      if (priceMin != null && l.price != null && l.price < priceMin) continue;
+      if (!(await this.searchIds(rest, "newest", 0, 1, [eq(listings.id, l.id)])).length) continue;
+      if (priceMax == null || l.price == null || priceMax >= l.price) {
+        searching.add(s.userId);
+        cheaper.delete(s.userId);
+      } else cheaper.set(s.userId, Math.max(cheaper.get(s.userId) ?? 0, priceMax));
+    }
+    const modelKey = (l.attributes as { modelKey?: string | null }).modelKey;
+    let modelFavorites: number | null = null;
+    if (modelKey) {
+      const [row] = (await this.db.execute(sql`
+        select count(distinct f.user_id)::int as n
+        from ${favorites} f join ${listings} x on x.id = f.listing_id
+        where x.attributes->>'modelKey' = ${modelKey} and f.user_id <> ${l.sellerUserId}
+          and f.created_at > now() - interval '30 days'`)) as unknown as Array<{ n: number }>;
+      modelFavorites = row?.n ?? 0;
+    }
+    return {
+      searching: searching.size,
+      cheaper: cheaper.size,
+      cheaperMax: cheaper.size ? Math.max(...cheaper.values()) : null,
+      modelFavorites,
     };
   }
 

@@ -397,6 +397,8 @@ export class ListingService {
     // approved at a fair price, then dropped to lure buyers), goes through moderation again.
     const baitDrop = priceChanged && patch.price! < l.price! * (1 - BAIT_DROP_PCT / 100);
     if ((textChanged || imeiChanged || baitDrop) && l.status === "active") await this.remoderate(id);
+    // A lower price may now fit saved searches capped below the old one (each search hears about a listing once).
+    if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.status === "active") await this.schedule("saved_search_alerts", { listingId: id });
     if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.price! - patch.price! >= (l.price! * PRICE_DROP_MIN_PCT) / 100) {
       await this.schedule("price_drop_alerts", { listingId: id, price: patch.price }, this.quiet(now));
     }

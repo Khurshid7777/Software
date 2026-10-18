@@ -4,7 +4,7 @@ import { ApiError, type Api } from "../api";
 import { useT } from "../i18n";
 
 /** Tips that the seller fixes in the editor vs. by bumping the listing. */
-const EDIT_TIPS: InsightTip[] = ["price_above_market", "favorites_no_requests", "few_photos", "short_description", "no_checklist", "no_account_check", "no_imei", "no_cod"];
+const EDIT_TIPS: InsightTip[] = ["price_above_market", "searchers_cheaper", "favorites_no_requests", "few_photos", "short_description", "no_checklist", "no_account_check", "no_imei", "no_cod"];
 const BUMP_TIPS: InsightTip[] = ["low_views", "stale"];
 
 /** "Почему не продаётся": numbers of the listing and concrete next steps. */
@@ -52,6 +52,16 @@ export function Insights({ api, listingId, onEdit, onBump }: { api: Api; listing
             sign: data.market.diffPct > 0 ? "+" : "",
             pct: data.market.diffPct,
           })}
+        </span>
+      )}
+      {(data.demand.searching > 0 || data.demand.cheaper > 0) && (
+        <span className="hint" data-testid="insights-demand">
+          {t("insights.demand", { searching: data.demand.searching, cheaper: data.demand.cheaper })}
+        </span>
+      )}
+      {data.demand.modelFavorites != null && data.demand.modelFavorites > 0 && (
+        <span className="hint" data-testid="insights-demand-model">
+          {t("insights.demand_model", { n: data.demand.modelFavorites })}
         </span>
       )}
       {data.tips.length === 0 ? (

@@ -182,6 +182,7 @@ export const MAX_BUNDLE_EXTRA = 4;
 // ---------- seller insights ("почему не продаётся") ----------
 export const INSIGHT_TIPS = [
   "price_above_market",
+  "searchers_cheaper",
   "favorites_no_requests",
   "low_views",
   "stale",
@@ -206,6 +207,12 @@ export interface ListingInsights {
   };
   /** Market price for the model (median) and how far the listing is from it, %. */
   market: { median: number; diffPct: number } | null;
+  /**
+   * Stage 24 «Спрос»: distinct people whose saved searches match the listing at its price, those whose search
+   * matches the item but caps the price lower (and the highest such cap), and people who saved the same model
+   * in the last 30 days (null without a recognised model).
+   */
+  demand: { searching: number; cheaper: number; cheaperMax: number | null; modelFavorites: number | null };
   /** Most important first. */
   tips: Array<{ code: InsightTip; severity: "high" | "medium" | "low"; params: Record<string, string | number> }>;
 }
