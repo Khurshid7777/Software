@@ -97,7 +97,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       botToken: config.BOT_TOKEN,
       internalToken: config.INTERNAL_API_TOKEN,
       maxAgeSec: config.INIT_DATA_MAX_AGE_SEC,
-    });
+    }, config.REDIS_URL);
   }
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {

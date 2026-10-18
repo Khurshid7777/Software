@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { Redis } from "ioredis";
 import { validateInitData } from "./auth/telegram.js";
 
 /** Per-route limits per user and minute; everything else gets the global limit. */
@@ -61,15 +62,37 @@ export function makeRateKey(secrets: RateKeySecrets) {
   };
 }
 
-/** Must be registered before routes: limits are attached in the onRoute hook. In-memory store per instance. */
-export async function registerRateLimits(app: FastifyInstance, secrets: RateKeySecrets) {
+/**
+ * Must be registered before routes: limits are attached in the onRoute hook. Counters live in memory per
+ * instance unless redisUrl is given; with several replicas they must be shared or each replica multiplies the limit.
+ */
+export async function registerRateLimits(app: FastifyInstance, secrets: RateKeySecrets, redisUrl = "") {
   app.addHook("onRoute", (route) => {
     const methods = Array.isArray(route.method) ? route.method : [route.method];
     const max = methods.map((m) => ROUTE_LIMITS[`${m} ${route.url}`]).find((x) => x !== undefined);
     if (max !== undefined) route.config = { ...(route.config as object), rateLimit: { max, timeWindow: "1 minute" } };
   });
+  let redis: Redis | undefined;
+  if (redisUrl) {
+    // Fail fast instead of queueing: a request must not wait for Redis to come back.
+    redis = new Redis(redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1, enableOfflineQueue: false });
+    redis.on("error", (err) => app.log.warn({ err: err.message }, "rate limit redis error"));
+    app.addHook("onClose", async () => {
+      redis?.disconnect();
+    });
+    // Without the offline queue, requests before the first connect would skip the limit; wait briefly for it.
+    const ready = redis;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      ready.once("ready", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
   await app.register(rateLimit, {
     global: true,
+    ...(redis ? { redis, nameSpace: "ishonch-rl:", skipOnError: true } : {}),
     max: GLOBAL_LIMIT,
     timeWindow: "1 minute",
     keyGenerator: makeRateKey(secrets),

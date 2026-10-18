@@ -51,6 +51,8 @@ const EnvSchema = z.object({
   APP_VERSION: z.string().default("dev"),
   // Per-user request limits (off in tests unless set explicitly).
   RATE_LIMITS: z.enum(["on", "off"]).optional(),
+  // Shared rate-limit counters for several API replicas (redis://host:6379). Empty: in-memory per instance.
+  REDIS_URL: z.string().default(""),
   // Behind nginx: take the client IP from X-Forwarded-For.
   TRUST_PROXY: z
     .string()
