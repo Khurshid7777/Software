@@ -316,6 +316,7 @@ export function createApi(initData: string | null) {
     saveSearch: (f: CatalogFilters) => request<SavedSearch>("/searches", json("POST", f)),
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
     setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
+    setSearchBelowMarket: (id: number, pct: number | null) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { belowMarketPct: pct })),
     wanted: () => request<WantedRequest[]>("/wanted"),
     stolenReports: () => request<StolenReportDto[]>("/me/stolen"),
     reportStolen: (body: { imei: string; kind: "stolen" | "lost"; policeReport?: string }) =>

@@ -474,3 +474,8 @@ export interface StolenReportDto {
 
 /** A seller may be away at most this long in one go; it ends by itself. */
 export const AWAY_MAX_DAYS = 30;
+
+// ---------- «Ниже рынка» in saved searches (stage 33) ----------
+
+/** How far below the model's market price a saved search may ask for, %. */
+export const BELOW_MARKET_STEPS = [10, 15, 20] as const;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useOnShow } from "../leave";
-import type { CatalogItem, ListingSeller } from "@ishonch/shared/client";
+import { BELOW_MARKET_STEPS, type CatalogItem, type ListingSeller } from "@ishonch/shared/client";
 import { ApiError, type Api, type SavedSearch } from "../api";
 import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
@@ -95,6 +95,22 @@ export function Favorites({ api, visible = true, onOpen, onSearch, onCatalog, on
             data-testid="search-public"
           >
             🙋 {t(s.public ? "searches.public_on" : "searches.public_off")}
+          </button>
+          <button
+            className={s.filters.belowMarketPct ? "chip active" : "chip"}
+            title={t("searches.below_market_hint")}
+            onClick={() => {
+              // 10 → 15 → 20 → off.
+              const steps: Array<number | null> = [...BELOW_MARKET_STEPS, null];
+              const next = steps[(steps.indexOf(s.filters.belowMarketPct ?? null) + 1) % steps.length] ?? null;
+              api
+                .setSearchBelowMarket(s.id, next)
+                .then((row) => setSearches((list) => list.map((x) => (x.id === s.id ? row : x))))
+                .catch(fail);
+            }}
+            data-testid="search-below-market"
+          >
+            {s.filters.belowMarketPct ? t("searches.below_market_on", { pct: s.filters.belowMarketPct }) : t("searches.below_market_off")}
           </button>
           <button
             className="link danger"

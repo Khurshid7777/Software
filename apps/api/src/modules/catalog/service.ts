@@ -624,9 +624,18 @@ export class CatalogService {
     const cheaper = new Map<string, number>();
     for (const s of searches) {
       if (searching.has(s.userId)) continue;
-      const { priceMax, priceMin, ...rest } = s.filters as CatalogFilters;
+      const { priceMax: cap, priceMin, belowMarketPct, ...rest } = s.filters as CatalogFilters;
       if (priceMin != null && l.price != null && l.price < priceMin) continue;
       if (!(await this.searchIds(rest, "newest", 0, 1, [eq(listings.id, l.id)])).length) continue;
+      // «Ниже рынка на N %» is one more price cap: the market median minus N %.
+      let priceMax = cap;
+      if (belowMarketPct) {
+        const key = (l.attributes as { modelKey?: string | null }).modelKey;
+        const range = key ? (await this.marketRange(key)).range : null;
+        if (!range) continue;
+        const marketCap = Math.floor((range.median * (1 - belowMarketPct / 100)) / 1000) * 1000;
+        priceMax = priceMax == null ? marketCap : Math.min(priceMax, marketCap);
+      }
       if (priceMax == null || l.price == null || priceMax >= l.price) {
         searching.add(s.userId);
         cheaper.delete(s.userId);
@@ -693,24 +702,51 @@ export class CatalogService {
   }
 
   // ---------- saved searches ----------
-  async saveSearch(user: User, filters: CatalogFilters) {
-    const [{ n }] = (await this.db.select({ n: count() }).from(savedSearches).where(eq(savedSearches.userId, user.id))) as [
-      { n: number },
-    ];
-    if (n >= MAX_SAVED_SEARCHES) throw new CatalogRejected("too_many_searches", 409);
-    const lang = user.language as Lang;
+  private searchTitle(filters: CatalogFilters, lang: Lang) {
     const parts = [
       filters.q,
       filters.category ? t(lang, `category.${filters.category}`) : null,
       filters.priceMax ? `≤ ${formatUzs(filters.priceMax)}` : null,
       filters.verifiedOnly ? "✔️" : null,
       filters.goodGrade ? "A–B" : null,
+      filters.belowMarketPct ? t(lang, "searches.below_market_short", { pct: filters.belowMarketPct }) : null,
     ].filter(Boolean);
+    return parts.join(" · ") || t(lang, "catalog.title");
+  }
+
+  async saveSearch(user: User, filters: CatalogFilters) {
+    const [{ n }] = (await this.db.select({ n: count() }).from(savedSearches).where(eq(savedSearches.userId, user.id))) as [
+      { n: number },
+    ];
+    if (n >= MAX_SAVED_SEARCHES) throw new CatalogRejected("too_many_searches", 409);
     const [row] = await this.db
       .insert(savedSearches)
-      .values({ userId: user.id, filters, title: parts.join(" · ") || t(lang, "catalog.title") })
+      .values({ userId: user.id, filters, title: this.searchTitle(filters, user.language as Lang) })
       .returning();
     return row!;
+  }
+
+  /** «Ниже рынка» (stage 33): null switches it off. The title follows. */
+  async setSearchBelowMarket(user: User, id: number, pct: number | null) {
+    const [s] = await this.db.select().from(savedSearches).where(and(eq(savedSearches.id, id), eq(savedSearches.userId, user.id)));
+    if (!s) throw new CatalogRejected("not_found", 404);
+    const { belowMarketPct: _, ...rest } = s.filters as CatalogFilters;
+    const filters: CatalogFilters = pct ? { ...rest, belowMarketPct: pct } : rest;
+    const [row] = await this.db
+      .update(savedSearches)
+      .set({ filters, title: this.searchTitle(filters, user.language as Lang) })
+      .where(eq(savedSearches.id, id))
+      .returning();
+    return row!;
+  }
+
+  /** A saved search's «ниже рынка на N %»: the item must be that far below the model's market median. */
+  private async belowMarketOk(l: Pick<Listing, "price" | "attributes">, pct: number | undefined) {
+    if (!pct) return true;
+    const key = (l.attributes as { modelKey?: string | null }).modelKey;
+    if (!key || !l.price) return false;
+    const range = (await this.marketRange(key)).range;
+    return !!range && l.price <= range.median * (1 - pct / 100);
   }
 
   listSearches(user: User) {
@@ -791,7 +827,11 @@ export class CatalogService {
     const s = row.s;
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
     if (!l || l.sellerUserId !== seller.id || l.status !== "active") throw new CatalogRejected("not_found", 404);
-    if (!(await this.searchIds(s.filters as CatalogFilters, "newest", 0, 1, [eq(listings.id, l.id)])).length) {
+    const wantedFilters = s.filters as CatalogFilters;
+    if (
+      !(await this.searchIds(wantedFilters, "newest", 0, 1, [eq(listings.id, l.id)])).length ||
+      !(await this.belowMarketOk(l, wantedFilters.belowMarketPct))
+    ) {
       throw new CatalogRejected("wanted_no_match", 400);
     }
     const [heard] = await this.db
@@ -866,6 +906,7 @@ export class CatalogService {
       }
       const ids = await this.searchIds(s.filters as CatalogFilters, "newest", 0, 1, [eq(listings.id, listingId)]);
       if (ids.length === 0) continue;
+      if (!(await this.belowMarketOk(l, (s.filters as CatalogFilters).belowMarketPct))) continue;
       const [{ today }] = (await this.db
         .select({ today: count() })
         .from(searchNotifications)

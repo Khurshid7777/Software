@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandl
 import { z } from "zod";
 import {
   AssistantMessageSchema,
+  BELOW_MARKET_STEPS,
   CATALOG_SORTS,
   CatalogFiltersSchema,
   CONDITIONS,
@@ -153,9 +154,23 @@ export function catalogRoutes(
   );
   app.patch<{ Params: { id: string } }>("/searches/:id", { preHandler: requireUser }, (req, reply) =>
     handle(req, reply, async () => {
-      const parsed = z.object({ public: z.boolean() }).safeParse(req.body);
+      const parsed = z
+        .object({
+          public: z.boolean().optional(),
+          belowMarketPct: z
+            .number()
+            .int()
+            .refine((v) => (BELOW_MARKET_STEPS as readonly number[]).includes(v))
+            .nullable()
+            .optional(),
+        })
+        .safeParse(req.body);
       if (!parsed.success || !Number.isInteger(Number(req.params.id))) return reply.code(400).send({ error: "bad_request" });
-      return catalog.setSearchPublic(req.user!, Number(req.params.id), parsed.data.public);
+      const id = Number(req.params.id);
+      let row = parsed.data.public !== undefined ? await catalog.setSearchPublic(req.user!, id, parsed.data.public) : null;
+      if (parsed.data.belowMarketPct !== undefined) row = await catalog.setSearchBelowMarket(req.user!, id, parsed.data.belowMarketPct);
+      if (!row) return reply.code(400).send({ error: "bad_request" });
+      return row;
     }),
   );
   // Stage 26: a verified shop's inbox of «Предложить магазинам» requests.
