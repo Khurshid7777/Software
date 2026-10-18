@@ -162,6 +162,8 @@ export class CatalogService {
     const c: SQL[] = [
       sql`${listings.status} = 'active'`,
       sql`(${listings.expiresAt} is null or ${listings.expiresAt} > now())`,
+      // «В отъезде»: an away seller's listings leave the catalog (and searches, alerts) until they are back.
+      sql`not exists (select 1 from users u where u.id = ${listings.sellerUserId} and u.away_until > now())`,
     ];
     if (f.category) c.push(eq(listings.category, f.category));
     if (f.priceMin != null) c.push(gte(listings.price, f.priceMin));

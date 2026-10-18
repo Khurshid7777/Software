@@ -948,7 +948,15 @@ export class ListingService {
     const due = await this.db
       .select()
       .from(listings)
-      .where(and(eq(listings.status, "active"), sql`${listings.autoDropFloor} is not null`, lte(listings.autoDropAt, now)))
+      .where(
+        and(
+          eq(listings.status, "active"),
+          sql`${listings.autoDropFloor} is not null`,
+          lte(listings.autoDropAt, now),
+          // A seller away (stage 28) gets no price drops while nobody can buy; they resume on return.
+          sql`not exists (select 1 from users u where u.id = ${listings.sellerUserId} and u.away_until > ${now.toISOString()})`,
+        ),
+      )
       .limit(200);
     let dropped = 0;
     for (const l of due) {
@@ -1154,7 +1162,7 @@ export class ListingService {
    * Public facts about sellers (shop, platform sales, rating, reply time, courier inspections), batched:
    * a fixed number of queries for any number of sellers. Listing cards and the seller page use it.
    */
-  async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt">>): Promise<Map<string, ListingSeller>> {
+  async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt"> & { awayUntil?: Date | null }>): Promise<Map<string, ListingSeller>> {
     const sellerIds = sellers.map((u) => u.id);
     if (!sellerIds.length) return new Map();
     const [shopRows, sales, ratings, responseOf, insp, lost, fans] = await Promise.all([
@@ -1218,6 +1226,7 @@ export class ListingService {
                 }
               : null,
             followers: fansOf.get(u.id) ?? 0,
+            awayUntil: u.awayUntil && u.awayUntil > new Date() ? u.awayUntil.toISOString() : null,
             responseMinutes: responseOf.get(u.id) ?? null,
             inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
             disputesLost: lostOf.get(u.id) ?? 0,
@@ -1394,6 +1403,7 @@ export class ListingService {
           inspections: { passed: 0, failed: 0 },
           disputesLost: 0,
           followers: 0,
+          awayUntil: null,
           badges: [],
         };
       }

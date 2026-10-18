@@ -111,6 +111,7 @@ export type OrderError =
   | "likers_too_high"
   | "no_likers"
   | "shops_too_soon"
+  | "seller_away"
   | "no_shops";
 
 export class OrderRejected extends Error {
@@ -188,6 +189,8 @@ export class OrderService {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
     if (!l) throw new OrderRejected("not_found", 404);
     if (l.status !== "active" || !l.price || (l.expiresAt && l.expiresAt <= new Date())) throw new OrderRejected("not_available", 409);
+    const [seller] = await this.db.select({ awayUntil: users.awayUntil }).from(users).where(eq(users.id, l.sellerUserId));
+    if (seller?.awayUntil && seller.awayUntil > new Date()) throw new OrderRejected("seller_away", 409);
     return l;
   }
 

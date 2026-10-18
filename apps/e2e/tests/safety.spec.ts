@@ -49,3 +49,23 @@ test("stolen phone: the owner reports an IMEI, sees it by its last digits, then 
   await row.getByTestId("stolen-found").click();
   await expect(row).toHaveCount(0);
 });
+
+test("away mode: the seller leaves, buyers see the return date and no order button; back — the button returns", async ({ page, browser }) => {
+  const [l] = await asBot<Array<{ id: string }>>("GET", "/listings/mine?status=active", PRIVATE_SELLER);
+  await open(page, PRIVATE_SELLER);
+  await page.getByTestId("tab-profile").click();
+  await page.getByTestId("open-away").click();
+  await page.getByTestId("away-on").click();
+  await expect(page.getByTestId("away-status")).toBeVisible();
+
+  const buyer = await browser.newPage();
+  await open(buyer, BUYER, `startapp=listing_${l!.id}`);
+  await expect(buyer.getByTestId("seller-away")).toBeVisible();
+  await expect(buyer.getByTestId("buy-delivery")).toHaveCount(0);
+
+  await page.getByTestId("away-off").click();
+  await expect(page.getByTestId("away-on")).toBeVisible();
+  await buyer.reload();
+  await expect(buyer.getByTestId("buy-delivery")).toBeVisible();
+  await expect(buyer.getByTestId("seller-away")).toHaveCount(0);
+});

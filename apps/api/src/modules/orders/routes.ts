@@ -52,6 +52,7 @@ const MESSAGES: Record<string, string> = {
   likers_too_high: "likers.err.too_high",
   no_likers: "likers.err.none",
   shops_too_soon: "shops_offer.err.too_soon",
+  seller_away: "away.err.seller_away",
   no_shops: "shops_offer.err.none",
 };
 

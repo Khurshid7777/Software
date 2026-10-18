@@ -26,7 +26,7 @@ const [shop] = await db
   .onConflictDoUpdate({ target: shops.ownerUserId, set: { verified: true, bundle2Pct: 0, bundle3Pct: 0 } })
   .returning();
 await db.delete(follows).where(inArray(follows.sellerUserId, [shopOwner.id, privateSeller.id]));
-await db.execute(dsql`update users set notify_off = '{}' where telegram_id in (999000001, 999000002, 777000111, 777000222)`);
+await db.execute(dsql`update users set notify_off = '{}', away_until = null where telegram_id in (999000001, 999000002, 777000111, 777000222)`);
 await db.execute(dsql`delete from stolen_reports where user_id in (select id from users where telegram_id in (999000001, 999000002, 777000111, 777000222))`);
 // Saved searches of the demo users (and the alerts they got) start empty: «Куплю» scenarios open them anew.
 await db.execute(dsql`delete from saved_searches where user_id in (select id from users where telegram_id in (999000001, 999000002, 777000111, 777000222))`);

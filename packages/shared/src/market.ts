@@ -469,3 +469,8 @@ export interface StolenReportDto {
   policeReport: string | null;
   createdAt: string;
 }
+
+// ---------- «В отъезде» (stage 28) ----------
+
+/** A seller may be away at most this long in one go; it ends by itself. */
+export const AWAY_MAX_DAYS = 30;

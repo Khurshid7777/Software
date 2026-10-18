@@ -78,6 +78,8 @@ export interface ListingSeller {
   shop: { id: string; name: string; verified: boolean; marketLocation: string | null; bundleDiscount: BundleDiscount | null } | null;
   /** Followers on Ishonch (stage 17). */
   followers: number;
+  /** «В отъезде» (stage 28): back on this date; no orders, meetings or offers until then. */
+  awayUntil: string | null;
   /** Median minutes to the first reply in chats (last 60 days, at least 3 chats), else null. */
   responseMinutes: number | null;
   /** Courier inspections of this seller's items: passed / failed. */

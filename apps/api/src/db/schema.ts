@@ -30,6 +30,8 @@ export const users = pgTable("users", {
   banReason: text("ban_reason"),
   /** Optional notification types the user switched off (NOTIFY_TYPES, stage 20). */
   notifyOff: text("notify_off").array().notNull().default(sql`'{}'::text[]`),
+  /** «В отъезде» (stage 28): the seller's listings are hidden and take no orders until then. */
+  awayUntil: timestamp("away_until", { withTimezone: true }),
 });
 
 export const categories = pgTable("categories", {

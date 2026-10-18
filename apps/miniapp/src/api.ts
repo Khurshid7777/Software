@@ -79,6 +79,8 @@ export interface Me {
   hasPhone: boolean;
   /** Optional notification types switched off (stage 20). */
   notifyOff?: string[];
+  /** «В отъезде» (stage 28), ISO date or null. */
+  awayUntil?: string | null;
   checks: { perDay: number; remaining: number };
 }
 
@@ -211,6 +213,7 @@ export function createApi(initData: string | null) {
 
   return {
     me: () => request<Me>("/me"),
+    setAway: (until: string | null) => request<{ awayUntil: string | null }>("/me/away", json("PUT", { until })),
     setNotification: (type: string, on: boolean) => request<{ notifyOff: string[] }>("/me/notifications", json("PATCH", { type, on })),
     acceptTerms: () => request("/me/accept-terms", { method: "POST" }),
     setLanguage: (language: Lang) => request("/me", json("PATCH", { language })),
