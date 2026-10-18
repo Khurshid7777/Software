@@ -137,6 +137,34 @@ export class ApiClient {
     return this.request<{ status: string }>(`/offers/${encodeURIComponent(offerId)}/${action}`, { method: "POST", user });
   }
 
+  /** Stage 20: switch an optional notification type off («Не присылать такое»). */
+  setNotification(user: TgUser, type: string, on: boolean) {
+    return this.request<{ notifyOff: string[] }>("/me/notifications", {
+      method: "PATCH",
+      user,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type, on }),
+    });
+  }
+
+  /** Stage 19: block the other side of a masked conversation / report it to the moderators. */
+  blockConversation(user: TgUser, conversationId: string) {
+    return this.request<{ ok: boolean }>(`/internal/conversations/${encodeURIComponent(conversationId)}/block`, { method: "POST", user });
+  }
+
+  reportConversation(user: TgUser, conversationId: string, reason: string) {
+    return this.request<{ ok: boolean }>(`/internal/conversations/${encodeURIComponent(conversationId)}/report`, {
+      method: "POST",
+      user,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  meetingAction(user: TgUser, meetingId: string, action: "accept" | "decline" | "confirm_sold") {
+    return this.request<{ status: string }>(`/meetings/${encodeURIComponent(meetingId)}/${action}`, { method: "POST", user });
+  }
+
   operatorStatus(user: TgUser, orderId: string, status: string) {
     return this.request<{ order: { status: string }; card: { text: string; buttons: CardButton[][] } }>(
       `/operator/orders/${encodeURIComponent(orderId)}/status`,

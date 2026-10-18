@@ -28,6 +28,8 @@ export const users = pgTable("users", {
   createdAt: createdAt(),
   bannedAt: timestamp("banned_at", { withTimezone: true }),
   banReason: text("ban_reason"),
+  /** Optional notification types the user switched off (NOTIFY_TYPES, stage 20). */
+  notifyOff: text("notify_off").array().notNull().default(sql`'{}'::text[]`),
 });
 
 export const categories = pgTable("categories", {
@@ -121,6 +123,9 @@ export const shops = pgTable("shops", {
   photoKey: text("photo_key"),
   verified: boolean("verified").notNull().default(false),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  /** Discount for several items in one delivery (stage 17): % for 2 items and for 3 or more; 0 — none. */
+  bundle2Pct: integer("bundle2_pct").notNull().default(0),
+  bundle3Pct: integer("bundle3_pct").notNull().default(0),
   createdAt: createdAt(),
 });
 
@@ -160,6 +165,35 @@ export const listings = pgTable(
     imei: text("imei"),
     /** Phones/tablets: structured condition (battery %, biometrics, repairs, kit), see ConditionChecklist. */
     checklist: jsonb("checklist").notNull().default({}),
+    /** "Рассмотрю обмен": buyers may propose their item plus a top-up. */
+    acceptsTrade: boolean("accepts_trade").notNull().default(false),
+    /** Автоснижение: −5 % every 3 days down to this floor; null = off. `autoDropAt` is the next step. */
+    autoDropFloor: bigint("auto_drop_floor", { mode: "number" }),
+    autoDropAt: timestamp("auto_drop_at", { withTimezone: true }),
+    /** The last «Предложить избранным»: price and time (limits how often and how high the next one is). */
+    likersOfferPrice: bigint("likers_offer_price", { mode: "number" }),
+    likersOfferAt: timestamp("likers_offer_at", { withTimezone: true }),
+    /**
+     * Condition grade A–D (catalog filter «Класс A–B»). Mirrors computeGrade() in @ishonch/shared/passport —
+     * the condition sets the best grade, checklist facts only lower it; a test keeps the two identical.
+     */
+    grade: text("grade").generatedAlwaysAs(
+      sql`case
+        when condition is null or condition = 'unknown' then null
+        when condition = 'broken' then 'D'
+        when condition = 'fair'
+          or (checklist->>'batteryPct')::int < 80
+          or checklist->>'biometrics' = 'broken'
+          or checklist->>'deadPixels' = 'many' then 'C'
+        when condition = 'good'
+          or (checklist->>'batteryPct')::int < 85
+          or checklist->>'deadPixels' = 'few'
+          or checklist->>'mining' = 'yes'
+          or checklist->'repairs' @> '["screen"]' or checklist->'repairs' @> '["battery"]'
+          or checklist->'repairs' @> '["back"]' or checklist->'repairs' @> '["other"]' then 'B'
+        else 'A'
+      end`,
+    ),
     /** «Проверено Ishonch»: the courier's inspection passed (badge while recent), see Inspection. */
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     verification: jsonb("verification"),
@@ -318,7 +352,11 @@ export const offers = pgTable(
     sellerUserId: uuid("seller_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** price | trade (the buyer's item + a top-up, see TradeItem). */
+    kind: text("kind").notNull().default("price"),
+    /** Price offer: the price. Trade: the top-up, > 0 from the buyer, < 0 from the seller. */
     amount: bigint("amount", { mode: "number" }).notNull(),
+    trade: jsonb("trade"),
     /** Listing price when the offer was made. */
     listPrice: bigint("list_price", { mode: "number" }).notNull(),
     status: text("status").notNull().default("pending"),
@@ -417,6 +455,63 @@ export const orderEvents = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("order_events_order_idx").on(t.orderId)],
+);
+
+/** Ishonch guarantee: the buyer's claim after delivery, decided by an admin. One per order. */
+export const disputes = pgTable(
+  "disputes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    text: text("text").notNull(),
+    sellerResponse: text("seller_response"),
+    /** open | resolved */
+    status: text("status").notNull().default("open"),
+    /** refund | partial | rejected */
+    resolution: text("resolution"),
+    amount: bigint("amount", { mode: "number" }),
+    note: text("note"),
+    resolvedBy: uuid("resolved_by").references(() => users.id, { onDelete: "set null" }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("disputes_status_idx").on(t.status, t.createdAt), index("disputes_seller_idx").on(t.sellerUserId, t.resolution)],
+);
+
+/**
+ * Evidence files (docs/plan.md, stage 15): the buyer's photos for a dispute, the courier's photos at the
+ * pickup inspection and the seller's short video check of the item. Served by signed URL (/media/:id).
+ */
+export const evidence = pgTable(
+  "evidence",
+  {
+    id: serial("id").primaryKey(),
+    /** dispute_photo | inspection_photo | listing_video */
+    kind: text("kind").notNull(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    orderId: uuid("order_id").references(() => orders.id, { onDelete: "cascade" }),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    storageKey: text("storage_key").notNull(),
+    mime: text("mime").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("evidence_listing_idx").on(t.listingId, t.kind), index("evidence_order_idx").on(t.orderId, t.kind)],
 );
 
 /** One review per delivered order, written by the buyer about the seller. */
@@ -522,3 +617,99 @@ export type User = typeof users.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
 export type Shop = typeof shops.$inferSelect;
+
+/**
+ * A buyer following a seller or shop (stage 17): new listings come as one message a day at most
+ * (last_notified_at is claimed atomically) and never at night.
+ */
+export const follows = pgTable(
+  "follows",
+  {
+    followerUserId: uuid("follower_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastNotifiedAt: timestamp("last_notified_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.followerUserId, t.sellerUserId] }), index("follows_seller_idx").on(t.sellerUserId)],
+);
+
+/**
+ * A meeting in person arranged on Ishonch (stage 18): the buyer proposes a place and an hour, the seller
+ * answers in the bot; payment happens hand to hand and never passes through Ishonch.
+ */
+export const meetings = pgTable(
+  "meetings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => listings.id, { onDelete: "cascade" }),
+    buyerUserId: uuid("buyer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sellerUserId: uuid("seller_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** A spot from MEETING_SPOTS, or null with `place` written by the buyer. */
+    spot: text("spot"),
+    place: text("place"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note"),
+    status: text("status").notNull().default("pending"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("meetings_listing_idx").on(t.listingId),
+    index("meetings_buyer_idx").on(t.buyerUserId),
+    index("meetings_seller_idx").on(t.sellerUserId),
+    // One open request per buyer and item, also under parallel taps.
+    uniqueIndex("meetings_open_uq").on(t.listingId, t.buyerUserId).where(sql`status in ('pending', 'accepted')`),
+  ],
+);
+
+/**
+ * A user blocked another one (stage 19): no messages and no meeting requests between them, either way.
+ * `listing_id` only reminds the blocker where they met (identities stay masked).
+ */
+export const userBlocks = pgTable(
+  "user_blocks",
+  {
+    blockerUserId: uuid("blocker_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedUserId: uuid("blocked_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.blockerUserId, t.blockedUserId] }), index("user_blocks_blocked_idx").on(t.blockedUserId)],
+);
+
+/** A complaint about a conversation (stage 19): moderators see the last messages and decide. One per reporter. */
+export const chatReports = pgTable(
+  "chat_reports",
+  {
+    id: serial("id").primaryKey(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    reporterUserId: uuid("reporter_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reportedUserId: uuid("reported_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolution: text("resolution"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("chat_reports_conv_reporter_uq").on(t.conversationId, t.reporterUserId)],
+);

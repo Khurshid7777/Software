@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
 import type { Api } from "../api";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
+import { LoadError } from "../components/LoadError";
 import { useT } from "../i18n";
-import { readRecent } from "../prefs";
+import { readPref, readRecent, writePref } from "../prefs";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
 /** Category chips on the storefront (the catch-all ones live in the catalog filters). */
@@ -28,7 +29,7 @@ interface Props {
   /** Staff see an entry to the admin panel (operators: delivery orders only). */
   staff?: "admin" | "operator" | null;
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin") => void;
+  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation") => void;
   onCatalog: (filters?: CatalogFilters) => void;
   onListing: (id: string) => void;
 }
@@ -41,9 +42,12 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
   const t = useT();
   const [fresh, setFresh] = useState<CatalogItem[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const [homeScreen, setHomeScreen] = useState(false);
   const [recent, setRecent] = useState<CatalogItem[]>([]);
+  // New users see once how a purchase is protected; one tap hides it for good on this device.
+  const [howTo, setHowTo] = useState(() => readPref("trust_intro_seen") !== "1");
 
   useEffect(() => {
     let current = true;
@@ -59,7 +63,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
     return () => {
       current = false;
     };
-  }, [api]);
+  }, [api, attempt]);
 
   return (
     <div className="stack" data-testid="home">
@@ -85,6 +89,27 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
           data-testid="home-search"
         />
       </form>
+
+      {howTo && (
+        <section className="card stack-tight" data-testid="trust-intro">
+          <strong>🛡 {t("home.trust.title")}</strong>
+          <ol className="trust-steps">
+            <li>{t("home.trust.step1")}</li>
+            <li>{t("home.trust.step2")}</li>
+            <li>{t("home.trust.step3")}</li>
+          </ol>
+          <button
+            className="link"
+            onClick={() => {
+              writePref("trust_intro_seen", "1");
+              setHowTo(false);
+            }}
+            data-testid="trust-intro-close"
+          >
+            {t("home.trust.close")}
+          </button>
+        </section>
+      )}
 
       <div className="category-strip scroll-x" role="list">
         {CATEGORIES.map((c) => (
@@ -125,6 +150,14 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
         </button>
       </div>
 
+      <button className="tile" onClick={() => onOpen("valuation")} data-testid="open-valuation">
+        <span className="tile-icon">💰</span>
+        <span>
+          <strong>{t("home.quick.valuation")}</strong>
+          <span className="hint">{t("home.quick.valuation_desc")}</span>
+        </span>
+      </button>
+
       {recent.length > 0 && (
         <section className="stack-tight" data-testid="recently-viewed">
           <h2>{t("home.recent")}</h2>
@@ -158,7 +191,11 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
             ))}
           </div>
         ) : (
-          <p className="hint center">{failed ? t("common.error") : t("home.fresh_empty")}</p>
+          failed ? (
+            <LoadError onRetry={() => (setFailed(false), setFresh(null), setAttempt((a) => a + 1))} />
+          ) : (
+            <p className="hint center">{t("home.fresh_empty")}</p>
+          )
         )}
       </section>
 

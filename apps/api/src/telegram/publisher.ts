@@ -29,7 +29,8 @@ export class BotApiPublisher implements ChannelPublisher, Notifier {
     token: string,
     private miniAppLinkBase?: string,
   ) {
-    this.api = new Api(token);
+    // A hung Telegram call must not outlive a job's lock (jobs/queue.ts) and run the job twice.
+    this.api = new Api(token, { timeoutSeconds: 30 });
   }
 
   async post(channelId: number, post: ChannelPost) {

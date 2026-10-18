@@ -298,8 +298,8 @@ button:active:not(:disabled), .mini-card:active, .menu-row:active { opacity: 0.7
 @keyframes toast-in { from { transform: translateY(12px); opacity: 0; } }
 .thumb { position: relative; }
 .thumb-x {
-  position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, 0.6);
-  color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center;
+  position: absolute; top: 2px; right: 2px; width: 28px; height: 28px; border-radius: 50%; background: rgba(0, 0, 0, 0.6);
+  color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center;
 }
 .busy .actions { pointer-events: none; opacity: 0.6; }
 /* ---- listing: gallery, viewer, sticky action bar ---- */
@@ -308,7 +308,8 @@ button:active:not(:disabled), .mini-card:active, .menu-row:active { opacity: 0.7
 .gallery-slide { flex: 0 0 100%; scroll-snap-align: center; border: 0; padding: 0; background: var(--bg); aspect-ratio: 1; }
 .gallery-slide img { width: 100%; height: 100%; max-height: none; object-fit: contain; }
 .gallery-count { position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 12px; border-radius: 999px; padding: 2px 8px; }
-.dots button { width: 10px; height: 10px; min-height: 0; }
+/* A 10 px dot with a 24 px tap area. */
+.dots button { width: 10px; height: 10px; min-height: 0; padding: 7px; box-sizing: content-box; background-clip: content-box; }
 .viewer { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column; }
 .viewer-close { position: absolute; top: calc(12px + var(--tg-viewport-content-safe-area-inset-top, 0px)); right: 12px; z-index: 1; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.2); color: #fff; font-size: 18px; }
 .viewer-track { flex: 1; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
@@ -343,3 +344,40 @@ button:active:not(:disabled), .mini-card:active, .menu-row:active { opacity: 0.7
 .tip-high { border-left-color: var(--high); }
 .tip-medium { border-left-color: var(--medium); }
 .tip-low { border-left-color: var(--low); }
+
+/* «Сколько стоит?» */
+.valuation-facts { grid-template-columns: repeat(3, 1fr); }
+.fact-main { background: color-mix(in srgb, var(--button) 14%, var(--bg2)); }
+.fact-main strong { color: var(--button); }
+.history-bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; }
+.history-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 2px; min-width: 0; }
+.history-fill { width: 100%; max-width: 36px; background: color-mix(in srgb, var(--button) 70%, transparent); border-radius: 6px 6px 2px 2px; }
+.history-value { font-size: 10px; color: var(--hint); }
+.trade-badge { font-size: 12px; }
+
+/* Паспорт товара: grade letters and checks */
+.grade {
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 700; border-radius: 6px;
+  color: #fff; min-width: 20px; height: 20px; font-size: 12px; padding: 0 5px; vertical-align: 1px;
+}
+.grade-lg { min-width: 36px; height: 36px; font-size: 20px; border-radius: 10px; }
+.grade-A { background: #1f8f5f; }
+.grade-B { background: #3d8bd9; }
+.grade-C { background: #d98a1f; }
+.grade-D { background: #8a8f98; }
+.mini-grade { position: absolute; right: 6px; top: 6px; }
+.passport-head {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; text-align: left;
+  background: none; border: 0; padding: 0; color: var(--text); width: 100%;
+}
+.passport-checks { display: flex; flex-direction: column; gap: 6px; }
+.passport-checks li { display: grid; grid-template-columns: 22px 1fr; gap: 4px; font-size: 14px; }
+.passport-checks .check-unknown { color: var(--hint); }
+.grade-legend { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.grade-legend .current { font-weight: 600; }
+.trust-steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 20px; }
+
+/* Evidence: video check, dispute and inspection photos */
+.video-check { width: 100%; max-height: 360px; border-radius: 12px; background: #000; }
+.evidence-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.evidence-row img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "notify_off" text[] DEFAULT '{}'::text[] NOT NULL;

@@ -11,6 +11,8 @@ import { Repo } from "./db/repo.js";
 import type { Db } from "./db/client.js";
 import { adminRoutes } from "./modules/admin/routes.js";
 import { checkRoutes, multipartLimits } from "./modules/checks/routes.js";
+import { EvidenceService } from "./modules/evidence/service.js";
+import { evidenceRoutes } from "./modules/evidence/routes.js";
 import { CheckService } from "./modules/checks/service.js";
 import { userRoutes } from "./modules/users/routes.js";
 import { listingRoutes, MAX_UPLOAD_BYTES } from "./modules/listings/routes.js";
@@ -18,6 +20,10 @@ import { LISTING_AI_PER_DAY, ListingService } from "./modules/listings/service.j
 import { ShopService } from "./modules/shops/service.js";
 import { FsStorage, S3Storage, type Storage } from "./storage/storage.js";
 import { DisabledSpeechToText, HttpWhisperSpeechToText, type SpeechToText } from "./stt/speechToText.js";
+import { MeetingService } from "./modules/meetings/service.js";
+import { SafetyService } from "./modules/safety/service.js";
+import { safetyRoutes } from "./modules/safety/routes.js";
+import { meetingRoutes } from "./modules/meetings/routes.js";
 import { BotApiPublisher, type ChannelPublisher, type Notifier } from "./telegram/publisher.js";
 import { AssistantService } from "./modules/catalog/assistant.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
@@ -34,7 +40,7 @@ import { StaffNotifier } from "./telegram/staff.js";
 import { maybeSendDigest } from "./jobs.js";
 import { JobQueue } from "./jobs/queue.js";
 import { registerRateLimits } from "./rateLimit.js";
-import { DEFAULT_COMPLAINTS_TO_HIDE } from "@ishonch/shared";
+import { DEFAULT_COMPLAINTS_TO_HIDE, quietUntil } from "@ishonch/shared";
 
 export interface AppDeps {
   config: Config;
@@ -133,6 +139,8 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     publisher !== undefined ? publisher : config.BOT_TOKEN ? new BotApiPublisher(config.BOT_TOKEN, config.MINIAPP_LINK) : null;
   // eslint-disable-next-line prefer-const
   let catalog: CatalogService;
+  // eslint-disable-next-line prefer-const
+  let meetingsSvc: MeetingService;
   const checks = new CheckService(
     repo,
     aiService,
@@ -155,8 +163,10 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     findMarket: async (key) => (await repo.findReferencePrice(key)) ?? (await catalog.findCatalogPrice(key)),
     logger: app.log,
   });
+  const evidenceSvc = new EvidenceService({ repo, storage: store, secret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos` });
   const listingsSvc = new ListingService({
     repo,
+    evidence: evidenceSvc,
     ai: aiService,
     storage: store,
     stt:
@@ -168,15 +178,22 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     notifier: gateway,
     staff,
     moderation,
-    enqueue: (kind, payload) => queue.enqueue(kind, payload),
+    enqueue: (kind, payload, runAt) => queue.enqueue(kind, payload, runAt),
+    quietUntil: config.QUIET_HOURS ? quietUntil : undefined,
     onPublished: (id) => catalog.notifySavedSearches(id),
-    onUnavailable: (id, reason): Promise<number> => ordersSvc.closeNewOrders(id, reason),
+    onUnavailable: async (id, reason): Promise<number> => {
+      const closed = await ordersSvc.closeNewOrders(id, reason);
+      // Sold, archived or hidden: meetings about it are off too (a price change keeps them).
+      if (reason === "listing_unavailable") await meetingsSvc.cancelForListing(id);
+      return closed;
+    },
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
     usdRate: config.USD_RATE,
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
   });
 
   catalog = new CatalogService(repo, listingsSvc, gateway);
+  meetingsSvc = new MeetingService({ repo, notifier: gateway, markSold: (id) => listingsSvc.soldAtMeeting(id) });
   const assistant = new AssistantService(repo, catalog, aiService, {
     perDay: config.ASSISTANT_PER_DAY,
     usdRate: config.USD_RATE,
@@ -187,10 +204,13 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     listings: listingsSvc,
     notifier: gateway,
     staff,
+    evidence: evidenceSvc,
     courier: courier ?? createCourierProvider(config.COURIER_PROVIDER),
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
     // `trust` is created below; the hook only runs later, on an order cancelled or returned.
     onListingRestored: (id) => trust.holdIfComplained(id),
+    enqueue: (kind, payload, runAt) => queue.enqueue(kind, payload, runAt),
+    quietUntil: config.QUIET_HOURS ? quietUntil : undefined,
   });
   const trust = new TrustService({ repo, listings: listingsSvc, onBanned: (id) => ordersSvc.cancelAllFor(id) });
 
@@ -210,7 +230,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     });
   });
-  userRoutes(app, repo, checks, auth.requireUser);
+  userRoutes(app, repo, checks, auth.requireUser, (id) => listingsSvc.purgeUserFiles(id));
   checkRoutes(app, checks, auth.requireUser);
   const metrics = new MetricsService(repo);
   const adminLink = () => (gateway ? gateway.miniAppLink("screen_admin").catch(() => null) : Promise.resolve(null));
@@ -242,20 +262,30 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     requireOperator: auth.requireRole("operator", "admin"),
     requireAdmin: auth.requireRole("admin"),
   }, (actor, action, target, details) => repo.audit(actor, action, target, details));
+  evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
+  meetingRoutes(app, meetingsSvc, { requireUser: auth.requireUser });
+  safetyRoutes(app, new SafetyService({ repo, staff, adminLink }), {
+    requireUser: auth.requireUser,
+    requireInternal: auth.requireInternal,
+    requireAdmin: auth.requireRole("admin"),
+  });
   catalogRoutes(app, catalog, assistant, new ReplySuggestions(repo, aiService, catalog), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
     optionalUser: auth.optionalUser,
   });
 
-  for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+  for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts", "follower_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
+  queue.register("likers_offer_dms", (p) => ordersSvc.likersOfferDms(String(p.listingId), Number(p.price)));
 
   app.decorate("services", {
     queue,
     catalog,
     listings: listingsSvc,
     orders: ordersSvc,
+    meetings: meetingsSvc,
+    repo,
     trust,
     metrics,
     digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff, adminLink }, config.DIGEST_HOUR, now),
@@ -270,6 +300,8 @@ declare module "fastify" {
       catalog: CatalogService;
       listings: ListingService;
       orders: OrderService;
+      meetings: MeetingService;
+      repo: Repo;
       trust: TrustService;
       metrics: MetricsService;
       digest: (now?: Date) => Promise<boolean>;

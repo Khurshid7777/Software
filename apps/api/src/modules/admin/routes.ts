@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { z } from "zod";
-import { desc, isNotNull } from "drizzle-orm";
+import { and, desc, isNotNull, ne } from "drizzle-orm";
 import { ADMIN_SETTING_KEYS, AdminSettingsSchema, type AdminSettings } from "@ishonch/shared";
 import { startOfMonthUtc, startOfTashkentDay, type Repo } from "../../db/repo.js";
 import { users } from "../../db/schema.js";
@@ -116,7 +116,8 @@ export function adminRoutes(
     repo.db
       .select({ id: users.id, telegramId: users.telegramId, bannedAt: users.bannedAt, banReason: users.banReason, role: users.role })
       .from(users)
-      .where(isNotNull(users.bannedAt))
+      // Placeholders of deleted accounts (Repo.deleteUser) are not bans.
+      .where(and(isNotNull(users.bannedAt), ne(users.role, "deleted")))
       .orderBy(desc(users.bannedAt))
       .limit(200),
   );

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { z } from "zod";
-import { LISTING_STATUSES, t, type Lang, type ListingStatus } from "@ishonch/shared";
+import { BUNDLE_DISCOUNT_MAX_PCT, LISTING_STATUSES, t, type Lang, type ListingStatus } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import type { ShopService } from "../shops/service.js";
 import { ListingPatchSchema, ListingRejected, MAX_PHOTOS, type ListingService, type UploadedFile } from "./service.js";
@@ -20,6 +20,7 @@ const I18N_KEY: Record<string, string> = {
   limit_reached: "sell.limit_reached",
   not_found: "listing.not_found",
   contact_info: "sell.contact_info",
+  bad_floor: "autodrop.bad_floor",
   duplicate: "sell.duplicate",
   ai_quota: "sell.ai_quota",
 };
@@ -30,9 +31,16 @@ async function readMultipart(req: FastifyRequest) {
   const fields: Record<string, string> = {};
   for await (const part of req.parts()) {
     if (part.type === "file") {
+      // Decide by type before reading: an unwanted file is drained, never buffered in memory.
+      const isPhoto = IMAGE_TYPES.test(part.mimetype);
+      const isAudio = !isPhoto && !audio && AUDIO_TYPES.test(part.mimetype);
+      if (!isPhoto && !isAudio) {
+        part.file.resume();
+        continue;
+      }
       const data = await part.toBuffer();
-      if (IMAGE_TYPES.test(part.mimetype)) photos.push({ data, mimeType: part.mimetype });
-      else if (AUDIO_TYPES.test(part.mimetype) && !audio) audio = { data, mimeType: part.mimetype };
+      if (isPhoto) photos.push({ data, mimeType: part.mimetype });
+      else audio = { data, mimeType: part.mimetype };
     } else fields[part.fieldname] = String(part.value);
   }
   return { photos, audio, fields };
@@ -167,6 +175,22 @@ export function listingRoutes(
     return reply.header("content-type", "image/jpeg").header("cache-control", "public, max-age=31536000, immutable").send(data);
   });
 
+  // ---- following sellers (stage 17) ----
+  const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
+  for (const method of ["POST", "DELETE"] as const) {
+    app.route<{ Params: { id: string } }>({
+      method,
+      url: "/sellers/:id/follow",
+      preHandler: requireUser,
+      handler: (req, reply) =>
+        handle(req, reply, async () => {
+          if (!isUuid(req.params.id)) return reply.code(404).send({ error: "not_found" });
+          return svc.follow(req.user!, req.params.id, method === "POST");
+        }),
+    });
+  }
+  app.get("/me/following", { preHandler: requireUser }, (req) => svc.following(req.user!));
+
   // ---- shops ----
   app.get("/shops/mine", { preHandler: requireUser }, async (req) => ({
     shop: await shopsSvc.mine(req.user!),
@@ -175,7 +199,14 @@ export function listingRoutes(
 
   app.put("/shops/mine", { preHandler: requireUser }, async (req, reply) => {
     const parsed = z
-      .object({ name: z.string().trim().min(2).max(80), marketLocation: z.string().trim().max(200).nullable().optional() })
+      .object({
+        name: z.string().trim().min(2).max(80),
+        marketLocation: z.string().trim().max(200).nullable().optional(),
+        // Set discount (stage 17): 3+ items never get less than 2 items.
+        bundle2Pct: z.number().int().min(0).max(BUNDLE_DISCOUNT_MAX_PCT).optional(),
+        bundle3Pct: z.number().int().min(0).max(BUNDLE_DISCOUNT_MAX_PCT).optional(),
+      })
+      .refine((d) => d.bundle3Pct === undefined || d.bundle2Pct === undefined || d.bundle3Pct === 0 || d.bundle3Pct >= d.bundle2Pct)
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
     return shopsSvc.upsert(req.user!, parsed.data);

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listingPlainText, type ListingDto, type ModerationDecision } from "@ishonch/shared/client";
 import { ApiError, compressImage, type Api, type ShopInfo } from "../api";
 import { ListingEditor } from "../components/ListingEditor";
+import { FirstListingGuide, markFirstListingDone } from "../components/FirstListingGuide";
 import { useRecorder } from "../components/useRecorder";
 import { useLang, useT } from "../i18n";
 import { useLeaveGuard } from "../leave";
@@ -95,6 +96,7 @@ export function Sell({ api, existing, onDone }: Props) {
       const res = await api.publish(listing.id, selected);
       setListing(res.listing);
       setPosted(res.postedChannels);
+      markFirstListingDone();
       setModeration(res.moderation);
       setStep("done");
       haptic(res.moderation === "rejected" ? "warning" : "success");
@@ -123,6 +125,7 @@ export function Sell({ api, existing, onDone }: Props) {
     return (
       <div className="stack">
         <h1>{t("sell.title")}</h1>
+        <FirstListingGuide />
         <p className="hint">{t("sell.photos_hint")}</p>
         <label className="file-picker">
           📷 {t("sell.add_photos")} ({files.length}/{MAX_PHOTOS})
@@ -166,7 +169,8 @@ export function Sell({ api, existing, onDone }: Props) {
             {error ?? t("sell.mic_unavailable")}
           </p>
         )}
-        <button className="primary" onClick={analyze} data-testid="sell-analyze">
+        {!files.length && !recorder.audio && !text.trim() && <p className="hint center">{t("sell.need_photo_or_voice")}</p>}
+        <button className="primary" onClick={analyze} disabled={!files.length && !recorder.audio && !text.trim()} data-testid="sell-analyze">
           {t("sell.analyze")}
         </button>
       </div>

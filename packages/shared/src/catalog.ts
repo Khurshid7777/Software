@@ -1,3 +1,4 @@
+import type { ItemPassport } from "./passport.js";
 import type { CatalogFilters } from "./schemas.js";
 import { CHECK_CATEGORIES } from "./types.js";
 import { CONDITIONS, TASHKENT_DISTRICTS, type ListingDto } from "./listing.js";
@@ -16,11 +17,15 @@ export function sellerTrust(s: {
   accountAgeDays: number;
   rating?: { avg: number | null; count: number };
   inspections?: { passed: number; failed: number };
+  /** Guarantee disputes decided against the seller (refund / compensation). */
+  disputesLost?: number;
 }): TrustLevel {
   if (s.rating && s.rating.count >= 3 && s.rating.avg !== null && s.rating.avg < 3) return "low";
   // Items that repeatedly failed the courier's inspection outweigh everything else.
   if (s.inspections && s.inspections.failed >= 2 && s.inspections.failed > s.inspections.passed) return "low";
-  if (s.verifiedShop || s.platformSales >= 3) return "high";
+  // Lost guarantee disputes: two mean "low", one keeps the seller out of "high".
+  if ((s.disputesLost ?? 0) >= 2) return "low";
+  if ((s.verifiedShop || s.platformSales >= 3) && !s.disputesLost) return "high";
   if (s.platformSales >= 1 || s.accountAgeDays >= 30) return "medium";
   return "low";
 }
@@ -31,6 +36,8 @@ export interface CatalogItem {
   market: PriceVerdict | null;
   trust: TrustLevel;
   favorite: boolean;
+  /** The listing page only (`/catalog/:id`): grade, checks and history of the item itself. */
+  passport?: ItemPassport;
 }
 
 export interface CatalogPage {

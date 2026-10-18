@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { eq, sql as dsql } from "drizzle-orm";
+import { eq, sql as dsql, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { CatalogPage, OrderDto } from "@ishonch/shared";
 import { buildApp } from "../src/app.js";
@@ -143,6 +143,8 @@ describe.skipIf(!reachable)("review regressions (integration)", () => {
 
   it("archive → republish cannot escape a complaint hide", async () => {
     const l = await live(SELLER, { aiDraft: {} });
+    for (const c of C) await app.inject({ url: "/me", headers: tma(c) });
+    await db.update(users).set({ createdAt: new Date(Date.now() - 10 * 864e5), phone: "+998901112233" }).where(inArray(users.telegramId, C));
     for (const c of C) await app.inject({ method: "POST", url: `/listings/${l.id}/complaints`, headers: tma(c), payload: { reason: "scam" } });
     expect(await status(l.id)).toBe("pending");
     await app.inject({ method: "POST", url: `/listings/${l.id}/archive`, headers: tma(SELLER) });

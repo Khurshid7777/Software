@@ -4,6 +4,7 @@ import { photoUrl, ApiError, type Api } from "../api";
 import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
 import { Insights } from "../components/Insights";
+import { SellFaster } from "../components/SellFaster";
 import { LoadError } from "../components/LoadError";
 import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
@@ -31,6 +32,8 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
   const [toast, setToast] = useState<string | null>(null);
   const [soldFor, setSoldFor] = useState<string | null>(null);
   const [insightsFor, setInsightsFor] = useState<string | null>(null);
+  // Only the main actions are always visible; the rest sits behind «⋯ Ещё» (one card at a time).
+  const [moreFor, setMoreFor] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   const begin = useLatest();
@@ -141,28 +144,40 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
                 <>
                   <button className="chip" onClick={() => act(() => api.bump(l.id), t("my.bumped"))}>⬆️ {t("my.bump")}</button>
                   <button className="chip" onClick={() => setSoldFor(l.id)}>✅ {t("my.sold")}</button>
-                  <button className="chip" onClick={() => onEdit(l)}>✏️ {t("my.edit")}</button>
-                  <button
-                    className={insightsFor === l.id ? "chip active" : "chip"}
-                    onClick={() => setInsightsFor(insightsFor === l.id ? null : l.id)}
-                    data-testid="insights-open"
-                  >
-                    💡 {t("insights.button")}
-                  </button>
-                  <button
-                    className="chip"
-                    onClick={() =>
-                      navigator.clipboard
-                        .writeText(listingPlainText(l, lang))
-                        .then(() => setToast(t("sell.copied")))
-                        .catch(() => setToast(t("common.error")))
-                    }
-                  >
-                    📋 OLX / Instagram
-                  </button>
-                  <button className="chip" onClick={() => archive(l.id)}>🗄 {t("my.archive")}</button>
                   {l.expiresAt && new Date(l.expiresAt).getTime() - Date.now() < EXPIRY_REMINDER_DAYS * DAY && (
                     <button className="chip" onClick={() => act(() => api.renew(l.id), t("my.renewed"))}>⏰ {t("my.renew")}</button>
+                  )}
+                  <button
+                    className={moreFor === l.id ? "chip active" : "chip"}
+                    onClick={() => setMoreFor(moreFor === l.id ? null : l.id)}
+                    aria-expanded={moreFor === l.id}
+                    data-testid="my-more"
+                  >
+                    {moreFor === l.id ? t("my.less") : t("my.more")}
+                  </button>
+                  {moreFor === l.id && (
+                    <>
+                      <button className="chip" onClick={() => onEdit(l)}>✏️ {t("my.edit")}</button>
+                      <button
+                        className={insightsFor === l.id ? "chip active" : "chip"}
+                        onClick={() => setInsightsFor(insightsFor === l.id ? null : l.id)}
+                        data-testid="insights-open"
+                      >
+                        💡 {t("insights.button")}
+                      </button>
+                      <button
+                        className="chip"
+                        onClick={() =>
+                          navigator.clipboard
+                            .writeText(listingPlainText(l, lang))
+                            .then(() => setToast(t("sell.copied")))
+                            .catch(() => setToast(t("common.error")))
+                        }
+                      >
+                        {t("my.copy_text")}
+                      </button>
+                      <button className="chip" onClick={() => archive(l.id)}>🗄 {t("my.archive")}</button>
+                    </>
                   )}
                 </>
               )}
@@ -190,6 +205,9 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
                 <button className="chip" onClick={() => act(() => api.publish(l.id, []))}>↩️ {t("my.restore")}</button>
               )}
             </div>
+          )}
+          {l.status === "active" && soldFor !== l.id && (moreFor === l.id || l.autoDrop || l.likersOffer) && (
+            <SellFaster api={api} listing={l} actions={moreFor === l.id} onDone={(m) => (setToast(m), load())} />
           )}
           {insightsFor === l.id && (
             <Insights

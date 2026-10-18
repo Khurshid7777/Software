@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { eq, sql as dsql } from "drizzle-orm";
+import { eq, sql as dsql, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { CatalogItem, CatalogPage, DeliveryQuote, ListingDto, ListingModeration, OrderDto } from "@ishonch/shared";
 import { buildApp } from "../src/app.js";
@@ -480,10 +480,16 @@ describe.skipIf(!reachable)("delivery, moderation, complaints, expiry, bans (int
       app.inject({ method: "POST", url: `/listings/${l.id}/complaints`, headers: tma(tg), payload: { reason, text: "пишите @scammer" } });
 
     expect((await complain(SELLER)).json().error).toBe("own_listing");
+    // Fresh throwaway accounts can complain, but cannot hide a listing on their own.
+    for (const tg of [C1, C2, C3]) await app.inject({ url: "/me", headers: tma(tg) });
+    await db.update(users).set({ createdAt: new Date(Date.now() - 10 * 864e5), phone: "+998901112233" }).where(inArray(users.telegramId, [C1, C2, C3]));
+    await db.update(users).set({ createdAt: new Date() }).where(eq(users.telegramId, C3));
     expect((await complain(C1)).json()).toMatchObject({ ok: true, hidden: false });
     expect((await complain(C1)).json()).toMatchObject({ duplicate: true });
     expect((await complain(C2, "wrong_info")).json().hidden).toBe(false);
-    expect((await complain(C3)).json().hidden).toBe(true);
+    expect((await complain(C3)).json().hidden).toBe(false);
+    await db.update(users).set({ createdAt: new Date(Date.now() - 10 * 864e5), phone: "+998901112233" }).where(inArray(users.telegramId, [C3]));
+    expect(await app.services.trust.holdIfComplained(l.id)).toBe(true);
     expect(await listingStatus(l.id)).toBe("pending");
     expect(dmsTo(SELLER).at(-1)!.text).toContain("временно скрыто");
     expect(dmsTo(MODERATION_CHAT).at(-1)!.text).toContain("scam ×2");

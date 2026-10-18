@@ -16,9 +16,17 @@ export const ROUTE_LIMITS: Record<string, number> = {
   "POST /internal/conversations/:id/messages": 20,
   "POST /orders": 6,
   "POST /listings/:id/complaints": 10,
+  "POST /listings/:id/offers": 10,
+  "POST /listings/:id/trade-offers": 6,
+  "POST /listings/:id/offer-likers": 5,
+  "POST /listings/:id/meetings": 6,
+  "POST /orders/:id/dispute": 5,
   // Uploads.
   "POST /listings/:id/photos": 20,
   "POST /shops/mine/photo": 10,
+  "POST /listings/:id/video": 5,
+  "POST /orders/:id/dispute/photos": 10,
+  "POST /operator/orders/:id/inspection/photos": 20,
 };
 export const GLOBAL_LIMIT = 300;
 

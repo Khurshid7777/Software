@@ -15,6 +15,9 @@ import { adminAudit, aiBudget, aiUsage, checks, events, priceReference, settings
 import type { AiUsageRecord } from "../ai/aiService.js";
 
 /** Tashkent is UTC+5 with no DST; "today" for limits is a Tashkent calendar day. */
+/** Retention periods (days) for personal data; see Repo.runRetention and the privacy policy. */
+export const RETENTION = { orderPiiDays: 90, chatDays: 365, eventsDays: 400 } as const;
+
 export function startOfTashkentDay(now = new Date()): Date {
   const shifted = new Date(now.getTime() + 5 * 3600_000);
   shifted.setUTCHours(0, 0, 0, 0);
@@ -68,20 +71,96 @@ export class Repo {
     await this.db.update(users).set({ phone }).where(eq(users.id, userId));
   }
 
-  async hasOpenOrders(userId: string) {
+  /**
+   * Orders in progress, a delivery still inside the dispute window, or an open dispute: deleting the
+   * account then would erase the other side's record (and let a seller escape a dispute).
+   */
+  async hasOpenOrders(userId: string, disputeDays: number) {
     const rows = await this.db.execute(sql`
       select 1 from orders where (buyer_user_id = ${userId} or seller_user_id = ${userId})
-        and status in ('new', 'confirmed', 'courier_assigned', 'picked_up') limit 1`);
+        and (status in ('new', 'confirmed', 'courier_assigned', 'picked_up')
+          or (status = 'delivered' and delivered_at > now() - make_interval(days => ${disputeDays})))
+      union all
+      select 1 from disputes where (buyer_user_id = ${userId} or seller_user_id = ${userId}) and status = 'open'
+      limit 1`);
     return (rows as unknown as unknown[]).length > 0;
+  }
+
+  /** Adds or removes an optional notification type from users.notify_off; returns the new list. */
+  async setNotify(userId: string, type: string, on: boolean) {
+    const [row] = await this.db
+      .update(users)
+      .set({
+        notifyOff: on
+          ? sql`array_remove(${users.notifyOff}, ${type})`
+          : sql`case when ${type} = any(${users.notifyOff}) then ${users.notifyOff} else array_append(${users.notifyOff}, ${type}) end`,
+      })
+      .where(eq(users.id, userId))
+      .returning({ notifyOff: users.notifyOff });
+    return row?.notifyOff ?? [];
   }
 
   async acceptTerms(userId: string) {
     await this.db.update(users).set({ acceptedTermsAt: new Date() }).where(eq(users.id, userId));
   }
 
-  /** Right to erasure: checks keep only anonymised data and are detached (user_id -> null). */
+  /**
+   * Right to erasure without erasing the other side's history. The user's orders, disputes and the reviews
+   * about them, and the listings those refer to, move to an anonymous "deleted account" placeholder (no
+   * Telegram id, no phone, banned so it never shows up); everything else of the user is deleted. Files are
+   * removed before (ListingService.purgeUserFiles), so the kept listings lose their photo rows too.
+   */
   async deleteUser(userId: string) {
-    await this.db.delete(users).where(eq(users.id, userId));
+    await this.db.transaction(async (tx) => {
+      const [ghost] = await tx
+        .insert(users)
+        .values({
+          // A unique negative id that no Telegram account can have.
+          telegramId: -(Date.now() * 1000 + Math.floor(Math.random() * 1000)),
+          language: "ru",
+          role: "deleted",
+          bannedAt: new Date(),
+          banReason: "account_deleted",
+        })
+        .returning({ id: users.id });
+      const g = ghost!.id;
+      await tx.execute(sql`
+        update listings set seller_user_id = ${g},
+          status = case when status in ('active', 'pending', 'reserved', 'draft', 'rejected') then 'archived' else status end
+        where seller_user_id = ${userId}
+          and (exists (select 1 from orders o where o.listing_id = listings.id)
+            or exists (select 1 from disputes d where d.listing_id = listings.id))`);
+      await tx.execute(sql`
+        delete from listing_photos where listing_id in (select id from listings where seller_user_id = ${g})`);
+      await tx.execute(sql`update orders set buyer_user_id = ${g} where buyer_user_id = ${userId}`);
+      await tx.execute(sql`update orders set seller_user_id = ${g} where seller_user_id = ${userId}`);
+      await tx.execute(sql`update disputes set buyer_user_id = ${g} where buyer_user_id = ${userId}`);
+      await tx.execute(sql`update disputes set seller_user_id = ${g} where seller_user_id = ${userId}`);
+      await tx.execute(sql`update reviews set seller_user_id = ${g} where seller_user_id = ${userId}`);
+      await tx.delete(users).where(eq(users.id, userId));
+    });
+  }
+
+  /**
+   * Personal data is kept only as long as it is needed (privacy policy): the delivery address, comment and
+   * courier phone of orders closed more than ORDER_PII_DAYS ago, chat messages older than CHAT_DAYS, and raw
+   * analytics events older than EVENTS_DAYS. Orders themselves stay (sales, reviews, disputes refer to them).
+   */
+  async runRetention(now = new Date()) {
+    const DAY = 864e5;
+    const orders = (await this.db.execute(sql`
+      update orders set address = '', comment = null, courier_phone = null
+      where address <> '' and status not in ('new', 'confirmed', 'courier_assigned', 'picked_up')
+        and updated_at < ${new Date(now.getTime() - RETENTION.orderPiiDays * DAY).toISOString()}
+        and not exists (select 1 from disputes d where d.order_id = orders.id and d.status = 'open')
+      returning id`)) as unknown as unknown[];
+    const messages = (await this.db.execute(sql`
+      delete from conversation_messages where created_at < ${new Date(now.getTime() - RETENTION.chatDays * DAY).toISOString()}
+      returning id`)) as unknown as unknown[];
+    const events = (await this.db.execute(sql`
+      delete from events where created_at < ${new Date(now.getTime() - RETENTION.eventsDays * DAY).toISOString()}
+      returning id`)) as unknown as unknown[];
+    return { orders: orders.length, messages: messages.length, events: events.length };
   }
 
   // ---- settings ----
@@ -144,6 +223,12 @@ export class Repo {
    * but requires the same model numbers / storage (13 vs 13, 128 vs 128).
    */
   async findReferencePrice(modelKey: string): Promise<MarketRange | null> {
+    const row = await this.findReferenceRow(modelKey);
+    return row ? { min: row.min, median: row.median, max: row.max } : null;
+  }
+
+  /** The reference row of the same model (trigram candidates, then the same numbers and modifiers). */
+  async findReferenceRow(modelKey: string): Promise<(MarketRange & { modelKey: string }) | null> {
     const key = normalizeModelKey(modelKey);
     const rows = await this.db
       .select({
@@ -156,8 +241,20 @@ export class Repo {
       .where(sql`${priceReference.modelKey} % ${key}`)
       .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
       .limit(5);
-    const row = rows.find((r) => sameModel(r.modelKey, key));
-    return row ? { min: row.min, median: row.median, max: row.max } : null;
+    return rows.find((r) => sameModel(r.modelKey, key)) ?? null;
+  }
+
+  /** Model names from the price reference for an autocomplete (prefix words first, then similar). */
+  async suggestModels(query: string, limit = 8): Promise<string[]> {
+    const key = normalizeModelKey(query);
+    if (key.length < 2) return [];
+    const rows = await this.db
+      .select({ modelKey: priceReference.modelKey })
+      .from(priceReference)
+      .where(sql`${priceReference.modelKey} ilike ${`%${key.replace(/[%_\\]/g, "")}%`} or ${priceReference.modelKey} % ${key}`)
+      .orderBy(desc(sql`similarity(${priceReference.modelKey}, ${key})`))
+      .limit(limit);
+    return rows.map((r) => r.modelKey);
   }
 
   listPriceReference() {

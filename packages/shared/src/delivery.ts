@@ -1,6 +1,6 @@
 import type { ListingModeration } from "./schemas.js";
 import { DELIVERY_MODES, TASHKENT_DISTRICTS, type DeliveryMode, type District, type FeePayer } from "./listing.js";
-import type { Inspection } from "./market.js";
+import type { DisputeDto, Inspection } from "./market.js";
 
 // ---------- delivery orders ----------
 
@@ -148,6 +148,9 @@ export interface BundleQuote {
   buyerTotal: number;
   /** Delivery fees saved compared with separate orders. */
   saved: number;
+  /** The shop's discount for the set (stage 17): its percentage and how much it takes off the items. */
+  discountPct: number;
+  discount: number;
 }
 
 /** Orders placed before cargo delivery stored quotes without the vehicle fields. */
@@ -181,7 +184,10 @@ export interface OrderDto {
   review: ReviewDto | null;
   canReview: boolean;
   /** Actions available to the viewer right now. */
-  actions: Array<"confirm" | "decline" | "cancel" | "review">;
+  actions: Array<"confirm" | "decline" | "cancel" | "review" | "dispute" | "dispute_response">;
+  /** Delivered orders: the end of the Ishonch guarantee window. */
+  guaranteeUntil: string | null;
+  dispute: DisputeDto | null;
   /** Courier's inspection at pickup («Проверено Ishonch»), once done. */
   inspection: Inspection | null;
   /** Several items of the seller in one delivery: the other orders of the bundle. */

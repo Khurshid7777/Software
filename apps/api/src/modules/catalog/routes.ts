@@ -17,6 +17,7 @@ import type { ReplySuggestions } from "./suggest.js";
 
 const MESSAGES: Record<string, string> = {
   contact_limit: "listing.contact_limit",
+  blocked: "chat.blocked",
   message_limit: "listing.message_limit",
   not_found: "listing.not_found",
   own_listing: "listing.own",
@@ -37,6 +38,7 @@ export function parseFilters(query: Record<string, unknown>) {
     ...query,
     conditions,
     verifiedOnly: query.verifiedOnly === "true" || query.verifiedOnly === "1" || query.verifiedOnly === true ? true : undefined,
+    goodGrade: query.goodGrade === "true" || query.goodGrade === "1" || query.goodGrade === true ? true : undefined,
     q: typeof query.q === "string" && query.q.trim() ? query.q : undefined,
   });
   return parsed.success ? parsed.data : null;
@@ -70,7 +72,8 @@ export function catalogRoutes(
     const filters = parseFilters(req.query);
     if (!filters) return reply.code(400).send({ error: "bad_request" });
     const sort = (CATALOG_SORTS as readonly string[]).includes(req.query.sort ?? "") ? (req.query.sort as CatalogSort) : "relevance";
-    const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
+    // Deep OFFSET scans get slow; nobody scrolls 50 pages of a phone catalogue.
+    const offset = Math.min(1000, Math.max(0, Number(req.query.offset ?? 0) || 0));
     const page = await catalog.search(filters, sort, offset, req.user ?? null);
     // First page only: one event per search, with the result count (zero results feed the spelling dictionary).
     if (req.user && offset === 0) {
@@ -78,6 +81,16 @@ export function catalogRoutes(
     }
     return page;
   });
+
+  // ---- «Сколько стоит?»: valuation by model and condition, model autocomplete ----
+  app.get<{ Querystring: { q?: string; condition?: string } }>("/valuation", { preHandler: auth.optionalUser }, (req, reply) => {
+    const q = z.object({ q: z.string().trim().min(2).max(120), condition: z.enum(CONDITIONS).default("good") }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: "bad_request" });
+    return catalog.valuation(q.data.q, q.data.condition);
+  });
+  app.get<{ Querystring: { q?: string } }>("/valuation/models", { preHandler: auth.optionalUser }, async (req) =>
+    ({ models: await catalog.valuationModels((req.query.q ?? "").slice(0, 120)) }),
+  );
 
   // ---- discovery: similar listings, recently viewed, seller page, seller insights ----
   const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);

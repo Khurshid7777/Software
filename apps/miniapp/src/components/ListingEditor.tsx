@@ -14,6 +14,7 @@ import { confirmDialog } from "../dialogs";
 import { digitsOnly, groupDigits } from "../prefs";
 import { useLang, useT } from "../i18n";
 import { ChecklistEditor } from "./Checklist";
+import { VideoCheck } from "./VideoCheck";
 
 interface Props {
   api: Api;
@@ -38,13 +39,13 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
     const p = (async () => {
       try {
         onChange(await api.updateListing(listing.id, patch));
-        return true;
         // Drop only what was saved: text typed meanwhile in another field stays.
         setDraft((d) => {
           const rest = { ...d };
           for (const k of Object.keys(patch) as Array<keyof ListingPatch>) if (rest[k] === patch[k]) delete rest[k];
           return rest;
         });
+        return true;
       } catch (e) {
         setError(e instanceof ApiError ? e.message : t("common.error"));
         return false;
@@ -186,7 +187,23 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           <span className="hint">{t("sell.imei_hint")}</span>
         </label>
       )}
+      <VideoCheck api={api} listing={listing} onChange={onChange} />
+
       <ChecklistEditor category={listing.category} value={listing.checklist} onSave={(checklist) => void save({ checklist })} />
+
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={listing.acceptsTrade}
+          onChange={(e) => void save({ acceptsTrade: e.target.checked })}
+          data-testid="accepts-trade"
+        />
+        <span>
+          {t("trade.accepts_label")}
+          <br />
+          <span className="hint">{t("trade.accepts_hint")}</span>
+        </span>
+      </label>
 
       <label className="field">
         {t("sell.field.district")}

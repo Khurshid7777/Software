@@ -3,7 +3,8 @@ import { CHECK_CATEGORIES, type CheckCategory, type Lang } from "./types.js";
 import { formatUzs } from "./price/parsePrice.js";
 import { t } from "./i18n-core.js";
 import type { MarketRange } from "./price/verdict.js";
-import type { ConditionChecklist, Inspection } from "./market.js";
+import type { BundleDiscount, ConditionChecklist, Inspection, SellerBadge } from "./market.js";
+import type { Grade } from "./passport.js";
 
 export const CONDITIONS = ["new", "like_new", "good", "fair", "broken"] as const;
 export type Condition = (typeof CONDITIONS)[number];
@@ -74,11 +75,17 @@ export interface ListingSeller {
   registeredAt: string;
   platformSales: number;
   rating: { avg: number | null; count: number };
-  shop: { id: string; name: string; verified: boolean; marketLocation: string | null } | null;
+  shop: { id: string; name: string; verified: boolean; marketLocation: string | null; bundleDiscount: BundleDiscount | null } | null;
+  /** Followers on Ishonch (stage 17). */
+  followers: number;
   /** Median minutes to the first reply in chats (last 60 days, at least 3 chats), else null. */
   responseMinutes: number | null;
   /** Courier inspections of this seller's items: passed / failed. */
   inspections: { passed: number; failed: number };
+  /** Guarantee disputes decided against the seller. */
+  disputesLost: number;
+  /** Earned by facts on Ishonch (see sellerBadges). */
+  badges: SellerBadge[];
 }
 
 /** Listing as returned by the API. */
@@ -102,6 +109,16 @@ export interface ListingDto {
   imeiTail: string | null;
   /** Phones/tablets: structured condition. */
   checklist: ConditionChecklist;
+  /** "Рассмотрю обмен": buyers may offer their item plus a top-up. */
+  acceptsTrade: boolean;
+  /** Condition grade A–D from the condition and the checklist (see computeGrade); null without a condition. */
+  grade: Grade | null;
+  /** The seller's short video check of the item (signed URL), if any. */
+  video: string | null;
+  /** Owner only: automatic price drop down to `floor`, next step at `nextAt`. */
+  autoDrop?: { floor: number; nextAt: string } | null;
+  /** Owner only: the last «Предложить избранным» (price and when). */
+  likersOffer?: { price: number; at: string } | null;
   /** «Проверено Ishonch»: a recent passed courier inspection, else null. */
   verified: Inspection | null;
   district: District | null;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BUNDLE_DISCOUNT_MAX_PCT } from "@ishonch/shared/client";
 import { ApiError, apiUrl, compressImage, type Api, type ShopInfo } from "../api";
 import { confirmDialog } from "../dialogs";
 import { LoadError } from "../components/LoadError";
@@ -10,6 +11,7 @@ export function Shop({ api }: { api: Api }) {
   const [info, setInfo] = useState<ShopInfo | null>(null);
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
+  const [bundle, setBundle] = useState({ two: "", three: "" });
   const [msg, setMsg] = useState<string | null>(null);
   const [photoVersion, setPhotoVersion] = useState(0);
 
@@ -23,6 +25,7 @@ export function Shop({ api }: { api: Api }) {
         setInfo(s);
         setName(s.shop?.name ?? "");
         setLocation(s.shop?.marketLocation ?? "");
+        setBundle({ two: s.shop?.bundle2Pct ? String(s.shop.bundle2Pct) : "", three: s.shop?.bundle3Pct ? String(s.shop.bundle3Pct) : "" });
       })
       .catch(() => setFailed(true));
   }, [api, attempt]);
@@ -32,9 +35,10 @@ export function Shop({ api }: { api: Api }) {
     if (busy) return;
     setBusy(true);
     try {
-      const shop = await api.saveShop(name, location);
+      const pct = (v: string) => Math.min(BUNDLE_DISCOUNT_MAX_PCT, Number(v.replace(/\D/g, "")) || 0);
+      const shop = await api.saveShop(name, location, info?.shop ? { bundle2Pct: pct(bundle.two), bundle3Pct: pct(bundle.three) } : undefined);
       setInfo((i) => (i ? { ...i, shop } : i));
-      setMsg(t("shop.saved"));
+      setMsg(info?.shop && (pct(bundle.two) !== info.shop.bundle2Pct || pct(bundle.three) !== info.shop.bundle3Pct) ? t("bundle.saved") : t("shop.saved"));
     } catch (e) {
       setMsg(e instanceof ApiError ? e.message : t("common.error"));
     } finally {
@@ -85,8 +89,24 @@ export function Shop({ api }: { api: Api }) {
           />
         </label>
       )}
+      {shop && (
+        <div className="card stack-tight" data-testid="bundle-settings">
+          <h4>🧺 {t("bundle.title")}</h4>
+          <span className="hint">{t("bundle.hint")}</span>
+          <div className="row">
+            <label className="field">
+              {t("bundle.two")}
+              <input inputMode="numeric" maxLength={2} value={bundle.two} onChange={(e) => setBundle({ ...bundle, two: e.target.value })} data-testid="bundle-two" />
+            </label>
+            <label className="field">
+              {t("bundle.three")}
+              <input inputMode="numeric" maxLength={2} value={bundle.three} onChange={(e) => setBundle({ ...bundle, three: e.target.value })} data-testid="bundle-three" />
+            </label>
+          </div>
+        </div>
+      )}
       {msg && <Toast text={msg} onClose={() => setMsg(null)} />}
-      <button className="primary" onClick={save} disabled={busy || name.trim().length < 2}>
+      <button className="primary" onClick={save} disabled={busy || name.trim().length < 2} data-testid="shop-save">
         {t("shop.save")}
       </button>
 

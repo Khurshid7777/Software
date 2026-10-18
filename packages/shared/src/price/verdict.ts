@@ -57,3 +57,31 @@ export function sameModel(a: string, b: string): boolean {
   };
   return sig(a) === sig(b);
 }
+
+const MODEL_WORDS: Record<string, string> = {
+  iphone: "iPhone",
+  ipad: "iPad",
+  macbook: "MacBook",
+  airpods: "AirPods",
+  imac: "iMac",
+  playstation: "PlayStation",
+  xbox: "Xbox",
+  rtx: "RTX",
+  gtx: "GTX",
+  rx: "RX",
+  lg: "LG",
+  btu: "BTU",
+};
+
+/** "apple iphone 13 128gb" → "Apple iPhone 13 128 GB": a model key as people write it. */
+export function prettyModel(key: string): string {
+  return key
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => {
+      const size = w.match(/^(\d+)(gb|tb)$/);
+      if (size) return `${size[1]} ${size[2]!.toUpperCase()}`;
+      return MODEL_WORDS[w] ?? (/\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1));
+    })
+    .join(" ");
+}

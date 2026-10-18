@@ -52,7 +52,8 @@ export function Users({ api }: { api: Api }) {
           </strong>
           <span className="hint">С {new Date(user.createdAt).toLocaleDateString("ru-RU")}</span>
           <span className="hint">
-            Активных объявлений: {user.activeListings} · рейтинг {user.rating.avg ?? "—"} ({user.rating.count})
+            Активных объявлений: {user.activeListings} · рейтинг {user.rating.avg ?? "—"} ({user.rating.count}) · не пришёл на встречу:{" "}
+            {user.noShows} · жалоб на переписку: {user.chatReports}
           </span>
           {user.bannedAt ? (
             <>

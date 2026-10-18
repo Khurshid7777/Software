@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, listingTitle, type OrderDto } from "@ishonch/shared/client";
-import { photoUrl, ApiError, type Api } from "../api";
+import { formatUzs, listingTitle, type DisputeReason, type MeetingDto, type OrderDto } from "@ishonch/shared/client";
+import { MeetingCard } from "../components/Meeting";
+import { photoUrl, ApiError, compressImage, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { LoadError } from "../components/LoadError";
+import { Guarantee } from "../components/Guarantee";
 import { Toast } from "../components/Toast";
 import { useLang, useT } from "../i18n";
 import { confirmDialog } from "../dialogs";
@@ -17,15 +19,17 @@ interface Props {
   focusId?: string;
   onOpenListing: (id: string) => void;
   onCatalog: () => void;
+  onSell?: () => void;
 }
 
-export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog }: Props) {
+export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog, onSell }: Props) {
   const t = useT();
   // A notification link: the order's side (buyer/seller) is resolved before the first load (no flash).
   const [role, setRole] = useState<"buyer" | "seller" | null>(focusId ? null : "buyer");
   const [items, setItems] = useState<OrderDto[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [meetings, setMeetings] = useState<MeetingDto[]>([]);
 
   // Notifications about sales open the seller tab.
   useEffect(() => {
@@ -46,6 +50,10 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
       .myOrders(role)
       .then((list) => isCurrent() && setItems(list))
       .catch(() => isCurrent() && (setItems([]), setFailed(true)));
+    api
+      .meetings()
+      .then((list) => isCurrent() && setMeetings(list))
+      .catch(() => undefined);
   }, [api, role, begin]);
   useEffect(load, [load]);
   // Bring the order from the notification into view once the list is there.
@@ -84,6 +92,16 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
         ))}
       </div>
       {toast && <Toast text={toast} onClose={() => setToast(null)} />}
+      {meetings.filter((m) => m.role === role).length > 0 && (
+        <section className="stack-tight" data-testid="meetings">
+          <h2>{t("meet.list_title")}</h2>
+          {meetings
+            .filter((m) => m.role === role)
+            .map((m) => (
+              <MeetingCard key={m.id} meeting={m} onOpenListing={() => onOpenListing(m.listingId)} onAction={(a, body) => act(() => api.meetingAction(m.id, a, body))} />
+            ))}
+        </section>
+      )}
       {items === null && <p className="hint center">{t("common.loading")}</p>}
       {failed && <LoadError onRetry={load} />}
       {items?.length === 0 && !failed && (
@@ -95,6 +113,10 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
             role === "buyer" ? (
               <button className="primary" onClick={onCatalog}>
                 {t("common.to_catalog")}
+              </button>
+            ) : onSell ? (
+              <button className="primary" onClick={onSell}>
+                📸 {t("home.sell.title")}
               </button>
             ) : undefined
           }
@@ -108,6 +130,11 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog 
           onOpenListing={() => onOpenListing(o.listing.id)}
           onAction={(a) => act(() => api.orderAction(o.id, a))}
           onReview={(rating, text) => act(() => api.review(o.id, rating, text), t("orders.review_thanks"))}
+          onDispute={(reason, text) => act(() => api.openDispute(o.id, reason, text), t("guarantee.sent"))}
+          onRespond={(text) => act(() => api.respondDispute(o.id, text), t("dispute.responded"))}
+          onPhotos={(files) =>
+            files.length > 0 && act(async () => api.disputePhotos(o.id, await Promise.all(files.map((f) => compressImage(f)))), t("dispute.photos_added"))
+          }
         />
       ))}
     </div>
@@ -120,12 +147,18 @@ function OrderCard({
   onOpenListing,
   onAction,
   onReview,
+  onDispute,
+  onRespond,
+  onPhotos,
 }: {
   order: OrderDto;
   highlighted: boolean;
   onOpenListing: () => void;
   onAction: (a: "confirm" | "decline" | "cancel") => void;
   onReview: (rating: number, text: string) => void;
+  onDispute: (reason: DisputeReason, text: string) => void;
+  onRespond: (text: string) => void;
+  onPhotos: (files: File[]) => void;
 }) {
   const t = useT();
   const lang = useLang();
@@ -181,7 +214,7 @@ function OrderCard({
         </ol>
       </details>
 
-      {o.actions.length > 0 && !o.actions.includes("review") && (
+      {o.actions.some((a) => a === "confirm" || a === "decline" || a === "cancel") && (
         <div className="row wrap">
           {o.actions.includes("confirm") && (
             <button className="chip" onClick={() => onAction("confirm")} data-testid="order-confirm">
@@ -206,7 +239,7 @@ function OrderCard({
           <strong>{t("orders.review_title")}</strong>
           <div className="row stars" role="radiogroup">
             {[1, 2, 3, 4, 5].map((n) => (
-              <button key={n} className={n <= rating ? "star active" : "star"} aria-label={`${n}`} onClick={() => setRating(n)}>
+              <button key={n} className={n <= rating ? "star active" : "star"} aria-label={t("orders.star_label", { n })} onClick={() => setRating(n)}>
                 ★
               </button>
             ))}
@@ -218,6 +251,7 @@ function OrderCard({
         </div>
       )}
       {o.review && <p className="hint">{t("orders.your_review", { stars: "⭐".repeat(o.review.rating) })}</p>}
+      <Guarantee order={o} onOpen={onDispute} onRespond={onRespond} onPhotos={onPhotos} />
     </article>
   );
 }

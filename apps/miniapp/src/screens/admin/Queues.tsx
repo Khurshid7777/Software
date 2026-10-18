@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatUzs, inspectionChecks, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
-import { ApiError, apiUrl, type Api, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
+import { MAX_INSPECTION_PHOTOS, formatUzs, inspectionChecks, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
+import { ApiError, apiUrl, compressImage, type AdminDispute, type Api, type ChatReport, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
+import { Toast } from "../../components/Toast";
 import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
 function useLoad<T>(load: () => Promise<T>) {
@@ -102,6 +103,121 @@ export function Complaints({ api, onOpen }: { api: Api; onOpen: (id: string) => 
               </li>
             ))}
           </ul>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+const DISPUTE_REASON: Record<string, string> = {
+  not_as_described: "Не соответствует описанию",
+  hidden_defect: "Скрытый дефект",
+  not_working: "Не работает",
+  counterfeit: "Подделка",
+  incomplete: "Неполная комплектация",
+  other: "Другое",
+};
+const RESOLUTION_LABEL: Record<string, string> = { refund: "Возврат товара и денег", partial: "Частичная компенсация", rejected: "Отказ" };
+
+/** Ishonch guarantee: both stories, the courier's inspection and phones; refund / compensation / reject. */
+export function Disputes({ api, onOpen }: { api: Api; onOpen: (id: string) => void }) {
+  const [all, setAll] = useState(false);
+  const load = useCallback(() => api.adminDisputes(all), [api, all]);
+  const { data, error, reload, setError } = useLoad<AdminDispute[]>(load);
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  async function resolve(d: AdminDispute, resolution: DisputeResolution) {
+    const amount = resolution === "partial" ? Number(amounts[d.id] ?? 0) : undefined;
+    const label = resolution === "partial" ? `компенсацию ${formatUzs(amount ?? 0)}` : RESOLUTION_LABEL[resolution]!.toLowerCase();
+    if (!(await confirmDialog(`Решение по спору «${d.title}»: ${label}?`))) return;
+    await api.resolveDispute(d.id, resolution, amount, notes[d.id]).catch((e) => setError(e instanceof ApiError ? e.message : "Ошибка"));
+    reload();
+  }
+  return (
+    <div className="stack">
+      <p className="hint">
+        Защита покупателя: спор в течение 3 дней после доставки. Ishonch деньги не хранит — решение выполняет продавец (возврат или часть суммы); решение против продавца засчитывается ему
+        (снижают его уровень доверия).
+      </p>
+      <label className="check-row">
+        <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+        показать решённые
+      </label>
+      {error && <p className="error">{error}</p>}
+      {!data && !error && <p className="hint center">Загрузка…</p>}
+      {data && !data.length && <p className="hint center">Открытых споров нет 🎉</p>}
+      {data?.map((d) => (
+        <article key={d.id} className="card stack" data-testid="dispute-item">
+          <div className="row between">
+            <button className="link" onClick={() => onOpen(d.listingId)}>
+              <strong>{d.title || "—"}</strong>
+            </button>
+            <span className="badge">{formatUzs(d.itemPrice)}</span>
+          </div>
+          <span>⚖️ {DISPUTE_REASON[d.reason] ?? d.reason}</span>
+          <span className="hint">Покупатель: «{d.text}»</span>
+          <span className="hint">{d.sellerResponse ? `Продавец: «${d.sellerResponse}»` : "Продавец ещё не ответил"}</span>
+          {d.photos.length > 0 && (
+            <div className="evidence-row" data-testid="dispute-photos">
+              {d.photos.map((u) => (
+                <a key={u} href={apiUrl(u)} target="_blank" rel="noreferrer">
+                  <img src={apiUrl(u)} alt="Фото покупателя" />
+                </a>
+              ))}
+            </div>
+          )}
+          {d.inspectionPhotos.length > 0 && (
+            <>
+              <span className="hint">Фото курьера при получении:</span>
+              <div className="evidence-row">
+                {d.inspectionPhotos.map((u) => (
+                  <a key={u} href={apiUrl(u)} target="_blank" rel="noreferrer">
+                    <img src={apiUrl(u)} alt="Фото курьера" />
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
+          {d.inspection && (
+            <span className="hint">
+              🔍 Осмотр курьером: {d.inspection.passed ? "пройден" : "были замечания"}
+              {d.inspection.note && ` — ${d.inspection.note}`}
+            </span>
+          )}
+          <span className="hint">
+            📞 покупатель {d.buyerPhone ?? "—"} · продавец {d.sellerPhone ?? "—"}
+          </span>
+          {d.status === "open" ? (
+            <>
+              <input placeholder="Комментарий к решению (увидят обе стороны)" maxLength={500} value={notes[d.id] ?? ""} onChange={(e) => setNotes({ ...notes, [d.id]: e.target.value })} />
+              <div className="row">
+                <input
+                  inputMode="numeric"
+                  placeholder="Сумма компенсации"
+                  value={amounts[d.id] ?? ""}
+                  onChange={(e) => setAmounts({ ...amounts, [d.id]: e.target.value.replace(/\D/g, "") })}
+                  data-testid="dispute-amount"
+                />
+                <button className="chip" disabled={!Number(amounts[d.id])} onClick={() => resolve(d, "partial")} data-testid="dispute-partial">
+                  Компенсация
+                </button>
+              </div>
+              <div className="row">
+                <button className="chip" onClick={() => resolve(d, "refund")} data-testid="dispute-refund">
+                  ↩️ Возврат
+                </button>
+                <button className="chip danger" onClick={() => resolve(d, "rejected")} data-testid="dispute-reject">
+                  Отказать
+                </button>
+              </div>
+            </>
+          ) : (
+            <span className="hint-card">
+              {RESOLUTION_LABEL[d.resolution ?? ""] ?? d.resolution}
+              {d.amount ? ` — ${formatUzs(d.amount)}` : ""}
+              {d.note && ` · ${d.note}`}
+            </span>
+          )}
         </article>
       ))}
     </div>
@@ -241,6 +357,28 @@ export function OperatorOrders({ api }: { api: Api }) {
                 <InspectionForm category={o.category} hasImei={!!o.imei} onSubmit={(checks, note) => api.inspect(o.id, checks, note).then(reload, (e) => setError(e instanceof ApiError ? e.message : "Ошибка"))} />
               )
             )}
+            {["confirmed", "courier_assigned", "picked_up", "delivered"].includes(o.status) && (
+              <label className="chip" data-testid="op-inspection-photos">
+                📷 Фото осмотра (до {MAX_INSPECTION_PHOTOS}) — попадут в паспорт товара
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (!files.length) return;
+                    try {
+                      const blobs = await Promise.all(files.map((f) => compressImage(f)));
+                      const { photos } = await api.inspectionPhotos(o.id, blobs);
+                      setError(`Фото осмотра сохранены: ${photos.length}`);
+                    } catch (err) {
+                      setError(err instanceof ApiError ? err.message : "Ошибка");
+                    }
+                  }}
+                />
+              </label>
+            )}
             {o.courier?.name && <span className="hint">Курьер: {o.courier.name}</span>}
             {next.includes("courier_assigned") && (
               <input
@@ -261,6 +399,71 @@ export function OperatorOrders({ api }: { api: Api }) {
           </article>
         );
       })}
+    </div>
+  );
+}
+
+const CHAT_REASON: Record<string, string> = {
+  prepayment: "просит предоплату",
+  scam: "мошенничество",
+  rude: "оскорбления",
+  spam: "спам",
+  other: "другое",
+};
+
+/** Stage 19: reports about masked conversations, with the last messages; warn, ban or dismiss. */
+export function ChatReports({ api, onOpen }: { api: Api; onOpen: (id: string) => void }) {
+  const [items, setItems] = useState<ChatReport[] | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api
+      .chatReports()
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [api]);
+  useEffect(load, [load]);
+  async function resolve(r: ChatReport, resolution: "dismissed" | "warned" | "banned") {
+    try {
+      if (resolution === "banned") await api.ban(r.reported.id, `Жалоба на переписку: ${CHAT_REASON[r.reason] ?? r.reason}`);
+      await api.resolveChatReport(r.id, resolution);
+      load();
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : "Ошибка");
+    }
+  }
+  if (!items) return <p className="hint center">Загрузка…</p>;
+  return (
+    <div className="stack" data-testid="chat-reports">
+      <p className="hint">Жалобы на переписку. Имена скрыты; видно, кто писал — покупатель или продавец.</p>
+      {msg && <Toast text={msg} onClose={() => setMsg(null)} />}
+      {items.length === 0 && <p className="hint center">Жалоб нет</p>}
+      {items.map((r) => (
+        <article key={r.id} className="card stack-tight" data-testid="chat-report">
+          <button className="link" onClick={() => onOpen(r.listing.id)}>
+            <strong>{r.listing.title}</strong>
+          </button>
+          <span>
+            На {r.reported.role === "seller" ? "продавца" : "покупателя"}: {CHAT_REASON[r.reason] ?? r.reason} · всего жалоб на него: {r.reported.reports}
+            {r.reported.banned ? " · уже заблокирован" : ""}
+          </span>
+          <div className="stack-tight">
+            {r.messages.map((m, i) => (
+              <span key={i} className="hint">
+                <b>{m.from === "seller" ? "Продавец" : "Покупатель"}:</b> {m.text}
+              </span>
+            ))}
+          </div>
+          <div className="row wrap">
+            <button className="chip" onClick={() => resolve(r, "warned")}>Предупредить</button>
+            {!r.reported.banned && (
+              <button className="chip" onClick={() => resolve(r, "banned")} data-testid="chat-report-ban">
+                Заблокировать
+              </button>
+            )}
+            <button className="chip" onClick={() => resolve(r, "dismissed")}>Отклонить</button>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }

@@ -4,6 +4,9 @@ import { t, type District } from "@ishonch/shared/client";
 export const districtName = (d: string | null) => (d ? t("ru", `district.${d as District}`) : "—");
 
 export const STEP_LABEL: Record<string, string> = {
+  meeting_requested: "Предложили встречу",
+  meeting_accepted: "Договорились о встрече",
+  meeting_bought: "Купили на встрече",
   terms_accepted: "Приняли условия",
   catalog_search: "Искали в каталоге",
   listing_viewed: "Открыли объявление",
@@ -39,7 +42,7 @@ export const CANCEL_LABEL: Record<string, string> = {
 export const MODE_LABEL: Record<string, string> = {
   delivery_only: "Только доставка",
   cod_seller: "Оплата при получении",
-  cod_platform: "Через Ishonch",
+  cod_platform: "Наличные курьеру Ishonch (не используется)",
 };
 
 export const STATUS_LABEL: Record<string, string> = {
