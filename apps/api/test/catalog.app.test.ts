@@ -163,7 +163,11 @@ describe.skipIf(!reachable)("catalog, assistant, subscriptions, masked chat (int
 
   // ---------- search ----------
   it("builds prefix queries for Uzbek words", () => {
-    expect(prefixQuery("O'yin noutbuk!")).toBe("oyin:* & noutbuk:*");
+    expect(prefixQuery("O'yin noutbuk!")).toBe("(oyin:* | (o <-> yin:*) | ўйин:*) & (noutbuk:* | ноутбук:*)");
+    // Both scripts and both languages; model codes stay as they are.
+    expect(prefixQuery("ноутбук")).toBe("(ноутбук:* | noutbuk:*)");
+    expect(prefixQuery("айфон a54")).toBe("(айфон:* | iphone:* | ayfon:*) & a54:*");
+    expect(prefixQuery("наушники")).toContain("quloqchin:*");
     expect(prefixQuery("&|!")).toBeNull();
   });
 
@@ -171,6 +175,8 @@ describe.skipIf(!reachable)("catalog, assistant, subscriptions, masked chat (int
     expect(keys(await catalog("q=macbook"))).toEqual(["mba_m1"]);
     expect(keys(await catalog(`q=${encodeURIComponent("игровые ноутбуки")}`))).toEqual(["lenovo_legion"]);
     expect(keys(await catalog("q=noutbuk"))).toContain("lenovo_legion");
+    // Uzbek written in Cyrillic finds a Latin-Uzbek title, and the other way round.
+    expect(keys(await catalog(`q=${encodeURIComponent("ўйин ноутбук")}`))).toContain("lenovo_legion");
     expect(keys(await catalog("q=iphnoe%2013"))).toEqual(["iphone13"]);
     expect(keys(await catalog("q=playstation"))).toEqual(["ps5"]);
     // Local spellings / transliterations.

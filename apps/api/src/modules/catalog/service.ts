@@ -14,6 +14,7 @@ import {
   type Valuation,
   canonicalQuery,
   canonicalWord,
+  otherScript,
   IMEI_CATEGORIES,
   checklistEmpty,
   checklistFields,
@@ -123,15 +124,27 @@ function quantile(sorted: number[], q: number) {
 export function prefixQuery(q: string): string | null {
   const words = q
     .toLowerCase()
-    .split(/[^\p{L}\p{N}']+/u)
-    .map((w) => w.replace(/'/g, ""))
-    .filter((w) => w.length >= 2)
+    .split(/[^\p{L}\p{N}'ʻ’]+/u)
+    .filter((w) => w.replace(/['ʻ’]/g, "").length >= 2)
     .slice(0, 8);
+  const clean = (w: string) => w.replace(/[^\p{L}\p{N}]/gu, "");
+  // The index splits "o'yin" into "o" and "yin" (the parser stops at the apostrophe): match it as a phrase too.
+  const terms = (w: string) => {
+    const joined = clean(w);
+    const parts = w.split(/['ʻ’]/).map(clean).filter(Boolean);
+    const out = joined.length >= 2 ? [`${joined}:*`] : [];
+    if (parts.length > 1) out.push(`(${parts.map((x, i) => (i === parts.length - 1 ? `${x}:*` : x)).join(" <-> ")})`);
+    return out;
+  };
   return words.length
     ? words
         .map((w) => {
-          const c = canonicalWord(w);
-          return c ? `(${w}:* | ${c.replace(/[^\p{L}\p{N}]/gu, "")}:*)` : `${w}:*`;
+          // The word, its usual spelling, and both in the other script (Uzbek is written in Cyrillic and Latin).
+          const c = canonicalWord(clean(w));
+          // Brands are canonical in Latin: their Cyrillic transliteration ("ипҳоне") would only add noise.
+          const forms = [w, c, otherScript(w), c && /\p{Script=Cyrillic}/u.test(c) ? otherScript(c) : null].filter((x): x is string => !!x);
+          const unique = [...new Set(forms.flatMap(terms))];
+          return unique.length > 1 ? `(${unique.join(" | ")})` : unique[0]!;
         })
         .join(" & ")
     : null;
