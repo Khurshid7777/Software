@@ -1006,5 +1006,10 @@
   "guide.example_title": "Apple iPhone 13 128 GB, ko‘k — batareya 87%",
   "guide.example_text": "Ehtiyotkorlik bilan ishlatilgan, doim g‘ilofda. Korpusda ulagich yonida mayda ishqalanishlar, ekranda tirnalish yo‘q. Ta’mirlanmagan, Face ID ishlaydi, iCloud uzilgan. To‘plam: quti, kabel. Uchrashuvda ko‘rsataman yoki ko‘rik bilan yuboraman.",
   "guide.example_why": "Nega yaxshi: sarlavhada model va xotira, batareya raqamda, nuqsonlar aytilgan, to‘plam va qanday sotib olish tushunarli.",
-  "guide.close": "Tushunarli"
+  "guide.close": "Tushunarli",
+  "export.caption": "📦 Ishonch'dagi ma'lumotlaringiz: profil, e'lonlar, buyurtmalar, sharhlar, qidiruvlar, sevimlilar va xabarlar.",
+  "export.limit": "Yuklab olish kuniga bir marta — ertaga urinib ko'ring.",
+  "export.unavailable": "Hozir faylni yuborib bo'lmayapti. Keyinroq urinib ko'ring.",
+  "export.button": "📦 Ma'lumotlarimni yuklab olish",
+  "export.sent": "Ma'lumotlaringiz fayli bot bilan chatga yuborildi."
 }

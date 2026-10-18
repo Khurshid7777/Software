@@ -387,6 +387,12 @@ export function App({ env }: { env: TelegramEnv }) {
             onOpen={(name) => go({ name } as Screen)}
             onLanguage={changeLanguage}
             onDeleteAccount={deleteAccount}
+            onExport={() =>
+              api
+                .exportData()
+                .then(() => alertDialog(t(lang, "export.sent")))
+                .catch((e) => alertDialog(e instanceof ApiError ? e.message : t(lang, "common.error")))
+            }
           />
         );
         break;

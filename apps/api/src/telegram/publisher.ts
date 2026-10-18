@@ -19,6 +19,8 @@ export type NotifyButton = { text: string; url: string } | { text: string; callb
 /** Direct messages from the bot to a user (masked chat, saved-search alerts). */
 export interface Notifier {
   send(telegramUserId: number, text: string, buttons?: NotifyButton[][]): Promise<void>;
+  /** A file in the chat with the bot («Скачать мои данные»); optional for test doubles. */
+  sendDocument?(telegramUserId: number, file: { name: string; data: Buffer }, caption: string): Promise<void>;
 }
 
 export class BotApiPublisher implements ChannelPublisher, Notifier {
@@ -43,6 +45,10 @@ export class BotApiPublisher implements ChannelPublisher, Notifier {
         })
       : await this.api.sendMessage(channelId, post.caption, { parse_mode: "HTML", reply_markup });
     return { messageId: msg.message_id };
+  }
+
+  async sendDocument(telegramUserId: number, file: { name: string; data: Buffer }, caption: string) {
+    await this.api.sendDocument(telegramUserId, new InputFile(file.data, file.name), { caption });
   }
 
   async send(telegramUserId: number, text: string, buttons: NotifyButton[][] = []) {

@@ -41,6 +41,7 @@ import { maybeSendDigest } from "./jobs.js";
 import { JobQueue } from "./jobs/queue.js";
 import { createImeiRegistry, type ImeiRegistry } from "./integrations/imeiRegistry.js";
 import { registerRateLimits } from "./rateLimit.js";
+import { registerOpsMetrics } from "./opsMetrics.js";
 import { DEFAULT_COMPLAINTS_TO_HIDE, quietUntil } from "@ishonch/shared";
 
 export interface AppDeps {
@@ -102,6 +103,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       maxAgeSec: config.INIT_DATA_MAX_AGE_SEC,
     }, config.REDIS_URL);
   }
+  registerOpsMetrics(app, db, config.METRICS_TOKEN);
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {
     limits: { ...multipartLimits, files: 12, fileSize: Math.max(multipartLimits.fileSize, MAX_UPLOAD_BYTES) },
@@ -234,7 +236,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     });
   });
-  userRoutes(app, repo, checks, auth.requireUser, (id) => listingsSvc.purgeUserFiles(id));
+  userRoutes(app, repo, checks, auth.requireUser, (id) => listingsSvc.purgeUserFiles(id), gateway);
   checkRoutes(app, checks, auth.requireUser);
   const metrics = new MetricsService(repo);
   const adminLink = () => (gateway ? gateway.miniAppLink("screen_admin").catch(() => null) : Promise.resolve(null));

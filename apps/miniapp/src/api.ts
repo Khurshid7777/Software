@@ -213,6 +213,7 @@ export function createApi(initData: string | null) {
 
   return {
     me: () => request<Me>("/me"),
+    exportData: () => request<{ sent: true }>("/me/export", json("POST", {})),
     setAway: (until: string | null) => request<{ awayUntil: string | null }>("/me/away", json("PUT", { until })),
     setNotification: (type: string, on: boolean) => request<{ notifyOff: string[] }>("/me/notifications", json("PATCH", { type, on })),
     acceptTerms: () => request("/me/accept-terms", { method: "POST" }),

@@ -15,10 +15,12 @@ interface Props {
   onOpen: (s: Target) => void;
   onLanguage: (lang: Lang) => void;
   onDeleteAccount: () => void;
+  /** «Скачать мои данные»: the bot sends a JSON file. */
+  onExport: () => void;
 }
 
 /** Everything personal: the seller's cabinet, saved items, language, legal texts, account removal. */
-export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount }: Props) {
+export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, onExport }: Props) {
   const t = useT();
   const lang = useLang();
   const row = (target: Target, icon: string, title: string, desc: string) => (
@@ -86,6 +88,9 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount }
         </section>
       )}
 
+      <button className="link" onClick={onExport} data-testid="export-data">
+        {t("export.button")}
+      </button>
       <button className="link danger" onClick={onDeleteAccount}>
         {t("home.delete_account")}
       </button>
