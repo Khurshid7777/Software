@@ -83,6 +83,7 @@ const DAY = 24 * 3600_000;
 export type ListingError =
   | "need_photo_or_voice"
   | "too_many_photos"
+  | "bad_photo_order"
   | "voice_unavailable"
   | "ai_unavailable"
   | "not_found"
@@ -231,7 +232,7 @@ export class ListingService {
     await Promise.all([storageKey, ...PHOTO_WIDTHS.map((w) => `${storageKey}@w${w}`)].map((k) => this.d.storage.delete(k).catch(() => undefined)));
   }
 
-  private async storePhotos(listingId: string, files: UploadedFile[], startPosition: number) {
+  private async storePhotos(listingId: string, files: UploadedFile[], startPosition: number, stored: Array<{ id: number; storageKey: string }> = []) {
     const aiImages: Buffer[] = [];
     for (const [i, f] of files.entries()) {
       let img;
@@ -242,14 +243,18 @@ export class ListingService {
       }
       const key = `listings/${listingId}/${Date.now()}-${randomBytes(6).toString("hex")}.jpg`;
       await this.d.storage.put(key, img.full, "image/jpeg");
-      await this.db.insert(listingPhotos).values({
-        listingId,
-        storageKey: key,
-        phash: img.phash,
-        width: img.width,
-        height: img.height,
-        position: startPosition + i,
-      });
+      const [row] = await this.db
+        .insert(listingPhotos)
+        .values({
+          listingId,
+          storageKey: key,
+          phash: img.phash,
+          width: img.width,
+          height: img.height,
+          position: startPosition + i,
+        })
+        .returning({ id: listingPhotos.id, storageKey: listingPhotos.storageKey });
+      stored.push(row!);
       aiImages.push(img.ai);
     }
     return aiImages;
@@ -429,14 +434,42 @@ export class ListingService {
   async addPhotos(user: User, id: string, files: UploadedFile[]) {
     const l = await this.own(user, id);
     if (!["draft", "active", "pending", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
-    const [{ n }] = (await this.db
-      .select({ n: count() })
-      .from(listingPhotos)
-      .where(eq(listingPhotos.listingId, id))) as [{ n: number }];
+    const photoStats = async () =>
+      ((await this.db
+        .select({ n: count(), last: sql<number>`coalesce(max(${listingPhotos.position}), -1)::int` })
+        .from(listingPhotos)
+        .where(eq(listingPhotos.listingId, id))) as [{ n: number; last: number }])[0];
+    const { n, last } = await photoStats();
     if (n + files.length > MAX_PHOTOS) throw new ListingRejected("too_many_photos", 400);
-    await this.storePhotos(id, files, n);
+    // After the last position, not the count: a deleted photo leaves a gap, and equal positions would make the
+    // channel post and the card disagree on the cover.
+    const stored: Array<{ id: number; storageKey: string }> = [];
+    await this.storePhotos(id, files, last + 1, stored);
+    // Two uploads at once may both pass the check above: the later one gives its photos back.
+    if ((await photoStats()).n > MAX_PHOTOS) {
+      await this.db.delete(listingPhotos).where(inArray(listingPhotos.id, stored.map((p) => p.id)));
+      await Promise.all(stored.map((p) => this.deletePhotoFiles(p.storageKey)));
+      throw new ListingRejected("too_many_photos", 400);
+    }
     // New photos on a live listing are checked like new text (duplicates, item swap).
     if (l.status === "active") await this.remoderate(id);
+    return this.dto(id, user.id);
+  }
+
+  /** New photo order (the first one is the cover): `ids` must be exactly the listing's photos. */
+  async reorderPhotos(user: User, id: string, ids: number[]) {
+    const l = await this.own(user, id);
+    if (!["draft", "active", "pending", "rejected", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    const current = await this.db.select({ id: listingPhotos.id }).from(listingPhotos).where(eq(listingPhotos.listingId, id));
+    const known = new Set(current.map((p) => p.id));
+    if (ids.length !== known.size || new Set(ids).size !== ids.length || ids.some((x) => !known.has(x))) {
+      throw new ListingRejected("bad_photo_order", 400);
+    }
+    await this.db.transaction(async (tx) => {
+      for (const [position, photoId] of ids.entries()) {
+        await tx.update(listingPhotos).set({ position }).where(and(eq(listingPhotos.id, photoId), eq(listingPhotos.listingId, id)));
+      }
+    });
     return this.dto(id, user.id);
   }
 
@@ -767,7 +800,7 @@ export class ListingService {
       .select()
       .from(listingPhotos)
       .where(eq(listingPhotos.listingId, id))
-      .orderBy(asc(listingPhotos.position))
+      .orderBy(asc(listingPhotos.position), asc(listingPhotos.id))
       .limit(1);
     const photo = first ? await this.d.storage.get(first.storageKey) : null;
     const meta = [

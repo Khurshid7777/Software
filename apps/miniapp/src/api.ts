@@ -263,6 +263,7 @@ export function createApi(initData: string | null) {
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
       return request<{ photos: string[] }>(`/operator/orders/${orderId}/inspection/photos`, { method: "POST", body: form });
     },
+    reorderPhotos: (id: string, ids: number[]) => request<ListingDto>(`/listings/${id}/photos/order`, json("PUT", { ids })),
     deletePhoto: (id: string, photoId: number) => request<ListingDto>(`/listings/${id}/photos/${photoId}`, { method: "DELETE" }),
     publish: (id: string, channelIds: number[]) =>
       request<{ listing: ListingDto; postedChannels: number; failedChannels: number; moderation: ModerationDecision }>(

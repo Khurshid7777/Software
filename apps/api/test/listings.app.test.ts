@@ -254,6 +254,30 @@ describe.skipIf(!reachable)("seller cabinet (integration)", () => {
     expect(card.seller?.shop).toMatchObject({ name: "Malika Mobile", verified: true });
   });
 
+  it("photos: new ones go after the last position, the order can be changed, the cover comes first", async () => {
+    const d = (await createDraft(SELLER, 3)).json() as ListingDto;
+    const [a, b, c] = d.photos.map((p) => p.id);
+    // Delete the first photo, add one: it must not share a position with the remaining ones.
+    await app.inject({ method: "DELETE", url: `/listings/${d.id}/photos/${a}`, headers: tma(SELLER) });
+    const body = multipart([{ name: "photos", value: await testPhoto(9), filename: "x.jpg", type: "image/jpeg" }]);
+    const added = (
+      await app.inject({ method: "POST", url: `/listings/${d.id}/photos`, headers: { ...tma(SELLER), "content-type": body.contentType }, payload: body.payload })
+    ).json() as ListingDto;
+    const positions = added.photos.map((p) => p.position);
+    expect(new Set(positions).size).toBe(positions.length);
+    const x = added.photos.at(-1)!.id;
+
+    const order = (ids: number[], who = SELLER) => app.inject({ method: "PUT", url: `/listings/${d.id}/photos/order`, headers: tma(who), payload: { ids } });
+    const res = await order([x, c!, b!]);
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as ListingDto).photos.map((p) => p.id)).toEqual([x, c, b]);
+    // Not all photos, an unknown one, a duplicate, someone else's listing: refused.
+    expect((await order([x, c!])).statusCode).toBe(400);
+    expect((await order([x, c!, a!])).statusCode).toBe(400);
+    expect((await order([x, x, b!])).statusCode).toBe(400);
+    expect((await order([x, c!, b!], BUYER)).statusCode).toBe(403);
+  });
+
   it("deleting a draft removes its photos from storage", async () => {
     const d = (await createDraft()).json() as ListingDto;
     const del = await app.inject({ method: "DELETE", url: `/listings/${d.id}`, headers: tma(SELLER) });
