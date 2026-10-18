@@ -26,6 +26,7 @@ import {
   t,
   type CatalogFilters,
   WANTED_MAX_AGE_DAYS,
+  SHOPS_OFFER_EVERY_DAYS,
   WANTED_OFFERS_PER_DAY,
   type WantedRequest,
   type CatalogItem,
@@ -494,6 +495,33 @@ export class CatalogService {
     const items = await this.items(unique, viewer);
     const byId = new Map(items.map((i) => [i.listing.id, i]));
     return unique.map((x) => byId.get(x)).filter((i): i is CatalogItem => !!i && i.listing.status === "active");
+  }
+
+  /**
+   * Stage 26: listings sellers sent to verified shops («Предложить магазинам») within the last week, for the
+   * shop's inbox — the same set the bot message went to, minus blocked pairs. Only for a verified shop.
+   */
+  async shopRequests(user: User): Promise<CatalogItem[]> {
+    const [shop] = await this.db.select({ verified: shops.verified }).from(shops).where(eq(shops.ownerUserId, user.id));
+    if (!shop?.verified) return [];
+    const rows = await this.db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(
+        and(
+          eq(listings.status, "active"),
+          ne(listings.sellerUserId, user.id),
+          gte(listings.shopsOfferAt, new Date(Date.now() - SHOPS_OFFER_EVERY_DAYS * DAY)),
+          sql`not exists (select 1 from user_blocks b where (b.blocker_user_id = ${user.id} and b.blocked_user_id = ${listings.sellerUserId})
+                or (b.blocker_user_id = ${listings.sellerUserId} and b.blocked_user_id = ${user.id}))`,
+        ),
+      )
+      .orderBy(desc(listings.shopsOfferAt))
+      .limit(20);
+    return this.batch(
+      rows.map((r) => r.id),
+      user,
+    );
   }
 
   /** Public seller page: the seller's facts (trust, rating, reply time…) and their live listings. */

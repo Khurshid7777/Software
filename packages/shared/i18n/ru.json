@@ -179,6 +179,8 @@
   "shop.verified": "✔️ Проверенный магазин",
   "shop.not_verified": "Ожидает проверки администрацией",
   "shop.channels": "Привязанные каналы",
+  "shop.requests": "Запросы на быструю продажу",
+  "shop.requests_empty": "Продавцы пока не присылали магазинам товары на этой неделе. Новые запросы приходят и в бот.",
   "listing.buy_delivery": "Купить с доставкой",
   "listing.seller": "Продавец",
   "listing.seller_since": "На Ishonch с {date}",

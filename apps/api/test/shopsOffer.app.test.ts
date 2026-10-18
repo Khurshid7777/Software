@@ -114,6 +114,14 @@ describe.skipIf(!reachable)("«Предложить магазинам» (integr
     expect(buttons(msg!)).toEqual([`https://t.me/ishonch_bot/app?startapp=listing_${l.id}`, "unsub:shops_request"]);
     for (const tg of [BLOCKED_SHOP, NEW_SHOP, QUIET_SHOP, SELLER]) expect(dmsTo(tg)).toHaveLength(0);
 
+    // The shop's inbox shows the same request; unverified and blocked shops don't see it.
+    const inbox = async (tg: number) =>
+      ((await app.inject({ url: "/shops/mine/requests", headers: tma(tg) })).json() as Array<{ listing: { id: string } }>).map((i) => i.listing.id);
+    expect(await inbox(SHOP)).toContain(l.id);
+    expect(await inbox(QUIET_SHOP)).toContain(l.id); // the bot messages are off, the inbox is not
+    expect(await inbox(NEW_SHOP)).toEqual([]);
+    expect(await inbox(BLOCKED_SHOP)).not.toContain(l.id);
+
     // A second tap within the week is refused with the reason; the owner sees when it was sent.
     const again = await post(SELLER, `/listings/${l.id}/offer-shops`);
     expect(again.statusCode).toBe(409);

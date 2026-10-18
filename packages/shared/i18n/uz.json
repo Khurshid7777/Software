@@ -179,6 +179,8 @@
   "shop.verified": "✔️ Tekshirilgan do'kon",
   "shop.not_verified": "Ma'muriyat tekshiruvini kutmoqda",
   "shop.channels": "Ulangan kanallar",
+  "shop.requests": "Tez sotish so'rovlari",
+  "shop.requests_empty": "Bu hafta sotuvchilar do'konlarga mahsulot yubormagan. Yangi so'rovlar botga ham keladi.",
   "listing.buy_delivery": "Yetkazib berish bilan sotib olish",
   "listing.seller": "Sotuvchi",
   "listing.seller_since": "Ishonch'da {date} dan beri",

@@ -311,6 +311,7 @@ export function createApi(initData: string | null) {
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
     setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
     wanted: () => request<WantedRequest[]>("/wanted"),
+    shopRequests: () => request<CatalogItem[]>("/shops/mine/requests"),
     offerToWanted: (id: number, listingId: string) => request<{ ok: true }>(`/wanted/${id}/offer`, json("POST", { listingId })),
     contact: (id: string, text: string) => request<{ ok: true }>(`/listings/${id}/contact`, json("POST", { text })),
     complain: (id: string, reason: ComplaintReason, text: string) =>

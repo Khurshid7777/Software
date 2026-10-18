@@ -158,6 +158,8 @@ export function catalogRoutes(
       return catalog.setSearchPublic(req.user!, Number(req.params.id), parsed.data.public);
     }),
   );
+  // Stage 26: a verified shop's inbox of «Предложить магазинам» requests.
+  app.get("/shops/mine/requests", { preHandler: requireUser }, (req) => catalog.shopRequests(req.user!));
   // «Куплю»: buyers' requests for sellers, and a seller's answer with a live listing.
   app.get("/wanted", { preHandler: requireUser }, (req) => catalog.wanted(req.user!));
   app.post<{ Params: { id: string } }>("/wanted/:id/offer", { preHandler: requireUser }, (req, reply) =>

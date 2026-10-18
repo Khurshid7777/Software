@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { BUYER, PRIVATE_SELLER, asBot, open, resetDemo } from "./helpers";
+import { BUYER, PRIVATE_SELLER, SHOP_OWNER, asBot, open, resetDemo } from "./helpers";
 
 test.beforeAll(resetDemo);
 
@@ -27,7 +27,7 @@ test("sell faster: offer a price to those who saved the item, then turn on the a
   await expect(card.getByTestId("autodrop-status")).toHaveCount(0);
 });
 
-test("sell to shops: verified shops get the listing, and a second request waits a week", async ({ page }) => {
+test("sell to shops: verified shops get the listing, and a second request waits a week", async ({ page, browser }) => {
   await open(page, PRIVATE_SELLER, "startapp=screen_my");
   const card = page.getByTestId("my-listing").first();
   await card.getByTestId("my-more").click();
@@ -41,6 +41,15 @@ test("sell to shops: verified shops get the listing, and a second request waits 
   await card.getByTestId("shops-open").click();
   await card.getByTestId("shops-send").click();
   await expect(card.getByTestId("sell-faster-error")).toContainText("раз в 7 дней");
+
+  // The verified demo shop finds the request in its inbox and opens the listing to offer a price.
+  const [first] = await asBot<Array<{ titleUz: string }>>("GET", "/listings/mine?status=active", PRIVATE_SELLER);
+  const shop = await browser.newPage();
+  await open(shop, SHOP_OWNER, "startapp=screen_shop");
+  const request = shop.getByTestId("shop-request").filter({ hasText: first!.titleUz });
+  await request.getByRole("button").click();
+  // The demo shop owner reads Uzbek: the listing opens on its offer button rather than the Russian title.
+  await expect(shop.getByTestId("offer-open")).toBeVisible();
 });
 
 test("«Куплю»: a buyer shows a saved search to sellers, a seller answers with a matching listing", async ({ page, browser }) => {

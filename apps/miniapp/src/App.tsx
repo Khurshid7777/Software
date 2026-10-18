@@ -87,6 +87,7 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_sell") return { name: "sell" };
   if (startParam === "screen_my") return { name: "my" };
   if (startParam === "screen_wanted") return { name: "wanted" };
+  if (startParam === "screen_shop") return { name: "shop" };
   if (startParam === "screen_check") return { name: "check" };
   if (startParam === "screen_catalog") return { name: "catalog" };
   if (startParam === "screen_assistant") return { name: "assistant" };
@@ -288,7 +289,7 @@ export function App({ env }: { env: TelegramEnv }) {
         );
         break;
       case "shop":
-        body = <Shop api={api} />;
+        body = <Shop api={api} onOpen={(id) => go({ name: "listing", id })} />;
         break;
       case "blocks":
         body = <Blocks api={api} />;
