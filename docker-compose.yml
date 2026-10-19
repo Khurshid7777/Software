@@ -94,7 +94,8 @@ services:
     restart: unless-stopped
     depends_on:
       api: { condition: service_healthy }
-    ports: ["${MINIAPP_PORT:-8080}:80"]
+    # Loopback only: the TLS proxy (Caddy) is the public entry, and Docker's published ports bypass ufw.
+    ports: ["127.0.0.1:${MINIAPP_PORT:-8080}:80"]
 
 volumes:
   pgdata:

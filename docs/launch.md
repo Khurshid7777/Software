@@ -105,7 +105,16 @@ docker compose up -d --build
 docker compose ps                 # все сервисы healthy / running
 docker compose logs api | tail    # «migrations applied», без UNSAFE CONFIG
 curl -s https://ishonch.uz/api/health   # {"ok":true,"db":{"ok":true,...}}
+./deploy/smoke.sh                 # проверка после деплоя: все строки ✓, «Всё в порядке»
 ```
+
+`deploy/smoke.sh` только читает и ничего не меняет. Что он проверяет:
+- сайт: TLS-сертификат (действует ещё больше 14 дней), редирект с http, заголовки, сборку Mini App;
+- API: `/health`, витрину, закрытый `/api/me`, блок внутреннего токена снаружи, `/metrics`;
+- бота: вебхук отклоняет запросы без секрета, токен рабочий, адрес вебхука в Telegram совпадает с `.env`, бот состоит в группах «Модерация» и «Доставка»;
+- сервер: контейнеры, `UNSAFE CONFIG` и ошибки в логе за сутки, порты только на 127.0.0.1, свежесть бэкапа и cron, место на диске.
+
+✗ — ошибка (код выхода 1), ! — стоит посмотреть. С ноутбука можно запустить `./deploy/smoke.sh https://ishonch.uz`: серверные проверки тогда пропускаются.
 
 - Миграции (включая 0021–0025) API применяет сам при старте, под блокировкой.
 - Справочник категорий и цен (46 моделей) заливается сидом при старте.
@@ -127,7 +136,7 @@ curl -s https://ishonch.uz/api/health   # {"ok":true,"db":{"ok":true,...}}
 ### Обновление
 
 ```bash
-cd /opt/ishonch && git pull && docker compose up -d --build
+cd /opt/ishonch && git pull && docker compose up -d --build && sleep 30 && ./deploy/smoke.sh
 ```
 
 Перед крупным обновлением — внеплановый `./deploy/backup.sh`.
