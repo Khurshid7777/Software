@@ -1,6 +1,8 @@
 # Demo of the Mini App in a browser: no Telegram, no keys, test data only.
-#   docker compose -f docker-compose.demo.yml up --build
+#   docker compose -f docker-compose.demo.yml up
 #   open http://localhost:8080/api/demo and pick a role
+# Ready images come from GitHub (.github/workflows/demo-images.yml builds them on every push to main), so this
+# one file is enough. In a clone, `up --build` builds them from the sources instead.
 # A separate project (own database volume), it does not touch the production stack. Stop: `... down -v`.
 name: ishonch-demo
 
@@ -19,6 +21,7 @@ services:
 
   # The service is called "api": the Mini App's nginx proxies /api to http://api:3000.
   api:
+    image: ghcr.io/khurshid7777/ishonch-demo-api:latest
     build: { context: ., target: demo }
     init: true
     environment:
@@ -40,6 +43,7 @@ services:
       start_period: 30s
 
   miniapp:
+    image: ghcr.io/khurshid7777/ishonch-demo-miniapp:latest
     build:
       context: .
       dockerfile: apps/miniapp/Dockerfile

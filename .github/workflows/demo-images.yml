@@ -1,0 +1,52 @@
+name: demo-images
+
+# Ready-to-run demo images (docker-compose.demo.yml) in GitHub Container Registry, so the demo needs only that one
+# file and Docker: no clone, no build. Built for Intel/AMD and Apple Silicon (arm64) machines.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: demo-images
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Demo API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: demo
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/khurshid7777/ishonch-demo-api:latest,ghcr.io/khurshid7777/ishonch-demo-api:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=demo-api
+          cache-to: type=gha,mode=max,scope=demo-api
+      - name: Mini App image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/miniapp/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/khurshid7777/ishonch-demo-miniapp:latest,ghcr.io/khurshid7777/ishonch-demo-miniapp:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=demo-miniapp
+          cache-to: type=gha,mode=max,scope=demo-miniapp

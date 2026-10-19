@@ -56,11 +56,16 @@ packages/shared типы, i18n (i18n/ru.json, i18n/uz.json), промпты (pro
 
 ## Демо в браузере (Docker, без Telegram и ключей)
 
+Нужен только Docker Desktop. Готовые образы собирает GitHub (`.github/workflows/demo-images.yml`), поэтому достаточно одного файла. В пустой папке выполните:
+
 ```bash
-docker compose -f docker-compose.demo.yml up --build
+curl -fLO https://raw.githubusercontent.com/Khurshid7777/Software/main/docker-compose.demo.yml
+docker compose -f docker-compose.demo.yml up
 ```
 
-Через 1–2 минуты откройте **http://localhost:8080/api/demo** и выберите роль: покупатель, частный продавец, магазин (узбекский), оператор доставки или администратор. Внутри настоящий API и база с демо-объявлениями; AI отвечает заготовками, Telegram не нужен. Удобнее смотреть в режиме телефона (DevTools → Toggle device toolbar). С телефона в той же Wi-Fi-сети: `DEMO_BIND=0.0.0.0 docker compose -f docker-compose.demo.yml up` и адрес `http://<IP компьютера>:8080/api/demo`. Остановить и стереть демо-данные: `docker compose -f docker-compose.demo.yml down -v`. Боевой стек и его база не затрагиваются.
+(На Windows то же самое в PowerShell, но первая строка: `curl.exe -fLO https://...`.)
+
+Через минуту откройте **http://localhost:8080/api/demo** и выберите роль: покупатель, частный продавец, магазин (узбекский), оператор доставки или администратор. Внутри настоящий API и база с демо-объявлениями; AI отвечает заготовками, Telegram не нужен. Удобнее смотреть в режиме телефона (DevTools → Toggle device toolbar). С телефона в той же Wi-Fi-сети: `DEMO_BIND=0.0.0.0 docker compose -f docker-compose.demo.yml up` и адрес `http://<IP компьютера>:8080/api/demo`. Обновить до последней версии: `docker compose -f docker-compose.demo.yml pull`. Остановить и стереть демо-данные: `docker compose -f docker-compose.demo.yml down -v`. Боевой стек и его база не затрагиваются. В клоне репозитория `up --build` собирает образы из исходников.
 
 ## Быстрый старт (локально)
 
