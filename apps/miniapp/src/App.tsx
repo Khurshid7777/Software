@@ -19,6 +19,9 @@ import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
 import { SellerPage } from "./screens/SellerPage";
 import { Blocks } from "./screens/Blocks";
+import { Wanted } from "./screens/Wanted";
+import { Stolen } from "./screens/Stolen";
+import { Away } from "./screens/Away";
 import { Notifications } from "./screens/Notifications";
 import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
@@ -32,6 +35,9 @@ type Screen =
   | { name: "my" }
   | { name: "shop" }
   | { name: "blocks" }
+  | { name: "wanted" }
+  | { name: "stolen" }
+  | { name: "away" }
   | { name: "notifications" }
   | { name: "listing"; id: string }
   | { name: "catalog"; filters?: CatalogFilters }
@@ -84,6 +90,8 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_admin") return { name: "admin" };
   if (startParam === "screen_sell") return { name: "sell" };
   if (startParam === "screen_my") return { name: "my" };
+  if (startParam === "screen_wanted") return { name: "wanted" };
+  if (startParam === "screen_shop") return { name: "shop" };
   if (startParam === "screen_check") return { name: "check" };
   if (startParam === "screen_catalog") return { name: "catalog" };
   if (startParam === "screen_assistant") return { name: "assistant" };
@@ -280,14 +288,24 @@ export function App({ env }: { env: TelegramEnv }) {
             onEdit={(l) => go({ name: "sell", existing: l })}
             onOpen={(id) => go({ name: "listing", id })}
             onSell={() => go({ name: "sell" })}
+            onWanted={() => go({ name: "wanted" })}
           />
         );
         break;
       case "shop":
-        body = <Shop api={api} />;
+        body = <Shop api={api} onOpen={(id) => go({ name: "listing", id })} />;
         break;
       case "blocks":
         body = <Blocks api={api} />;
+        break;
+      case "away":
+        body = <Away api={api} />;
+        break;
+      case "stolen":
+        body = <Stolen api={api} />;
+        break;
+      case "wanted":
+        body = <Wanted api={api} onSell={() => go({ name: "sell" })} />;
         break;
       case "notifications":
         body = <Notifications api={api} />;
@@ -369,6 +387,12 @@ export function App({ env }: { env: TelegramEnv }) {
             onOpen={(name) => go({ name } as Screen)}
             onLanguage={changeLanguage}
             onDeleteAccount={deleteAccount}
+            onExport={() =>
+              api
+                .exportData()
+                .then(() => alertDialog(t(lang, "export.sent")))
+                .catch((e) => alertDialog(e instanceof ApiError ? e.message : t(lang, "common.error")))
+            }
           />
         );
         break;

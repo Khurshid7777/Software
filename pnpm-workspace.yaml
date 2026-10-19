@@ -1,3 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+overrides:
+  # @telegram-apps/sdk pins valibot 1.0.0 (ReDoS GHSA-vqpr-j7v3-hqw9, flatten() GHSA-5qjj-4xww-7phc); 1.x is API-compatible.
+  valibot: ^1.4.2

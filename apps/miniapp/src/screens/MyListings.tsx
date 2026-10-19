@@ -21,10 +21,12 @@ interface Props {
   visible?: boolean;
   onEdit: (l: ListingDto) => void;
   onOpen: (id: string) => void;
+  /** «Куплю»: buyers' requests the seller may answer. */
+  onWanted: () => void;
   onSell: () => void;
 }
 
-export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Props) {
+export function MyListings({ api, visible = true, onEdit, onOpen, onSell, onWanted }: Props) {
   const t = useT();
   const lang = useLang();
   const [tab, setTab] = useState<ListingStatus>("active");
@@ -77,7 +79,12 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
 
   return (
     <div className="stack">
-      <h1>{t("my.title")}</h1>
+      <div className="row between">
+        <h1>{t("my.title")}</h1>
+        <button className="chip" onClick={onWanted} data-testid="open-wanted">
+          🙋 {t("wanted.open")}
+        </button>
+      </div>
       <div className="tabs" role="tablist">
         {TABS.map((s) => (
           <button key={s} role="tab" className={tab === s ? "active" : ""} onClick={() => setTab(s)}>
@@ -206,7 +213,7 @@ export function MyListings({ api, visible = true, onEdit, onOpen, onSell }: Prop
               )}
             </div>
           )}
-          {l.status === "active" && soldFor !== l.id && (moreFor === l.id || l.autoDrop || l.likersOffer) && (
+          {l.status === "active" && soldFor !== l.id && (moreFor === l.id || l.autoDrop || l.likersOffer || l.shopsOfferAt) && (
             <SellFaster api={api} listing={l} actions={moreFor === l.id} onDone={(m) => (setToast(m), load())} />
           )}
           {insightsFor === l.id && (

@@ -1,6 +1,10 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, t, type Lang, type NotifyType } from "@ishonch/shared";
+import { eq } from "drizzle-orm";
+import { AWAY_MAX_DAYS, GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, t, type Lang, type NotifyType } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
+import { users } from "../../db/schema.js";
+import type { Notifier } from "../../telegram/publisher.js";
+import { buildExport } from "./export.js";
 import type { CheckService } from "../checks/service.js";
 
 export function userRoutes(
@@ -10,6 +14,8 @@ export function userRoutes(
   requireUser: preHandlerHookHandler,
   /** Removes the user's files (listing photos, videos, shop photo) before the rows go. */
   purgeFiles: (userId: string) => Promise<void> = async () => undefined,
+  /** Sends «Скачать мои данные» as a file in the bot chat. */
+  notifier: Notifier | null = null,
 ) {
   app.get("/me", { preHandler: requireUser }, async (req) => {
     const u = req.user!;
@@ -22,9 +28,40 @@ export function userRoutes(
       acceptedTerms: u.acceptedTermsAt !== null,
       hasPhone: !!u.phone,
       notifyOff: u.notifyOff,
+      awayUntil: u.awayUntil && u.awayUntil > new Date() ? u.awayUntil.toISOString() : null,
       createdAt: u.createdAt,
       checks: limit,
     };
+  });
+
+  // «Скачать мои данные» (stage 29): once a day, as a JSON file in the chat with the bot.
+  app.post("/me/export", { preHandler: requireUser }, async (req, reply) => {
+    const u = req.user!;
+    const lang = u.language as Lang;
+    if (!notifier?.sendDocument) return reply.code(503).send({ error: "export_unavailable", message: t(lang, "export.unavailable") });
+    const reservation = await repo.reserveDaily(u.id, "data_export", 1);
+    if (reservation == null) return reply.code(429).send({ error: "export_limit", message: t(lang, "export.limit") });
+    try {
+      const data = Buffer.from(JSON.stringify(await buildExport(repo, u), null, 2));
+      await notifier.sendDocument(u.telegramId, { name: `ishonch-data-${new Date().toISOString().slice(0, 10)}.json`, data }, t(lang, "export.caption"));
+    } catch (err) {
+      await repo.refundDaily(reservation);
+      throw err;
+    }
+    return { sent: true };
+  });
+
+  // «В отъезде» (stage 28): until a date at most AWAY_MAX_DAYS ahead; null — back now.
+  app.put<{ Body: { until?: string | null } }>("/me/away", { preHandler: requireUser }, async (req, reply) => {
+    const raw = req.body?.until ?? null;
+    const until = raw === null ? null : new Date(raw);
+    const now = Date.now();
+    if (until && (Number.isNaN(until.getTime()) || until.getTime() <= now || until.getTime() > now + AWAY_MAX_DAYS * 86_400_000)) {
+      return reply.code(400).send({ error: "bad_date" });
+    }
+    await repo.db.update(users).set({ awayUntil: until }).where(eq(users.id, req.user!.id));
+    await repo.event(req.user!.id, until ? "away_on" : "away_off");
+    return { awayUntil: until?.toISOString() ?? null };
   });
 
   app.post("/me/accept-terms", { preHandler: requireUser }, async (req) => {

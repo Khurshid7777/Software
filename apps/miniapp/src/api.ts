@@ -39,12 +39,16 @@ import type {
   OrderDto,
   ReviewDto,
   SellerRating,
+  StolenReportDto,
+  WantedRequest,
 } from "@ishonch/shared/client";
 
 export interface SavedSearch {
   id: number;
   title: string;
   filters: CatalogFilters;
+  /** «Куплю»: sellers may see it (without the buyer). */
+  public: boolean;
   createdAt: string;
 }
 
@@ -75,6 +79,8 @@ export interface Me {
   hasPhone: boolean;
   /** Optional notification types switched off (stage 20). */
   notifyOff?: string[];
+  /** «В отъезде» (stage 28), ISO date or null. */
+  awayUntil?: string | null;
   checks: { perDay: number; remaining: number };
 }
 
@@ -207,6 +213,8 @@ export function createApi(initData: string | null) {
 
   return {
     me: () => request<Me>("/me"),
+    exportData: () => request<{ sent: true }>("/me/export", json("POST", {})),
+    setAway: (until: string | null) => request<{ awayUntil: string | null }>("/me/away", json("PUT", { until })),
     setNotification: (type: string, on: boolean) => request<{ notifyOff: string[] }>("/me/notifications", json("PATCH", { type, on })),
     acceptTerms: () => request("/me/accept-terms", { method: "POST" }),
     setLanguage: (language: Lang) => request("/me", json("PATCH", { language })),
@@ -235,6 +243,8 @@ export function createApi(initData: string | null) {
       request<MeetingDto>(`/listings/${id}/meetings`, json("POST", body)),
     meetings: () => request<MeetingDto[]>("/meetings"),
     meetingAction: (id: string, action: string, body: object = {}) => request<MeetingDto>(`/meetings/${id}/${action}`, json("POST", body)),
+    offerToShops: (id: string) =>
+      request<{ sent: number; deferredUntil: string | null }>(`/listings/${id}/offer-shops`, json("POST", {})),
     offerToLikers: (id: string, amount: number) =>
       request<{ sent: number; price: number; expiresAt: string; deferredUntil: string | null }>(`/listings/${id}/offer-likers`, json("POST", { amount })),
     addPhotos: (id: string, photos: Blob[]) => {
@@ -258,6 +268,7 @@ export function createApi(initData: string | null) {
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
       return request<{ photos: string[] }>(`/operator/orders/${orderId}/inspection/photos`, { method: "POST", body: form });
     },
+    reorderPhotos: (id: string, ids: number[]) => request<ListingDto>(`/listings/${id}/photos/order`, json("PUT", { ids })),
     deletePhoto: (id: string, photoId: number) => request<ListingDto>(`/listings/${id}/photos/${photoId}`, { method: "DELETE" }),
     publish: (id: string, channelIds: number[]) =>
       request<{ listing: ListingDto; postedChannels: number; failedChannels: number; moderation: ModerationDecision }>(
@@ -304,6 +315,15 @@ export function createApi(initData: string | null) {
     searches: () => request<SavedSearch[]>("/searches"),
     saveSearch: (f: CatalogFilters) => request<SavedSearch>("/searches", json("POST", f)),
     deleteSearch: (id: number) => request(`/searches/${id}`, { method: "DELETE" }),
+    setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
+    setSearchBelowMarket: (id: number, pct: number | null) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { belowMarketPct: pct })),
+    wanted: () => request<WantedRequest[]>("/wanted"),
+    stolenReports: () => request<StolenReportDto[]>("/me/stolen"),
+    reportStolen: (body: { imei: string; kind: "stolen" | "lost"; policeReport?: string }) =>
+      request<{ id: number; held: number }>("/me/stolen", json("POST", body)),
+    withdrawStolen: (id: number) => request<{ ok: true }>(`/me/stolen/${id}`, { method: "DELETE" }),
+    shopRequests: () => request<CatalogItem[]>("/shops/mine/requests"),
+    offerToWanted: (id: number, listingId: string) => request<{ ok: true }>(`/wanted/${id}/offer`, json("POST", { listingId })),
     contact: (id: string, text: string) => request<{ ok: true }>(`/listings/${id}/contact`, json("POST", { text })),
     complain: (id: string, reason: ComplaintReason, text: string) =>
       request<{ ok: true; duplicate: boolean; hidden: boolean }>(`/listings/${id}/complaints`, json("POST", { reason, text: text || undefined })),

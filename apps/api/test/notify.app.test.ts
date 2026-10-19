@@ -91,7 +91,8 @@ describe.skipIf(!reachable)("notifications under control (integration)", () => {
       OPERATOR_TELEGRAM_IDS: String(OPERATOR),
       ADMIN_TELEGRAM_IDS: String(ADMIN),
       MODERATION_CHAT_ID: String(MODERATORS),
-      QUIET_HOURS: "true",
+      // Messages go out at once whatever the hour (quiet hours are covered in selling.app.test.ts).
+      QUIET_HOURS: "false",
     } as NodeJS.ProcessEnv);
     const created = createDb(url);
     db = created.db;

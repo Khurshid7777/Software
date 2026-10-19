@@ -32,3 +32,12 @@ test("first listing: the guide with an example, hidden for good after «Поня
   await expect(page.getByTestId("sell-analyze")).toBeVisible();
   await expect(page.getByTestId("first-listing-guide")).toHaveCount(0);
 });
+
+test("sell: text typed before the first draft comes back after the Mini App is reopened", async ({ page }) => {
+  await open(page, PRIVATE_SELLER, "startapp=screen_sell");
+  await page.getByTestId("sell-text").fill("Продаю iPhone 12, 128 ГБ, батарея 88%");
+  await page.reload();
+  await expect(page.getByTestId("sell-text")).toHaveValue("Продаю iPhone 12, 128 ГБ, батарея 88%");
+  await expect(page.getByTestId("sell-text-restored")).toBeVisible();
+  await page.getByTestId("sell-text").fill("");
+});

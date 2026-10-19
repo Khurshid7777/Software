@@ -29,7 +29,9 @@ export default defineConfig({
       url: `http://localhost:${API_PORT}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { PORT: String(API_PORT), OPERATOR_TELEGRAM_IDS: "777000222", INTERNAL_API_TOKEN: "dev-internal-token" },
+      // Rate limits are covered by API tests; here a few demo users click through the whole suite in a minute
+      // and would hit the per-user limit on a fast CI runner.
+      env: { PORT: String(API_PORT), OPERATOR_TELEGRAM_IDS: "777000222", INTERNAL_API_TOKEN: "dev-internal-token", RATE_LIMITS: "off" },
     },
     {
       command: `pnpm --filter @ishonch/miniapp exec vite --port ${APP_PORT} --strictPort`,

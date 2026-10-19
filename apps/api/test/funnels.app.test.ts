@@ -109,6 +109,8 @@ describe.skipIf(!reachable)("search misses and the meeting funnel (integration)"
 
   beforeEach(async () => {
     dms.length = 0;
+    // Earlier runs' misses stay in the shared database (moved to "yesterday") and would crowd the digest's top 5.
+    await db.execute(dsql`delete from events where name = 'catalog_search' and props->>'q' like 'zzqx%'`);
     await db.execute(dsql.raw(`delete from users where telegram_id in (${ALL.join(",")})`));
     for (const tg of [SELLER, BUYER, LIKER]) {
       await app.inject({ method: "POST", url: "/internal/phone", headers: internal(tg), payload: { phone: `+99890${String(tg).slice(-7)}` } });

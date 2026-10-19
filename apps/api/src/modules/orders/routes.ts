@@ -12,6 +12,7 @@ import {
   DisputeResponseSchema,
   GUARANTEE_DAYS,
   LIKERS_OFFER_EVERY_DAYS,
+  SHOPS_OFFER_EVERY_DAYS,
   LIKERS_OFFER_MIN_PCT,
   OfferInputSchema,
   TradeOfferInputSchema,
@@ -50,6 +51,9 @@ const MESSAGES: Record<string, string> = {
   likers_not_lower: "likers.err.not_lower",
   likers_too_high: "likers.err.too_high",
   no_likers: "likers.err.none",
+  shops_too_soon: "shops_offer.err.too_soon",
+  seller_away: "away.err.seller_away",
+  no_shops: "shops_offer.err.none",
 };
 
 const TariffSchema = z.object({
@@ -80,7 +84,7 @@ export function orderRoutes(
         const key = MESSAGES[err.code];
         return reply
           .code(err.status)
-          .send({ error: err.code, message: key ? t(lang, key as Parameters<typeof t>[1], { days: GUARANTEE_DAYS, every: LIKERS_OFFER_EVERY_DAYS, pct: LIKERS_OFFER_MIN_PCT }) : err.code });
+          .send({ error: err.code, message: key ? t(lang, key as Parameters<typeof t>[1], { days: GUARANTEE_DAYS, every: LIKERS_OFFER_EVERY_DAYS, pct: LIKERS_OFFER_MIN_PCT, week: SHOPS_OFFER_EVERY_DAYS }) : err.code });
       }
       throw err;
     }
@@ -146,6 +150,14 @@ export function orderRoutes(
       const parsed = OfferInputSchema.safeParse(req.body);
       if (!parsed.success || !uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
       return svc.offerToLikers(req.user!, req.params.id, parsed.data.amount);
+    }),
+  );
+
+  // «Предложить магазинам»: verified shops get the listing and answer with ordinary offers.
+  app.post<{ Params: { id: string } }>("/listings/:id/offer-shops", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      if (!uuidParam(req.params.id)) return reply.code(400).send({ error: "bad_request" });
+      return svc.offerToShops(req.user!, req.params.id);
     }),
   );
 

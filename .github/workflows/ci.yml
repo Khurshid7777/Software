@@ -20,9 +20,16 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U ishonch" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        # Shared rate-limit counters across API replicas (apps/api/test/rateLimitRedis.test.ts).
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgres://ishonch@localhost:5432/ishonch
       TEST_DATABASE_URL: postgres://ishonch@localhost:5432/ishonch
+      TEST_REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -31,6 +38,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Dependency audit (production dependencies, high and critical)
+        run: pnpm audit --prod --audit-level high
       - name: Typecheck
         run: pnpm typecheck
       - name: Dictionaries (ru/uz keys, placeholders, keys used in code)

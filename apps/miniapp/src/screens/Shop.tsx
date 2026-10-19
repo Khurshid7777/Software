@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { BUNDLE_DISCOUNT_MAX_PCT } from "@ishonch/shared/client";
+import { BUNDLE_DISCOUNT_MAX_PCT, formatUzs, type CatalogItem } from "@ishonch/shared/client";
 import { ApiError, apiUrl, compressImage, type Api, type ShopInfo } from "../api";
 import { confirmDialog } from "../dialogs";
 import { LoadError } from "../components/LoadError";
 import { Toast } from "../components/Toast";
-import { useT } from "../i18n";
+import { useLang, useT } from "../i18n";
 
-export function Shop({ api }: { api: Api }) {
+export function Shop({ api, onOpen }: { api: Api; onOpen: (listingId: string) => void }) {
   const t = useT();
+  const lang = useLang();
   const [info, setInfo] = useState<ShopInfo | null>(null);
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
@@ -17,6 +18,10 @@ export function Shop({ api }: { api: Api }) {
 
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [requests, setRequests] = useState<CatalogItem[]>([]);
+  useEffect(() => {
+    api.shopRequests().then(setRequests).catch(() => undefined);
+  }, [api]);
   useEffect(() => {
     setFailed(false);
     api
@@ -109,6 +114,27 @@ export function Shop({ api }: { api: Api }) {
       <button className="primary" onClick={save} disabled={busy || name.trim().length < 2} data-testid="shop-save">
         {t("shop.save")}
       </button>
+
+      {info.shop?.verified && (
+        <div className="card stack" data-testid="shop-requests">
+          <h4>🏪 {t("shop.requests")}</h4>
+          {requests.length === 0 ? (
+            <p className="hint">{t("shop.requests_empty")}</p>
+          ) : (
+            requests.map(({ listing: l }) => (
+              <div key={l.id} className="row between" data-testid="shop-request">
+                <span>
+                  {lang === "ru" ? l.titleRu || l.titleUz : l.titleUz || l.titleRu}
+                  {l.price ? <span className="hint"> · {formatUzs(l.price)}</span> : null}
+                </span>
+                <button className="chip" onClick={() => onOpen(l.id)}>
+                  {t("shops_offer.make_offer")}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       <div className="card stack">
         <h4>{t("shop.channels")}</h4>

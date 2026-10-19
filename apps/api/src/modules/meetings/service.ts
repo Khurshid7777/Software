@@ -21,6 +21,7 @@ export type MeetingError =
   | "not_found"
   | "own_listing"
   | "not_available"
+  | "seller_away"
   | "bad_place"
   | "too_soon"
   | "too_far"
@@ -91,6 +92,8 @@ export class MeetingService {
     if (l.sellerUserId === buyer.id) throw new MeetingRejected("own_listing", 409);
     if (l.status !== "active") throw new MeetingRejected("not_available", 409);
     if (await blockedBetween(this.db, buyer.id, l.sellerUserId)) throw new MeetingRejected("blocked", 403);
+    const [away] = await this.db.select({ until: users.awayUntil }).from(users).where(eq(users.id, l.sellerUserId));
+    if (away?.until && away.until > now) throw new MeetingRejected("seller_away", 409);
     const spot = input.spot && MEETING_SPOTS.includes(input.spot) ? input.spot : null;
     const place = spot ? null : input.place?.trim().slice(0, 200) || null;
     if (!spot && (!place || place.length < 5)) throw new MeetingRejected("bad_place", 400);

@@ -12,6 +12,7 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const I18N_KEY: Record<string, string> = {
   need_photo_or_voice: "sell.need_photo_or_voice",
   too_many_photos: "sell.too_many_photos",
+  bad_photo_order: "sell.photo_order_bad",
   voice_unavailable: "sell.voice_unavailable",
   ai_unavailable: "check.ai_unavailable",
   phone_required: "sell.phone_required",
@@ -106,6 +107,14 @@ export function listingRoutes(
     handle(req, reply, async () => {
       const { photos } = await readMultipart(req);
       return svc.addPhotos(req.user!, req.params.id, photos.slice(0, MAX_PHOTOS + 1));
+    }),
+  );
+
+  app.put<{ Params: { id: string } }>("/listings/:id/photos/order", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = z.object({ ids: z.array(z.number().int().positive()).min(1).max(MAX_PHOTOS) }).safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+      return svc.reorderPhotos(req.user!, req.params.id, parsed.data.ids);
     }),
   );
 

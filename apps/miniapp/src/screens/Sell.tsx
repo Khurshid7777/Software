@@ -8,6 +8,7 @@ import { useLang, useT } from "../i18n";
 import { useLeaveGuard } from "../leave";
 import { sharePhoneAndWait } from "../phone";
 import { haptic } from "../telegram";
+import { readPref, writePref } from "../prefs";
 
 type Step = "capture" | "analyzing" | "questions" | "generating" | "edit" | "done";
 const MAX_PHOTOS = 10;
@@ -19,12 +20,21 @@ interface Props {
   onDone: () => void;
 }
 
+/** Unsent description of a new listing on this device. */
+const SELL_TEXT_KEY = "sell.text";
+
 export function Sell({ api, existing, onDone }: Props) {
   const t = useT();
   const lang = useLang();
   const [step, setStep] = useState<Step>(existing ? (existing.titleRu ? "edit" : "questions") : "capture");
   const [files, setFiles] = useState<File[]>([]);
-  const [text, setText] = useState("");
+  // Text typed before the first draft survives a closed Mini App (stage 32); photos and voice don't — too big.
+  const [restored] = useState(() => (existing ? "" : (readPref(SELL_TEXT_KEY) ?? "")));
+  const [text, setTextState] = useState(restored);
+  const setText = (v: string) => {
+    setTextState(v);
+    writePref(SELL_TEXT_KEY, v);
+  };
   const [listing, setListing] = useState<ListingDto | null>(existing ?? null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +77,7 @@ export function Sell({ api, existing, onDone }: Props) {
     try {
       const photos = await Promise.all(files.map((f) => compressImage(f, 2000)));
       const draft = await api.createDraft(photos, recorder.audio, text);
+      writePref(SELL_TEXT_KEY, ""); // it lives in the draft now
       setListing(draft);
       if (draft.questions.length) setStep("questions");
       else await generate(draft, {});
@@ -164,6 +175,11 @@ export function Sell({ api, existing, onDone }: Props) {
           </button>
         )}
         <textarea rows={3} placeholder={t("sell.text_hint")} value={text} onChange={(e) => setText(e.target.value)} data-testid="sell-text" />
+        {restored && text === restored && (
+          <span className="hint" data-testid="sell-text-restored">
+            {t("sell.text_restored")}
+          </span>
+        )}
         {(error || recorder.error) && (
           <p className="error" role="alert">
             {error ?? t("sell.mic_unavailable")}

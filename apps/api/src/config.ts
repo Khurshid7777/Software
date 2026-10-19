@@ -38,6 +38,10 @@ const EnvSchema = z.object({
   MODERATION_CHAT_ID: optionalNumber,
   // Courier integration. Only "manual" exists: operators arrange couriers themselves.
   COURIER_PROVIDER: z.enum(["manual"]).default("manual"),
+  // Lost/stolen IMEI registry: "none" until a contract exists; "http" calls an adapter (integrations/imeiRegistry.ts).
+  IMEI_REGISTRY: z.enum(["none", "http"]).default("none"),
+  IMEI_REGISTRY_URL: z.string().default(""),
+  IMEI_REGISTRY_TOKEN: z.string().optional(),
   // Hour (Tashkent, 0-23) of the daily digest to admins; empty or -1 turns it off.
   DIGEST_HOUR: z.preprocess((v) => (v === "" ? -1 : v), z.coerce.number().int().min(-1).max(23).default(9)),
   // AI pre-moderation of listings at publication. "false": rules and duplicate checks only.
@@ -51,6 +55,10 @@ const EnvSchema = z.object({
   APP_VERSION: z.string().default("dev"),
   // Per-user request limits (off in tests unless set explicitly).
   RATE_LIMITS: z.enum(["on", "off"]).optional(),
+  // Shared rate-limit counters for several API replicas (redis://host:6379). Empty: in-memory per instance.
+  REDIS_URL: z.string().default(""),
+  // Prometheus /metrics (Authorization: Bearer <token>). Empty: the endpoint does not exist.
+  METRICS_TOKEN: z.string().default(""),
   // Behind nginx: take the client IP from X-Forwarded-For.
   TRUST_PROXY: z
     .string()

@@ -39,7 +39,9 @@ import { TrustService } from "./modules/trust/service.js";
 import { StaffNotifier } from "./telegram/staff.js";
 import { maybeSendDigest } from "./jobs.js";
 import { JobQueue } from "./jobs/queue.js";
+import { createImeiRegistry, type ImeiRegistry } from "./integrations/imeiRegistry.js";
 import { registerRateLimits } from "./rateLimit.js";
+import { registerOpsMetrics } from "./opsMetrics.js";
 import { DEFAULT_COMPLAINTS_TO_HIDE, quietUntil } from "@ishonch/shared";
 
 export interface AppDeps {
@@ -51,6 +53,8 @@ export interface AppDeps {
   stt?: SpeechToText;
   publisher?: (ChannelPublisher & Notifier) | null;
   courier?: CourierProvider;
+  /** Tests inject a fake registry; null turns it off whatever the config says. */
+  imeiRegistry?: ImeiRegistry | null;
   /** true in server.ts: jobs go to the queue and a worker runs them. Tests and dev run them inline. */
   backgroundJobs?: boolean;
 }
@@ -65,7 +69,7 @@ export function createStorage(config: Config): Storage {
     : new FsStorage(config.STORAGE_DIR);
 }
 
-export async function buildApp({ config, db, ai, storage, stt, publisher, courier, backgroundJobs = false }: AppDeps) {
+export async function buildApp({ config, db, ai, storage, stt, publisher, courier, imeiRegistry, backgroundJobs = false }: AppDeps) {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
@@ -97,8 +101,9 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       botToken: config.BOT_TOKEN,
       internalToken: config.INTERNAL_API_TOKEN,
       maxAgeSec: config.INIT_DATA_MAX_AGE_SEC,
-    });
+    }, config.REDIS_URL);
   }
+  registerOpsMetrics(app, db, config.METRICS_TOKEN);
   await app.register(cors, { origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",") });
   await app.register(multipart, {
     limits: { ...multipartLimits, files: 12, fileSize: Math.max(multipartLimits.fileSize, MAX_UPLOAD_BYTES) },
@@ -161,6 +166,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     ai: config.AI_MODERATION ? aiService : null,
     storage: store,
     findMarket: async (key) => (await repo.findReferencePrice(key)) ?? (await catalog.findCatalogPrice(key)),
+    imeiRegistry: imeiRegistry !== undefined ? imeiRegistry : createImeiRegistry(config),
     logger: app.log,
   });
   const evidenceSvc = new EvidenceService({ repo, storage: store, secret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos` });
@@ -230,7 +236,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     });
   });
-  userRoutes(app, repo, checks, auth.requireUser, (id) => listingsSvc.purgeUserFiles(id));
+  userRoutes(app, repo, checks, auth.requireUser, (id) => listingsSvc.purgeUserFiles(id), gateway);
   checkRoutes(app, checks, auth.requireUser);
   const metrics = new MetricsService(repo);
   const adminLink = () => (gateway ? gateway.miniAppLink("screen_admin").catch(() => null) : Promise.resolve(null));
@@ -265,7 +271,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
   evidenceRoutes(app, evidenceSvc, repo, { requireUser: auth.requireUser, requireOperator: auth.requireRole("operator", "admin") });
   trustRoutes(app, trust, { requireUser: auth.requireUser, requireAdmin: auth.requireRole("admin") });
   meetingRoutes(app, meetingsSvc, { requireUser: auth.requireUser });
-  safetyRoutes(app, new SafetyService({ repo, staff, adminLink }), {
+  safetyRoutes(app, new SafetyService({ repo, staff, adminLink, recheckImei: (imei, reporter) => listingsSvc.recheckImei(imei, reporter) }), {
     requireUser: auth.requireUser,
     requireInternal: auth.requireInternal,
     requireAdmin: auth.requireRole("admin"),
@@ -278,6 +284,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
 
   for (const kind of ["channel_posts", "saved_search_alerts", "price_drop_alerts", "follower_alerts"]) queue.register(kind, (p) => listingsSvc.runJob(kind, p));
   queue.register("likers_offer_dms", (p) => ordersSvc.likersOfferDms(String(p.listingId), Number(p.price)));
+  queue.register("shops_offer_dms", (p) => ordersSvc.shopsOfferDms(String(p.listingId)));
 
   app.decorate("services", {
     queue,

@@ -11,12 +11,15 @@ import {
 } from "@ishonch/shared";
 import { AiLimitExceededError, AiOutputError, type AiService } from "../../ai/aiService.js";
 import type { Repo } from "../../db/repo.js";
-import { listingPhotos, listings, type Listing } from "../../db/schema.js";
+import type { ImeiRegistry } from "../../integrations/imeiRegistry.js";
+import { listingPhotos, listings, stolenReports, type Listing } from "../../db/schema.js";
 import type { Storage } from "../../storage/storage.js";
 
 /** Statuses that occupy the catalog (or will soon) — duplicates are searched among them. */
 const LIVE = ["active", "pending", "reserved"];
 const SEVERITY: Record<ModerationDecision, number> = { approved: 0, needs_review: 1, rejected: 2 };
+/** A registry answer is reused this long for the same IMEI (republish, edits); the registry may charge per call. */
+const REGISTRY_TTL_MS = 30 * 24 * 3600 * 1000;
 
 export interface Duplicates {
   /** The seller's own live listings with the same photos. */
@@ -34,6 +37,8 @@ export interface ModerationDeps {
   ai: Pick<AiService, "structured"> | null;
   storage: Storage;
   findMarket: (modelKey: string) => Promise<MarketRange | null>;
+  /** Lost/stolen IMEI registry; null until Ishonch has access to one. */
+  imeiRegistry?: ImeiRegistry | null;
   logger?: { warn: (obj: object, msg: string) => void };
 }
 
@@ -130,6 +135,18 @@ export class ModerationService {
       record.decision = "needs_review";
       record.reasons.push({ code: "duplicate_imei", note: "Такой IMEI уже есть в объявлении другого продавца" });
     }
+    const registry = await this.checkRegistry(l);
+    if (registry?.status === "listed" && !registry.cleared) {
+      // The registry may be out of date (a found phone, a resold insurance case): a person decides, never the rule alone.
+      record.decision = "needs_review";
+      record.reasons.push({
+        code: "imei_listed",
+        note:
+          registry.provider === "ishonch"
+            ? "Владелец сообщил в Ishonch о краже или потере телефона с этим IMEI"
+            : "IMEI найден в базе утерянных или украденных устройств",
+      });
+    }
     const dupIds = [...duplicates.otherPhotos, ...duplicates.otherText, ...duplicates.otherImei];
     if (dupIds.length) record.duplicates = [...new Set(dupIds)];
 
@@ -148,6 +165,43 @@ export class ModerationService {
       this.d.logger?.warn({ kind, err: String(err) }, "AI moderation unavailable, rules only");
     }
     return record;
+  }
+
+  /** Registry answer for the listing's IMEI: cached on the listing, null without an IMEI, a registry or an answer. */
+  async checkRegistry(l: Listing, now = new Date()) {
+    if (!l.imei) return null;
+    const cached = l.imeiRegistry;
+    // Ishonch's own base first («Украли телефон», stage 27): free, always on, and never stale.
+    const [report] = await this.db
+      .select({ id: stolenReports.id })
+      .from(stolenReports)
+      .where(and(eq(stolenReports.imei, l.imei), ne(stolenReports.userId, l.sellerUserId), sql`${stolenReports.withdrawnAt} is null`))
+      .limit(1);
+    if (report) {
+      // A moderator's clearance for this IMEI also covers a report filed again later.
+      const cleared = cached?.imei === l.imei && cached.cleared === true;
+      const stored = { imei: l.imei, status: "listed" as const, provider: "ishonch", at: now.toISOString(), ...(cleared ? { cleared } : {}) };
+      await this.db.update(listings).set({ imeiRegistry: stored }).where(eq(listings.id, l.id));
+      return stored;
+    }
+    // The report was withdrawn: forget the answer, keeping only a moderator's clearance (as "clean").
+    if (cached?.provider === "ishonch" && cached.status === "listed") {
+      const kept = cached.cleared && cached.imei === l.imei ? { ...cached, status: "clean" as const } : null;
+      await this.db.update(listings).set({ imeiRegistry: kept }).where(eq(listings.id, l.id));
+    }
+    if (!this.d.imeiRegistry) return null;
+    if (cached && cached.provider !== "ishonch" && cached.imei === l.imei && now.getTime() - Date.parse(cached.at) < REGISTRY_TTL_MS) return cached;
+    if (cached?.provider === "ishonch" && !this.d.imeiRegistry) return null;
+    const res = await this.d.imeiRegistry.check(l.imei);
+    if (!res) {
+      this.d.logger?.warn({ listingId: l.id, provider: this.d.imeiRegistry.name }, "IMEI registry did not answer");
+      return null;
+    }
+    // A moderator's clearance survives a refresh while the registry still says the same thing about the same IMEI.
+    const cleared = cached?.imei === l.imei && cached.cleared === true && res.status === "listed";
+    const stored = { imei: l.imei, status: res.status, provider: res.provider, at: now.toISOString(), ...(cleared ? { cleared } : {}) };
+    await this.db.update(listings).set({ imeiRegistry: stored }).where(eq(listings.id, l.id));
+    return stored;
   }
 
   private async askAi(l: Listing) {

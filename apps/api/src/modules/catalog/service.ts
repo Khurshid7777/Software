@@ -14,6 +14,7 @@ import {
   type Valuation,
   canonicalQuery,
   canonicalWord,
+  otherScript,
   IMEI_CATEGORIES,
   checklistEmpty,
   checklistFields,
@@ -25,6 +26,10 @@ import {
   sellerTrust,
   t,
   type CatalogFilters,
+  WANTED_MAX_AGE_DAYS,
+  SHOPS_OFFER_EVERY_DAYS,
+  WANTED_OFFERS_PER_DAY,
+  type WantedRequest,
   type CatalogItem,
   type CatalogPage,
   type CatalogSort,
@@ -49,6 +54,7 @@ import {
   searchNotifications,
   shops,
   users,
+  type Listing,
   type User,
 } from "../../db/schema.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../../telegram/publisher.js";
@@ -85,7 +91,12 @@ export class CatalogRejected extends Error {
       | "message_limit"
       | "suggest_limit"
       | "suggest_expired"
-      | "ai_unavailable",
+      | "ai_unavailable"
+      | "wanted_closed"
+      | "wanted_already"
+      | "wanted_busy"
+      | "wanted_limit"
+      | "wanted_no_match",
     public status: number,
   ) {
     super(code);
@@ -113,15 +124,27 @@ function quantile(sorted: number[], q: number) {
 export function prefixQuery(q: string): string | null {
   const words = q
     .toLowerCase()
-    .split(/[^\p{L}\p{N}']+/u)
-    .map((w) => w.replace(/'/g, ""))
-    .filter((w) => w.length >= 2)
+    .split(/[^\p{L}\p{N}'ʻ’]+/u)
+    .filter((w) => w.replace(/['ʻ’]/g, "").length >= 2)
     .slice(0, 8);
+  const clean = (w: string) => w.replace(/[^\p{L}\p{N}]/gu, "");
+  // The index splits "o'yin" into "o" and "yin" (the parser stops at the apostrophe): match it as a phrase too.
+  const terms = (w: string) => {
+    const joined = clean(w);
+    const parts = w.split(/['ʻ’]/).map(clean).filter(Boolean);
+    const out = joined.length >= 2 ? [`${joined}:*`] : [];
+    if (parts.length > 1) out.push(`(${parts.map((x, i) => (i === parts.length - 1 ? `${x}:*` : x)).join(" <-> ")})`);
+    return out;
+  };
   return words.length
     ? words
         .map((w) => {
-          const c = canonicalWord(w);
-          return c ? `(${w}:* | ${c.replace(/[^\p{L}\p{N}]/gu, "")}:*)` : `${w}:*`;
+          // The word, its usual spelling, and both in the other script (Uzbek is written in Cyrillic and Latin).
+          const c = canonicalWord(clean(w));
+          // Brands are canonical in Latin: their Cyrillic transliteration ("ипҳоне") would only add noise.
+          const forms = [w, c, otherScript(w), c && /\p{Script=Cyrillic}/u.test(c) ? otherScript(c) : null].filter((x): x is string => !!x);
+          const unique = [...new Set(forms.flatMap(terms))];
+          return unique.length > 1 ? `(${unique.join(" | ")})` : unique[0]!;
         })
         .join(" & ")
     : null;
@@ -152,6 +175,8 @@ export class CatalogService {
     const c: SQL[] = [
       sql`${listings.status} = 'active'`,
       sql`(${listings.expiresAt} is null or ${listings.expiresAt} > now())`,
+      // «В отъезде»: an away seller's listings leave the catalog (and searches, alerts) until they are back.
+      sql`not exists (select 1 from users u where u.id = ${listings.sellerUserId} and u.away_until > now())`,
     ];
     if (f.category) c.push(eq(listings.category, f.category));
     if (f.priceMin != null) c.push(gte(listings.price, f.priceMin));
@@ -274,7 +299,10 @@ export class CatalogService {
     let history: ItemHistory | null = null;
 
     if ((IMEI_CATEGORIES as readonly string[]).includes(l.category)) {
-      const [row] = await this.db.select({ imei: listings.imei, seller: listings.sellerUserId }).from(listings).where(eq(listings.id, l.id));
+      const [row] = await this.db
+        .select({ imei: listings.imei, seller: listings.sellerUserId, registry: listings.imeiRegistry })
+        .from(listings)
+        .where(eq(listings.id, l.id));
       if (!row?.imei) checks.push({ code: "imei", source: "ishonch", status: "unknown" });
       else {
         const others = await this.db
@@ -283,6 +311,11 @@ export class CatalogService {
           .where(and(eq(listings.imei, row.imei), ne(listings.id, l.id)));
         const clash = others.some((o) => o.seller !== row.seller && ["active", "pending", "reserved"].includes(o.status));
         checks.push({ code: "imei", source: "ishonch", status: clash ? "fail" : "ok" });
+        // Only when a registry answered for this very IMEI: without access there is nothing to show.
+        // Ishonch's own base only ever says "listed": a closed report (kept "clean" for the moderator) shows nothing.
+        if (row.registry?.imei === row.imei && !(row.registry.provider === "ishonch" && row.registry.status !== "listed")) {
+          checks.push({ code: "imei_registry", source: "registry", status: row.registry.status === "clean" ? "ok" : "fail" });
+        }
         const past = others.filter((o) => o.publishedAt).sort((a, b) => b.publishedAt!.getTime() - a.publishedAt!.getTime());
         if (past.length) {
           const [insp] = (await this.db
@@ -480,6 +513,34 @@ export class CatalogService {
     return unique.map((x) => byId.get(x)).filter((i): i is CatalogItem => !!i && i.listing.status === "active");
   }
 
+  /**
+   * Stage 26: listings sellers sent to verified shops («Предложить магазинам») within the last week, for the
+   * shop's inbox — the same set the bot message went to, minus blocked pairs. Only for a verified shop.
+   */
+  async shopRequests(user: User): Promise<CatalogItem[]> {
+    const [shop] = await this.db.select({ verified: shops.verified }).from(shops).where(eq(shops.ownerUserId, user.id));
+    if (!shop?.verified) return [];
+    const rows = await this.db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(
+        and(
+          eq(listings.status, "active"),
+          ne(listings.sellerUserId, user.id),
+          gte(listings.shopsOfferAt, new Date(Date.now() - SHOPS_OFFER_EVERY_DAYS * DAY)),
+          sql`not exists (select 1 from user_blocks b where (b.blocker_user_id = ${user.id} and b.blocked_user_id = ${listings.sellerUserId})
+                or (b.blocker_user_id = ${listings.sellerUserId} and b.blocked_user_id = ${user.id}))`,
+          sql`not exists (select 1 from users u where u.id = ${listings.sellerUserId} and u.away_until > now())`,
+        ),
+      )
+      .orderBy(desc(listings.shopsOfferAt))
+      .limit(20);
+    return this.batch(
+      rows.map((r) => r.id),
+      user,
+    );
+  }
+
   /** Public seller page: the seller's facts (trust, rating, reply time…) and their live listings. */
   async sellerPage(sellerId: string, viewer: User | null) {
     const seller = await this.listingsSvc.sellerProfile(sellerId);
@@ -522,7 +583,11 @@ export class CatalogService {
     const tips: ListingInsights["tips"] = [];
     const phone = (IMEI_CATEGORIES as readonly string[]).includes(l.category);
     const checklist = (l.checklist ?? {}) as ConditionChecklist;
+    const demand = await this.demand(l);
     if (market && market.diffPct >= 10) tips.push({ code: "price_above_market", severity: "high", params: { pct: market.diffPct, median: formatUzs(market.median) } });
+    if (demand.cheaper > 0 && demand.cheaperMax) {
+      tips.push({ code: "searchers_cheaper", severity: "high", params: { n: demand.cheaper, max: formatUzs(demand.cheaperMax) } });
+    }
     if (l.favoritesCount >= 3 && l.requestsCount === 0) tips.push({ code: "favorites_no_requests", severity: "high", params: { n: l.favoritesCount } });
     if (days >= 3 && categoryViewsPerDay && viewsPerDay < categoryViewsPerDay * 0.5) {
       tips.push({ code: "low_views", severity: "medium", params: { mine: viewsPerDay, avg: categoryViewsPerDay } });
@@ -539,7 +604,58 @@ export class CatalogService {
     return {
       stats: { daysOnSale: days, views: l.views, viewsPerDay, categoryViewsPerDay, favorites: l.favoritesCount, requests: l.requestsCount },
       market,
+      demand,
       tips,
+    };
+  }
+
+  /** Who is looking for this item: saved searches that match it (with and without their price cap) and model favorites. */
+  private async demand(l: Listing): Promise<ListingInsights["demand"]> {
+    const searches = await this.db
+      .select({ userId: savedSearches.userId, filters: savedSearches.filters })
+      .from(savedSearches)
+      .innerJoin(users, eq(users.id, savedSearches.userId))
+      .where(
+        sql`${savedSearches.userId} <> ${l.sellerUserId} and ${users.bannedAt} is null
+          and (${savedSearches.filters}->>'category' is null or ${savedSearches.filters}->>'category' = ${l.category})
+          and (${savedSearches.filters}->>'district' is null or ${savedSearches.filters}->>'district' = ${l.district ?? ""})`,
+      )
+      .orderBy(desc(savedSearches.createdAt))
+      .limit(150);
+    const searching = new Set<string>();
+    const cheaper = new Map<string, number>();
+    for (const s of searches) {
+      if (searching.has(s.userId)) continue;
+      const { priceMax: cap, priceMin, belowMarketPct, ...rest } = s.filters as CatalogFilters;
+      if (priceMin != null && l.price != null && l.price < priceMin) continue;
+      if (!(await this.searchIds(rest, "newest", 0, 1, [eq(listings.id, l.id)])).length) continue;
+      // «Ниже рынка на N %» is one more price cap: the market median minus N % (the same rule as the alerts).
+      let priceMax = cap;
+      if (belowMarketPct) {
+        const marketCap = await this.belowMarketCap(l, belowMarketPct);
+        if (marketCap == null) continue;
+        priceMax = priceMax == null ? marketCap : Math.min(priceMax, marketCap);
+      }
+      if (priceMax == null || l.price == null || priceMax >= l.price) {
+        searching.add(s.userId);
+        cheaper.delete(s.userId);
+      } else cheaper.set(s.userId, Math.max(cheaper.get(s.userId) ?? 0, priceMax));
+    }
+    const modelKey = (l.attributes as { modelKey?: string | null }).modelKey;
+    let modelFavorites: number | null = null;
+    if (modelKey) {
+      const [row] = (await this.db.execute(sql`
+        select count(distinct f.user_id)::int as n
+        from ${favorites} f join ${listings} x on x.id = f.listing_id
+        where x.attributes->>'modelKey' = ${modelKey} and f.user_id <> ${l.sellerUserId}
+          and f.created_at > now() - interval '30 days'`)) as unknown as Array<{ n: number }>;
+      modelFavorites = row?.n ?? 0;
+    }
+    return {
+      searching: searching.size,
+      cheaper: cheaper.size,
+      cheaperMax: cheaper.size ? Math.max(...cheaper.values()) : null,
+      modelFavorites,
     };
   }
 
@@ -586,28 +702,182 @@ export class CatalogService {
   }
 
   // ---------- saved searches ----------
-  async saveSearch(user: User, filters: CatalogFilters) {
-    const [{ n }] = (await this.db.select({ n: count() }).from(savedSearches).where(eq(savedSearches.userId, user.id))) as [
-      { n: number },
-    ];
-    if (n >= MAX_SAVED_SEARCHES) throw new CatalogRejected("too_many_searches", 409);
-    const lang = user.language as Lang;
+  private searchTitle(filters: CatalogFilters, lang: Lang) {
     const parts = [
       filters.q,
       filters.category ? t(lang, `category.${filters.category}`) : null,
       filters.priceMax ? `≤ ${formatUzs(filters.priceMax)}` : null,
       filters.verifiedOnly ? "✔️" : null,
       filters.goodGrade ? "A–B" : null,
+      filters.belowMarketPct ? t(lang, "searches.below_market_short", { pct: filters.belowMarketPct }) : null,
     ].filter(Boolean);
+    return parts.join(" · ") || t(lang, "catalog.title");
+  }
+
+  async saveSearch(user: User, filters: CatalogFilters) {
+    const [{ n }] = (await this.db.select({ n: count() }).from(savedSearches).where(eq(savedSearches.userId, user.id))) as [
+      { n: number },
+    ];
+    if (n >= MAX_SAVED_SEARCHES) throw new CatalogRejected("too_many_searches", 409);
     const [row] = await this.db
       .insert(savedSearches)
-      .values({ userId: user.id, filters, title: parts.join(" · ") || t(lang, "catalog.title") })
+      .values({ userId: user.id, filters, title: this.searchTitle(filters, user.language as Lang) })
       .returning();
     return row!;
   }
 
+  /** «Ниже рынка» (stage 33): null switches it off. The title follows. */
+  async setSearchBelowMarket(user: User, id: number, pct: number | null) {
+    const [s] = await this.db.select().from(savedSearches).where(and(eq(savedSearches.id, id), eq(savedSearches.userId, user.id)));
+    if (!s) throw new CatalogRejected("not_found", 404);
+    const { belowMarketPct: _, ...rest } = s.filters as CatalogFilters;
+    const filters: CatalogFilters = pct ? { ...rest, belowMarketPct: pct } : rest;
+    const [row] = await this.db
+      .update(savedSearches)
+      .set({ filters, title: this.searchTitle(filters, user.language as Lang) })
+      .where(eq(savedSearches.id, id))
+      .returning();
+    return row!;
+  }
+
+  /** «Ниже рынка на N %»: the highest price that still counts, or null when the model's market price is unknown. */
+  private async belowMarketCap(l: Pick<Listing, "attributes">, pct: number) {
+    const key = (l.attributes as { modelKey?: string | null }).modelKey;
+    const range = key ? (await this.marketRange(key)).range : null;
+    return range ? Math.floor(range.median * (1 - pct / 100)) : null;
+  }
+
+  /** A saved search's «ниже рынка на N %»: the item must be that far below the model's market median. */
+  private async belowMarketOk(l: Pick<Listing, "price" | "attributes">, pct: number | undefined) {
+    if (!pct) return true;
+    if (!l.price) return false;
+    const cap = await this.belowMarketCap(l, pct);
+    return cap != null && l.price <= cap;
+  }
+
   listSearches(user: User) {
     return this.db.select().from(savedSearches).where(eq(savedSearches.userId, user.id)).orderBy(desc(savedSearches.createdAt));
+  }
+
+  async setSearchPublic(user: User, id: number, on: boolean) {
+    const [row] = await this.db
+      .update(savedSearches)
+      .set({ public: on })
+      .where(and(eq(savedSearches.id, id), eq(savedSearches.userId, user.id)))
+      .returning();
+    if (!row) throw new CatalogRejected("not_found", 404);
+    return row;
+  }
+
+  /** Open buyer requests a seller may answer: never the seller's own, banned or blocked buyers', or stale ones. */
+  private openWanted(seller: User, extra: SQL[] = []) {
+    return this.db
+      .select({ s: savedSearches })
+      .from(savedSearches)
+      .innerJoin(users, eq(users.id, savedSearches.userId))
+      .where(
+        and(
+          eq(savedSearches.public, true),
+          ne(savedSearches.userId, seller.id),
+          gte(savedSearches.createdAt, new Date(Date.now() - WANTED_MAX_AGE_DAYS * DAY)),
+          sql`${users.bannedAt} is null and not ('saved_search' = any(${users.notifyOff}))`,
+          sql`not exists (select 1 from user_blocks b where (b.blocker_user_id = ${users.id} and b.blocked_user_id = ${seller.id})
+                or (b.blocker_user_id = ${seller.id} and b.blocked_user_id = ${users.id}))`,
+          ...extra,
+        ),
+      );
+  }
+
+  /** «Куплю» for a seller: open requests, the ones their live listings fit first. */
+  async wanted(seller: User): Promise<WantedRequest[]> {
+    const rows = await this.openWanted(seller).orderBy(desc(savedSearches.createdAt)).limit(50);
+    const mine = await this.db
+      .select({ id: listings.id, titleRu: listings.titleRu, titleUz: listings.titleUz, price: listings.price, attributes: listings.attributes })
+      .from(listings)
+      .where(and(eq(listings.sellerUserId, seller.id), eq(listings.status, "active")));
+    const lang = seller.language as Lang;
+    const byId = new Map(mine.map((m) => [m.id, m]));
+    const out: WantedRequest[] = [];
+    for (const { s } of rows) {
+      const f = s.filters as CatalogFilters;
+      const found = mine.length ? await this.searchIds(f, "newest", 0, 5, [eq(listings.sellerUserId, seller.id)]) : [];
+      // The same rule «Отправить» checks: a listing above the buyer's «ниже рынка» is not offered.
+      const ids: string[] = [];
+      for (const id of found) {
+        const m = byId.get(id);
+        if (m && (await this.belowMarketOk({ price: m.price, attributes: m.attributes }, f.belowMarketPct))) ids.push(id);
+      }
+      const offered = ids.length
+        ? new Set(
+            (
+              await this.db
+                .select({ listingId: searchNotifications.listingId })
+                .from(searchNotifications)
+                .where(and(eq(searchNotifications.savedSearchId, s.id), inArray(searchNotifications.listingId, ids)))
+            ).map((r) => r.listingId),
+          )
+        : new Set<string>();
+      out.push({
+        id: s.id,
+        title: s.title,
+        priceMax: f.priceMax ?? null,
+        district: f.district ?? null,
+        createdAt: s.createdAt.toISOString(),
+        matches: ids.flatMap((id) => {
+          const m = byId.get(id);
+          return m ? [{ id, title: (lang === "ru" ? m.titleRu || m.titleUz : m.titleUz || m.titleRu) ?? "", price: m.price, offered: offered.has(id) }] : [];
+        }),
+      });
+    }
+    return out.sort((a, b) => Number(b.matches.length > 0) - Number(a.matches.length > 0)).slice(0, 50);
+  }
+
+  /** A seller answers a request with one of their live listings: the buyer gets it like a saved search alert. */
+  async offerToWanted(seller: User, searchId: number, listingId: string) {
+    const [row] = await this.openWanted(seller, [eq(savedSearches.id, searchId)]);
+    if (!row) throw new CatalogRejected("wanted_closed", 404);
+    const s = row.s;
+    const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
+    if (!l || l.sellerUserId !== seller.id || l.status !== "active") throw new CatalogRejected("not_found", 404);
+    const wantedFilters = s.filters as CatalogFilters;
+    if (
+      !(await this.searchIds(wantedFilters, "newest", 0, 1, [eq(listings.id, l.id)])).length ||
+      !(await this.belowMarketOk(l, wantedFilters.belowMarketPct))
+    ) {
+      throw new CatalogRejected("wanted_no_match", 400);
+    }
+    const [heard] = await this.db
+      .select({ id: searchNotifications.id })
+      .from(searchNotifications)
+      .where(and(eq(searchNotifications.userId, s.userId), eq(searchNotifications.listingId, l.id)))
+      .limit(1);
+    if (heard) throw new CatalogRejected("wanted_already", 409);
+    const [{ today }] = (await this.db
+      .select({ today: count() })
+      .from(searchNotifications)
+      .where(and(eq(searchNotifications.userId, s.userId), gte(searchNotifications.createdAt, startOfTashkentDay())))) as [{ today: number }];
+    if (today >= MAX_SEARCH_ALERTS_PER_DAY) throw new CatalogRejected("wanted_busy", 429);
+    const reservation = await this.repo.reserveDaily(seller.id, "wanted_offer", WANTED_OFFERS_PER_DAY);
+    if (reservation == null) throw new CatalogRejected("wanted_limit", 429);
+    const inserted = await this.db.insert(searchNotifications).values({ savedSearchId: s.id, userId: s.userId, listingId: l.id }).onConflictDoNothing().returning();
+    if (!inserted.length) {
+      await this.repo.refundDaily(reservation);
+      throw new CatalogRejected("wanted_already", 409);
+    }
+    const [buyer] = await this.db.select().from(users).where(eq(users.id, s.userId));
+    if (this.notifier && buyer) {
+      const lang = buyer.language as Lang;
+      const title = lang === "ru" ? l.titleRu || l.titleUz : l.titleUz || l.titleRu;
+      const url = await this.notifier.miniAppLink(`listing_${l.id}`).catch(() => null);
+      await this.notifier
+        .send(buyer.telegramId, t(lang, "wanted.offer_for_buyer", { query: s.title, title, price: l.price ? formatUzs(l.price) : "" }), [
+          ...(url ? [[{ text: t(lang, "bot.open_listing"), url }]] : []),
+          unsubscribeRow(lang, "saved_search"),
+        ])
+        .catch((err) => console.error("wanted offer message failed", err));
+    }
+    await this.repo.event(seller.id, "wanted_offer_sent", { searchId: s.id, listingId: l.id });
+    return { ok: true };
   }
 
   async deleteSearch(user: User, id: number) {
@@ -636,8 +906,19 @@ export class CatalogService {
     const notifiedUsers = new Set<string>();
     for (const { s, telegramId, language } of searches) {
       if (notifiedUsers.has(s.userId)) continue; // one alert per user per listing
+      // …also across runs: a price drop re-checks searches, and another search of the same person may match now.
+      const [heard] = await this.db
+        .select({ id: searchNotifications.id })
+        .from(searchNotifications)
+        .where(and(eq(searchNotifications.userId, s.userId), eq(searchNotifications.listingId, listingId)))
+        .limit(1);
+      if (heard) {
+        notifiedUsers.add(s.userId);
+        continue;
+      }
       const ids = await this.searchIds(s.filters as CatalogFilters, "newest", 0, 1, [eq(listings.id, listingId)]);
       if (ids.length === 0) continue;
+      if (!(await this.belowMarketOk(l, (s.filters as CatalogFilters).belowMarketPct))) continue;
       const [{ today }] = (await this.db
         .select({ today: count() })
         .from(searchNotifications)

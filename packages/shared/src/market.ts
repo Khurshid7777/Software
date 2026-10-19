@@ -182,6 +182,7 @@ export const MAX_BUNDLE_EXTRA = 4;
 // ---------- seller insights ("почему не продаётся") ----------
 export const INSIGHT_TIPS = [
   "price_above_market",
+  "searchers_cheaper",
   "favorites_no_requests",
   "low_views",
   "stale",
@@ -206,6 +207,12 @@ export interface ListingInsights {
   };
   /** Market price for the model (median) and how far the listing is from it, %. */
   market: { median: number; diffPct: number } | null;
+  /**
+   * Stage 24 «Спрос»: distinct people whose saved searches match the listing at its price, those whose search
+   * matches the item but caps the price lower (and the highest such cap), and people who saved the same model
+   * in the last 30 days (null without a recognised model).
+   */
+  demand: { searching: number; cheaper: number; cheaperMax: number | null; modelFavorites: number | null };
   /** Most important first. */
   tips: Array<{ code: InsightTip; severity: "high" | "medium" | "low"; params: Record<string, string | number> }>;
 }
@@ -417,5 +424,58 @@ export type ChatReportReason = (typeof CHAT_REPORT_REASONS)[number];
 // ---------- Stage 20: notifications under control (docs/plan.md) ----------
 
 /** Optional messages a user can switch off. Orders, meetings, disputes and chat messages always come. */
-export const NOTIFY_TYPES = ["price_drop", "follow", "likers_offer", "saved_search", "review_reminder"] as const;
+export const NOTIFY_TYPES = ["price_drop", "follow", "likers_offer", "saved_search", "review_reminder", "shops_request"] as const;
 export type NotifyType = (typeof NOTIFY_TYPES)[number];
+
+// ---------- «Предложить магазинам» (stage 23) ----------
+
+/**
+ * A private seller who wants to sell today sends the listing to verified shops (Carousell/Swappa style instant
+ * offers): each shop answers with an ordinary price offer, the seller picks one. Ishonch only connects them.
+ */
+export const SHOPS_OFFER_EVERY_DAYS = 7;
+/** At most this many shops get one request (the longest-verified first). */
+export const SHOPS_OFFER_MAX = 30;
+
+// ---------- «Куплю»: buyers' requests seen by sellers (stage 25) ----------
+
+/** A saved search opened to sellers stays visible this long after it was saved. */
+export const WANTED_MAX_AGE_DAYS = 30;
+/** One seller answers at most this many requests a day. */
+export const WANTED_OFFERS_PER_DAY = 10;
+
+/** A buyer's request as a seller sees it: no name, only what is wanted, plus the seller's own matching listings. */
+export interface WantedRequest {
+  id: number;
+  title: string;
+  priceMax: number | null;
+  district: string | null;
+  createdAt: string;
+  matches: Array<{ id: string; title: string; price: number | null; offered: boolean }>;
+}
+
+// ---------- «Украли телефон» (stage 27) ----------
+
+export const STOLEN_KINDS = ["stolen", "lost"] as const;
+export type StolenKind = (typeof STOLEN_KINDS)[number];
+/** Open reports one person may have at a time. */
+export const STOLEN_REPORTS_MAX = 3;
+
+export interface StolenReportDto {
+  id: number;
+  /** Last 4 digits only: the full IMEI is not shown back. */
+  imeiTail: string;
+  kind: StolenKind;
+  policeReport: string | null;
+  createdAt: string;
+}
+
+// ---------- «В отъезде» (stage 28) ----------
+
+/** A seller may be away at most this long in one go; it ends by itself. */
+export const AWAY_MAX_DAYS = 30;
+
+// ---------- «Ниже рынка» in saved searches (stage 33) ----------
+
+/** How far below the model's market price a saved search may ask for, %. */
+export const BELOW_MARKET_STEPS = [10, 15, 20] as const;

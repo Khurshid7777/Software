@@ -81,6 +81,8 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   if (!item) return <p className="center hint">{t("common.loading")}</p>;
   const l = item.listing;
   const own = l.seller?.id === meId;
+  // «В отъезде» (stage 28): the card still opens by link, but nothing can be ordered until the seller is back.
+  const away = !own && l.seller?.awayUntil ? new Date(l.seller.awayUntil) : null;
   const date = (iso: string) => new Date(iso).toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ");
 
   async function complain() {
@@ -153,7 +155,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
   }
 
   return (
-    <div className={!own && l.status === "active" && l.allowedDeliveryModes.length > 0 ? "stack with-action-bar" : "stack"} data-testid="listing-view">
+    <div className={!own && !away && l.status === "active" && l.allowedDeliveryModes.length > 0 ? "stack with-action-bar" : "stack"} data-testid="listing-view">
       <Gallery photos={l.photos} />
       {l.video && (
         <section className="stack-tight" data-testid="listing-video">
@@ -289,6 +291,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
         </section>
       )}
 
+      {away && (
+        <p className="hint-card" data-testid="seller-away">
+          🏖 {t("away.banner", { date: away.toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ", { day: "numeric", month: "long" }) })}
+        </p>
+      )}
+
       <section className="card">
         <h3>🚚 {t("listing.delivery_modes")}</h3>
         <ul>
@@ -343,7 +351,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
                 💬 {t("listing.write")}
               </button>
             )}
-            {l.allowedDeliveryModes.length > 0 && (
+            {l.allowedDeliveryModes.length > 0 && !away && (
               // Always at hand: the main action does not scroll away with the description.
               <div className="action-bar">
                 <div className="action-bar-inner">

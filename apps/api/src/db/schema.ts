@@ -30,6 +30,8 @@ export const users = pgTable("users", {
   banReason: text("ban_reason"),
   /** Optional notification types the user switched off (NOTIFY_TYPES, stage 20). */
   notifyOff: text("notify_off").array().notNull().default(sql`'{}'::text[]`),
+  /** «В отъезде» (stage 28): the seller's listings are hidden and take no orders until then. */
+  awayUntil: timestamp("away_until", { withTimezone: true }),
 });
 
 export const categories = pgTable("categories", {
@@ -163,6 +165,11 @@ export const listings = pgTable(
     priceDroppedAt: timestamp("price_dropped_at", { withTimezone: true }),
     /** Phones: 15-digit IMEI (Luhn-checked). Only the owner and operators see it; buyers see the last 4 digits. */
     imei: text("imei"),
+    /**
+     * Last answer of the lost/stolen registry for `imei` (IMEI_REGISTRY); stale once the IMEI changes.
+     * `cleared`: a moderator approved the listing despite "listed", so edits don't send it back for the same reason.
+     */
+    imeiRegistry: jsonb("imei_registry").$type<{ imei: string; status: "clean" | "listed"; provider: string; at: string; cleared?: boolean }>(),
     /** Phones/tablets: structured condition (battery %, biometrics, repairs, kit), see ConditionChecklist. */
     checklist: jsonb("checklist").notNull().default({}),
     /** "Рассмотрю обмен": buyers may propose their item plus a top-up. */
@@ -173,6 +180,8 @@ export const listings = pgTable(
     /** The last «Предложить избранным»: price and time (limits how often and how high the next one is). */
     likersOfferPrice: bigint("likers_offer_price", { mode: "number" }),
     likersOfferAt: timestamp("likers_offer_at", { withTimezone: true }),
+    /** «Предложить магазинам»: last time the listing went to verified shops (once a week). */
+    shopsOfferAt: timestamp("shops_offer_at", { withTimezone: true }),
     /**
      * Condition grade A–D (catalog filter «Класс A–B»). Mirrors computeGrade() in @ishonch/shared/passport —
      * the condition sets the best grade, checklist facts only lower it; a test keeps the two identical.
@@ -273,6 +282,8 @@ export const savedSearches = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     filters: jsonb("filters").notNull(),
     title: text("title").notNull(),
+    /** «Куплю» (stage 25): sellers may see this search (without the buyer) and answer with their listing. */
+    public: boolean("public").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [index("saved_searches_user_idx").on(t.userId)],
@@ -712,4 +723,27 @@ export const chatReports = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("chat_reports_conv_reporter_uq").on(t.conversationId, t.reporterUserId)],
+);
+
+/**
+ * «Украли телефон» (stage 27): an owner reports the IMEI of a stolen or lost phone. A listing with that IMEI goes
+ * to a moderator (a person decides: reports can be wrong); `withdrawnAt` — the owner found it or closed the report.
+ */
+export const stolenReports = pgTable(
+  "stolen_reports",
+  {
+    id: serial("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    imei: text("imei").notNull(),
+    kind: text("kind").notNull(),
+    policeReport: text("police_report"),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("stolen_reports_open_uq").on(t.userId, t.imei).where(sql`${t.withdrawnAt} is null`),
+    index("stolen_reports_imei_idx").on(t.imei).where(sql`${t.withdrawnAt} is null`),
+  ],
 );

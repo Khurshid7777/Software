@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { Redis } from "ioredis";
 import { validateInitData } from "./auth/telegram.js";
 
 /** Per-route limits per user and minute; everything else gets the global limit. */
@@ -19,6 +20,12 @@ export const ROUTE_LIMITS: Record<string, number> = {
   "POST /listings/:id/offers": 10,
   "POST /listings/:id/trade-offers": 6,
   "POST /listings/:id/offer-likers": 5,
+  "POST /listings/:id/offer-shops": 5,
+  "POST /wanted/:id/offer": 10,
+  "GET /wanted": 20,
+  "GET /listings/:id/insights": 30,
+  "POST /me/stolen": 5,
+  "POST /me/export": 3,
   "POST /listings/:id/meetings": 6,
   "POST /orders/:id/dispute": 5,
   // Uploads.
@@ -61,15 +68,46 @@ export function makeRateKey(secrets: RateKeySecrets) {
   };
 }
 
-/** Must be registered before routes: limits are attached in the onRoute hook. In-memory store per instance. */
-export async function registerRateLimits(app: FastifyInstance, secrets: RateKeySecrets) {
+/**
+ * Must be registered before routes: limits are attached in the onRoute hook. Counters live in memory per
+ * instance unless redisUrl is given; with several replicas they must be shared or each replica multiplies the limit.
+ */
+export async function registerRateLimits(app: FastifyInstance, secrets: RateKeySecrets, redisUrl = "") {
   app.addHook("onRoute", (route) => {
     const methods = Array.isArray(route.method) ? route.method : [route.method];
     const max = methods.map((m) => ROUTE_LIMITS[`${m} ${route.url}`]).find((x) => x !== undefined);
     if (max !== undefined) route.config = { ...(route.config as object), rateLimit: { max, timeWindow: "1 minute" } };
   });
+  let redis: Redis | undefined;
+  if (redisUrl) {
+    // Fail fast instead of queueing: a request must not wait for Redis to come back.
+    redis = new Redis(redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1, enableOfflineQueue: false });
+    // ioredis keeps reconnecting with a backoff: log the outage and the recovery once, not every attempt.
+    let down = false;
+    redis.on("error", (err) => {
+      if (!down) app.log.warn({ err: err.message }, "rate limit redis unavailable, limits are off until it is back");
+      down = true;
+    });
+    redis.on("ready", () => {
+      if (down) app.log.info("rate limit redis is back");
+      down = false;
+    });
+    app.addHook("onClose", async () => {
+      redis?.disconnect();
+    });
+    // Without the offline queue, requests before the first connect would skip the limit; wait briefly for it.
+    const ready = redis;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      ready.once("ready", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
   await app.register(rateLimit, {
     global: true,
+    ...(redis ? { redis, nameSpace: "ishonch-rl:", skipOnError: true } : {}),
     max: GLOBAL_LIMIT,
     timeWindow: "1 minute",
     keyGenerator: makeRateKey(secrets),

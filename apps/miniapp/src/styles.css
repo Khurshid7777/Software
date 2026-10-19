@@ -381,3 +381,6 @@ button:active:not(:disabled), .mini-card:active, .menu-row:active { opacity: 0.7
 .video-check { width: 100%; max-height: 360px; border-radius: 12px; background: #000; }
 .evidence-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .evidence-row img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }
+/* Photo editor: the cover label or a "make cover" link under each thumbnail. */
+.thumb-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 64px; }
+.thumb-cover { font-size: 11px; line-height: 1.2; text-align: center; padding: 0; min-height: 24px; }

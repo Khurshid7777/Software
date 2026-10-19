@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "away_until" timestamp with time zone;

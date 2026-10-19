@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useOnShow } from "../leave";
-import type { CatalogItem, ListingSeller } from "@ishonch/shared/client";
+import { BELOW_MARKET_STEPS, type CatalogItem, type ListingSeller } from "@ishonch/shared/client";
 import { ApiError, type Api, type SavedSearch } from "../api";
 import { confirmDialog } from "../dialogs";
 import { Empty } from "../components/Empty";
@@ -78,9 +78,39 @@ export function Favorites({ api, visible = true, onOpen, onSearch, onCatalog, on
       <h2>🔔 {t("searches.title")}</h2>
       {searches.length === 0 && <p className="hint">{t("searches.empty")}</p>}
       {searches.map((s) => (
-        <div key={s.id} className="card row between">
+        <div key={s.id} className="card row between" data-testid="saved-search">
           <button className="link" onClick={() => onSearch(s)}>
             {s.title}
+          </button>
+          <button
+            className={s.public ? "chip active" : "chip"}
+            aria-pressed={s.public}
+            title={t("searches.public_hint")}
+            onClick={() =>
+              api
+                .setSearchPublic(s.id, !s.public)
+                .then((row) => setSearches((list) => list.map((x) => (x.id === s.id ? { ...x, public: row.public } : x))))
+                .catch(fail)
+            }
+            data-testid="search-public"
+          >
+            🙋 {t(s.public ? "searches.public_on" : "searches.public_off")}
+          </button>
+          <button
+            className={s.filters.belowMarketPct ? "chip active" : "chip"}
+            title={t("searches.below_market_hint")}
+            onClick={() => {
+              // 10 → 15 → 20 → off.
+              const steps: Array<number | null> = [...BELOW_MARKET_STEPS, null];
+              const next = steps[(steps.indexOf(s.filters.belowMarketPct ?? null) + 1) % steps.length] ?? null;
+              api
+                .setSearchBelowMarket(s.id, next)
+                .then((row) => setSearches((list) => list.map((x) => (x.id === s.id ? row : x))))
+                .catch(fail);
+            }}
+            data-testid="search-below-market"
+          >
+            {s.filters.belowMarketPct ? t("searches.below_market_on", { pct: s.filters.belowMarketPct }) : t("searches.below_market_off")}
           </button>
           <button
             className="link danger"

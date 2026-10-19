@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CHECK_CATEGORIES, CURRENCIES } from "./types.js";
 import { CONDITIONS, DELIVERY_MODES, TASHKENT_DISTRICTS } from "./listing.js";
 import { COMPLAINT_REASONS, MAX_FLOOR, MODERATION_REASONS } from "./delivery.js";
+import { BELOW_MARKET_STEPS } from "./market.js";
 import { BIOMETRICS_STATES, DISPUTE_REASONS, DISPUTE_RESOLUTIONS, INSPECTION_CHECKS, KIT_ITEMS, MAX_BUNDLE_EXTRA, MINING_STATES, PIXEL_STATES, REPAIR_KINDS } from "./market.js";
 
 /**
@@ -109,6 +110,12 @@ export const CatalogFiltersSchema = z.object({
   verifiedOnly: z.coerce.boolean().optional(),
   /** Only grade A–B items (see computeGrade). */
   goodGrade: z.coerce.boolean().optional(),
+  /** Saved searches (stage 33): alert only when the item is this far below the model's market price, %. */
+  belowMarketPct: z.coerce
+    .number()
+    .int()
+    .refine((v) => (BELOW_MARKET_STEPS as readonly number[]).includes(v))
+    .optional(),
 });
 
 export type CatalogFilters = z.infer<typeof CatalogFiltersSchema>;

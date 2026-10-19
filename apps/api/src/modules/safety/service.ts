@@ -1,12 +1,23 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { CHAT_REPORT_REASONS, listingTitle, t, type ChatReportReason, type Lang } from "@ishonch/shared";
+import {
+  CHAT_REPORT_REASONS,
+  STOLEN_REPORTS_MAX,
+  isValidImei,
+  listingTitle,
+  normalizeImei,
+  t,
+  type ChatReportReason,
+  type Lang,
+  type StolenKind,
+  type StolenReportDto,
+} from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { chatReports, conversationMessages, conversations, listings, meetings, userBlocks, users, type User } from "../../db/schema.js";
+import { chatReports, conversationMessages, conversations, listings, meetings, stolenReports, userBlocks, users, type User } from "../../db/schema.js";
 import type { StaffNotifier } from "../../telegram/staff.js";
 
 export class SafetyRejected extends Error {
   constructor(
-    public code: "not_found" | "bad_request",
+    public code: "not_found" | "bad_request" | "bad_imei" | "phone_required" | "stolen_limit" | "stolen_exists",
     public status: number,
   ) {
     super(code);
@@ -21,7 +32,73 @@ const REPORT_MESSAGES = 12;
  * moderators. Identities stay masked: a block is shown to its owner by the listing where they met.
  */
 export class SafetyService {
-  constructor(private d: { repo: Repo; staff: StaffNotifier; adminLink?: () => Promise<string | null> }) {}
+  constructor(
+    private d: {
+      repo: Repo;
+      staff: StaffNotifier;
+      adminLink?: () => Promise<string | null>;
+      /** Sends live listings with the IMEI back through moderation (ListingService.recheckImei). */
+      recheckImei?: (imei: string, reporterId: string) => Promise<number>;
+    },
+  ) {}
+
+  // ---------- «Украли телефон» (stage 27) ----------
+
+  async stolenReports(user: User): Promise<StolenReportDto[]> {
+    const rows = await this.db
+      .select()
+      .from(stolenReports)
+      .where(and(eq(stolenReports.userId, user.id), isNull(stolenReports.withdrawnAt)))
+      .orderBy(desc(stolenReports.createdAt));
+    return rows.map((r) => ({
+      id: r.id,
+      imeiTail: r.imei.slice(-4),
+      kind: r.kind as StolenKind,
+      policeReport: r.policeReport,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
+  /** The owner's word is enough to hold a listing for a moderator, not to remove it: a person decides. */
+  async reportStolen(user: User, input: { imei: string; kind: StolenKind; policeReport?: string }) {
+    const imei = normalizeImei(input.imei);
+    if (!isValidImei(imei)) throw new SafetyRejected("bad_imei", 400);
+    if (!user.phone) throw new SafetyRejected("phone_required", 409);
+    const open = await this.stolenReports(user);
+    if (open.length >= STOLEN_REPORTS_MAX) throw new SafetyRejected("stolen_limit", 409);
+    // Report → «нашёлся» → report again would move listings back and forth: a few new reports a day at most.
+    const reservation = await this.d.repo.reserveDaily(user.id, "stolen_report", STOLEN_REPORTS_MAX);
+    if (reservation == null) throw new SafetyRejected("stolen_limit", 409);
+    const [row] = await this.db
+      .insert(stolenReports)
+      .values({ userId: user.id, imei, kind: input.kind, policeReport: input.policeReport?.trim().slice(0, 100) || null })
+      .onConflictDoNothing()
+      .returning();
+    if (!row) {
+      await this.d.repo.refundDaily(reservation);
+      throw new SafetyRejected("stolen_exists", 409);
+    }
+    const held = (await this.d.recheckImei?.(imei, user.id)) ?? 0;
+    await this.d.repo.event(user.id, "stolen_reported", { kind: input.kind, held });
+    return { id: row.id, held };
+  }
+
+  /** «Нашёлся» / close the report: listings already with a moderator stay there, the next check forgets it. */
+  async withdrawStolen(user: User, id: number) {
+    const [row] = await this.db
+      .update(stolenReports)
+      .set({ withdrawnAt: new Date() })
+      .where(and(eq(stolenReports.id, id), eq(stolenReports.userId, user.id), isNull(stolenReports.withdrawnAt)))
+      .returning();
+    if (!row) throw new SafetyRejected("not_found", 404);
+    // Passports stop showing the report right away (no other open report for the IMEI).
+    // A moderator's clearance stays: a report filed again later must not send the same listing back each time.
+    await this.db.execute(sql`
+      update ${listings} set imei_registry = case when (imei_registry->>'cleared')::boolean then jsonb_set(imei_registry, '{status}', '"clean"') else null end
+      where imei = ${row.imei} and imei_registry->>'provider' = 'ishonch'
+        and not exists (select 1 from ${stolenReports} s where s.imei = ${row.imei} and s.withdrawn_at is null)`);
+    return { ok: true };
+  }
 
   private get db() {
     return this.d.repo.db;

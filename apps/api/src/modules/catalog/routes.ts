@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandl
 import { z } from "zod";
 import {
   AssistantMessageSchema,
+  BELOW_MARKET_STEPS,
   CATALOG_SORTS,
   CatalogFiltersSchema,
   CONDITIONS,
@@ -26,6 +27,11 @@ const MESSAGES: Record<string, string> = {
   ai_unavailable: "check.ai_unavailable",
   suggest_limit: "suggest.limit",
   suggest_expired: "suggest.expired",
+  wanted_closed: "wanted.err.closed",
+  wanted_already: "wanted.err.already",
+  wanted_busy: "wanted.err.busy",
+  wanted_limit: "wanted.err.limit",
+  wanted_no_match: "wanted.err.no_match",
 };
 
 /** Query string → filters (conditions come as a comma-separated list). */
@@ -144,6 +150,38 @@ export function catalogRoutes(
       const parsed = CatalogFiltersSchema.safeParse(req.body ?? {});
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       return catalog.saveSearch(req.user!, parsed.data);
+    }),
+  );
+  app.patch<{ Params: { id: string } }>("/searches/:id", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = z
+        .object({
+          public: z.boolean().optional(),
+          belowMarketPct: z
+            .number()
+            .int()
+            .refine((v) => (BELOW_MARKET_STEPS as readonly number[]).includes(v))
+            .nullable()
+            .optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success || !Number.isInteger(Number(req.params.id))) return reply.code(400).send({ error: "bad_request" });
+      const id = Number(req.params.id);
+      let row = parsed.data.public !== undefined ? await catalog.setSearchPublic(req.user!, id, parsed.data.public) : null;
+      if (parsed.data.belowMarketPct !== undefined) row = await catalog.setSearchBelowMarket(req.user!, id, parsed.data.belowMarketPct);
+      if (!row) return reply.code(400).send({ error: "bad_request" });
+      return row;
+    }),
+  );
+  // Stage 26: a verified shop's inbox of «Предложить магазинам» requests.
+  app.get("/shops/mine/requests", { preHandler: requireUser }, (req) => catalog.shopRequests(req.user!));
+  // «Куплю»: buyers' requests for sellers, and a seller's answer with a live listing.
+  app.get("/wanted", { preHandler: requireUser }, (req) => catalog.wanted(req.user!));
+  app.post<{ Params: { id: string } }>("/wanted/:id/offer", { preHandler: requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const parsed = z.object({ listingId: z.string().uuid() }).safeParse(req.body);
+      if (!parsed.success || !Number.isInteger(Number(req.params.id))) return reply.code(400).send({ error: "bad_request" });
+      return catalog.offerToWanted(req.user!, Number(req.params.id), parsed.data.listingId);
     }),
   );
   app.delete<{ Params: { id: string } }>("/searches/:id", { preHandler: requireUser }, async (req) => {

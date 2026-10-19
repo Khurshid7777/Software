@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, avg, count, desc, eq, gt, inArray, isNull, lte, or, sql, ne } from "drizzle-orm";
 import { z } from "zod";
 import {
   BUMP_INTERVAL_DAYS,
@@ -83,6 +83,7 @@ const DAY = 24 * 3600_000;
 export type ListingError =
   | "need_photo_or_voice"
   | "too_many_photos"
+  | "bad_photo_order"
   | "voice_unavailable"
   | "ai_unavailable"
   | "not_found"
@@ -231,7 +232,7 @@ export class ListingService {
     await Promise.all([storageKey, ...PHOTO_WIDTHS.map((w) => `${storageKey}@w${w}`)].map((k) => this.d.storage.delete(k).catch(() => undefined)));
   }
 
-  private async storePhotos(listingId: string, files: UploadedFile[], startPosition: number) {
+  private async storePhotos(listingId: string, files: UploadedFile[], startPosition: number, stored: Array<{ id: number; storageKey: string }> = []) {
     const aiImages: Buffer[] = [];
     for (const [i, f] of files.entries()) {
       let img;
@@ -242,14 +243,18 @@ export class ListingService {
       }
       const key = `listings/${listingId}/${Date.now()}-${randomBytes(6).toString("hex")}.jpg`;
       await this.d.storage.put(key, img.full, "image/jpeg");
-      await this.db.insert(listingPhotos).values({
-        listingId,
-        storageKey: key,
-        phash: img.phash,
-        width: img.width,
-        height: img.height,
-        position: startPosition + i,
-      });
+      const [row] = await this.db
+        .insert(listingPhotos)
+        .values({
+          listingId,
+          storageKey: key,
+          phash: img.phash,
+          width: img.width,
+          height: img.height,
+          position: startPosition + i,
+        })
+        .returning({ id: listingPhotos.id, storageKey: listingPhotos.storageKey });
+      stored.push(row!);
       aiImages.push(img.ai);
     }
     return aiImages;
@@ -397,6 +402,8 @@ export class ListingService {
     // approved at a fair price, then dropped to lure buyers), goes through moderation again.
     const baitDrop = priceChanged && patch.price! < l.price! * (1 - BAIT_DROP_PCT / 100);
     if ((textChanged || imeiChanged || baitDrop) && l.status === "active") await this.remoderate(id);
+    // A lower price may now fit saved searches capped below the old one (each search hears about a listing once).
+    if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.status === "active") await this.schedule("saved_search_alerts", { listingId: id });
     if ("priceDroppedAt" in priceChange && priceChange.priceDroppedAt && l.price! - patch.price! >= (l.price! * PRICE_DROP_MIN_PCT) / 100) {
       await this.schedule("price_drop_alerts", { listingId: id, price: patch.price }, this.quiet(now));
     }
@@ -415,6 +422,41 @@ export class ListingService {
     return {}; // raised, but still below the old price: the badge stays
   }
 
+  /**
+   * «Украли телефон»: live listings with a newly reported IMEI go through moderation again (and to a moderator,
+   * since the report makes the review hold them). The reporter's own listings are not touched.
+   */
+  async recheckImei(imei: string, reporterId: string) {
+    const rows = await this.db
+      .select()
+      .from(listings)
+      .where(and(eq(listings.imei, imei), inArray(listings.status, ["active", "pending", "reserved"]), ne(listings.sellerUserId, reporterId)));
+    for (const l of rows) {
+      if (l.status === "active") {
+        await this.remoderate(l.id);
+        continue;
+      }
+      // Already with a moderator, or in an order: record the report on the listing and tell people now — a
+      // reserved phone may be on its way to a buyer.
+      const registry = this.d.moderation ? await this.d.moderation.checkRegistry(l) : null;
+      if (l.status === "pending") {
+        const record = l.moderation as ModerationRecord | null;
+        if (record && !record.reasons.some((r) => r.code === "imei_listed")) {
+          record.reasons.unshift({ code: "imei_listed", note: "Владелец сообщил в Ishonch о краже или потере телефона с этим IMEI" });
+          await this.db.update(listings).set({ moderation: record }).where(eq(listings.id, l.id));
+        }
+      }
+      if (registry?.cleared) continue;
+      const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      await this.d.staff?.moderators(
+        t("ru", l.status === "reserved" ? "staff.stolen_reserved" : "staff.stolen_pending", { title: l.titleRu || l.titleUz }),
+        url ? [[{ text: "Открыть", url }]] : [],
+      );
+      if (l.status === "reserved") await this.d.staff?.operators(t("ru", "staff.stolen_reserved", { title: l.titleRu || l.titleUz }));
+    }
+    return rows.length;
+  }
+
   private async remoderate(id: string) {
     if (!this.d.moderation) return;
     const [fresh] = await this.db.select().from(listings).where(eq(listings.id, id));
@@ -427,14 +469,42 @@ export class ListingService {
   async addPhotos(user: User, id: string, files: UploadedFile[]) {
     const l = await this.own(user, id);
     if (!["draft", "active", "pending", "rejected"].includes(l.status)) throw new ListingRejected("bad_state", 409);
-    const [{ n }] = (await this.db
-      .select({ n: count() })
-      .from(listingPhotos)
-      .where(eq(listingPhotos.listingId, id))) as [{ n: number }];
+    const photoStats = async () =>
+      ((await this.db
+        .select({ n: count(), last: sql<number>`coalesce(max(${listingPhotos.position}), -1)::int` })
+        .from(listingPhotos)
+        .where(eq(listingPhotos.listingId, id))) as [{ n: number; last: number }])[0];
+    const { n, last } = await photoStats();
     if (n + files.length > MAX_PHOTOS) throw new ListingRejected("too_many_photos", 400);
-    await this.storePhotos(id, files, n);
+    // After the last position, not the count: a deleted photo leaves a gap, and equal positions would make the
+    // channel post and the card disagree on the cover.
+    const stored: Array<{ id: number; storageKey: string }> = [];
+    await this.storePhotos(id, files, last + 1, stored);
+    // Two uploads at once may both pass the check above: the later one gives its photos back.
+    if ((await photoStats()).n > MAX_PHOTOS) {
+      await this.db.delete(listingPhotos).where(inArray(listingPhotos.id, stored.map((p) => p.id)));
+      await Promise.all(stored.map((p) => this.deletePhotoFiles(p.storageKey)));
+      throw new ListingRejected("too_many_photos", 400);
+    }
     // New photos on a live listing are checked like new text (duplicates, item swap).
     if (l.status === "active") await this.remoderate(id);
+    return this.dto(id, user.id);
+  }
+
+  /** New photo order (the first one is the cover): `ids` must be exactly the listing's photos. */
+  async reorderPhotos(user: User, id: string, ids: number[]) {
+    const l = await this.own(user, id);
+    if (!["draft", "active", "pending", "rejected", "archived"].includes(l.status)) throw new ListingRejected("bad_state", 409);
+    const current = await this.db.select({ id: listingPhotos.id }).from(listingPhotos).where(eq(listingPhotos.listingId, id));
+    const known = new Set(current.map((p) => p.id));
+    if (ids.length !== known.size || new Set(ids).size !== ids.length || ids.some((x) => !known.has(x))) {
+      throw new ListingRejected("bad_photo_order", 400);
+    }
+    await this.db.transaction(async (tx) => {
+      for (const [position, photoId] of ids.entries()) {
+        await tx.update(listingPhotos).set({ position }).where(and(eq(listingPhotos.id, photoId), eq(listingPhotos.listingId, id)));
+      }
+    });
     return this.dto(id, user.id);
   }
 
@@ -618,10 +688,16 @@ export class ListingService {
    * "Новый товар у продавца, на которого вы подписаны" (Depop / Vinted follow): at most one message per
    * follower and seller a Tashkent day — the day is claimed in follows.last_notified_at before sending.
    */
+  /** «В отъезде» (stage 28): an away seller's listings send nobody to a card they can't buy from. */
+  async sellerAway(userId: string, now = new Date()) {
+    const [u] = await this.db.select({ until: users.awayUntil }).from(users).where(eq(users.id, userId));
+    return !!u?.until && u.until > now;
+  }
+
   async followerAlerts(listingId: string, now = new Date()) {
     if (!this.d.notifier) return 0;
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
-    if (!l || l.status !== "active") return 0;
+    if (!l || l.status !== "active" || (await this.sellerAway(l.sellerUserId, now))) return 0;
     const claimed = await this.db
       .update(follows)
       .set({ lastNotifiedAt: now })
@@ -696,7 +772,7 @@ export class ListingService {
   async priceDropAlerts(listingId: string, price: number) {
     if (!this.d.notifier) return;
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
-    if (!l || l.status !== "active" || l.price !== price || !l.previousPrice) return;
+    if (!l || l.status !== "active" || l.price !== price || !l.previousPrice || (await this.sellerAway(l.sellerUserId))) return;
     const fans = await this.db
       .select({ id: users.id, telegramId: users.telegramId, language: users.language })
       .from(favorites)
@@ -765,7 +841,7 @@ export class ListingService {
       .select()
       .from(listingPhotos)
       .where(eq(listingPhotos.listingId, id))
-      .orderBy(asc(listingPhotos.position))
+      .orderBy(asc(listingPhotos.position), asc(listingPhotos.id))
       .limit(1);
     const photo = first ? await this.d.storage.get(first.storageKey) : null;
     const meta = [
@@ -900,7 +976,15 @@ export class ListingService {
     const due = await this.db
       .select()
       .from(listings)
-      .where(and(eq(listings.status, "active"), sql`${listings.autoDropFloor} is not null`, lte(listings.autoDropAt, now)))
+      .where(
+        and(
+          eq(listings.status, "active"),
+          sql`${listings.autoDropFloor} is not null`,
+          lte(listings.autoDropAt, now),
+          // A seller away (stage 28) gets no price drops while nobody can buy; they resume on return.
+          sql`not exists (select 1 from users u where u.id = ${listings.sellerUserId} and u.away_until > ${now.toISOString()})`,
+        ),
+      )
       .limit(200);
     let dropped = 0;
     for (const l of due) {
@@ -1106,7 +1190,7 @@ export class ListingService {
    * Public facts about sellers (shop, platform sales, rating, reply time, courier inspections), batched:
    * a fixed number of queries for any number of sellers. Listing cards and the seller page use it.
    */
-  async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt">>): Promise<Map<string, ListingSeller>> {
+  async sellerInfos(sellers: Array<Pick<User, "id" | "createdAt"> & { awayUntil?: Date | null }>): Promise<Map<string, ListingSeller>> {
     const sellerIds = sellers.map((u) => u.id);
     if (!sellerIds.length) return new Map();
     const [shopRows, sales, ratings, responseOf, insp, lost, fans] = await Promise.all([
@@ -1170,6 +1254,7 @@ export class ListingService {
                 }
               : null,
             followers: fansOf.get(u.id) ?? 0,
+            awayUntil: u.awayUntil && u.awayUntil > new Date() ? u.awayUntil.toISOString() : null,
             responseMinutes: responseOf.get(u.id) ?? null,
             inspections: inspOf.get(u.id) ?? { passed: 0, failed: 0 },
             disputesLost: lostOf.get(u.id) ?? 0,
@@ -1306,6 +1391,7 @@ export class ListingService {
           ? {
               autoDrop: l.autoDropFloor && l.autoDropAt ? { floor: l.autoDropFloor, nextAt: l.autoDropAt.toISOString() } : null,
               likersOffer: l.likersOfferPrice && l.likersOfferAt ? { price: l.likersOfferPrice, at: l.likersOfferAt.toISOString() } : null,
+              shopsOfferAt: l.shopsOfferAt?.toISOString() ?? null,
             }
           : {}),
         verified:
@@ -1345,6 +1431,7 @@ export class ListingService {
           inspections: { passed: 0, failed: 0 },
           disputesLost: 0,
           followers: 0,
+          awayUntil: null,
           badges: [],
         };
       }

@@ -77,25 +77,42 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
   return (
     <div className="stack" data-testid="listing-editor">
       <div className="thumbs">
-        {listing.photos.map((p) => (
-          <button
-            key={p.id}
-            className="thumb"
-            aria-label={t("sell.photo_remove")}
-            onClick={async () => {
-              // Deleting is permanent (the file is removed on the server): ask first.
-              if (!(await confirmDialog(t("sell.photo_remove_confirm")))) return;
-              api
-                .deletePhoto(listing.id, p.id)
-                .then(onChange)
-                .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")));
-            }}
-          >
-            <img src={photoUrl(p.url, 240)} alt="" />
-            <span className="thumb-x" aria-hidden>
-              ✕
-            </span>
-          </button>
+        {listing.photos.map((p, i) => (
+          <div key={p.id} className="thumb-wrap">
+            <button
+              className="thumb"
+              aria-label={t("sell.photo_remove")}
+              onClick={async () => {
+                // Deleting is permanent (the file is removed on the server): ask first.
+                if (!(await confirmDialog(t("sell.photo_remove_confirm")))) return;
+                api
+                  .deletePhoto(listing.id, p.id)
+                  .then(onChange)
+                  .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")));
+              }}
+            >
+              <img src={photoUrl(p.url, 240)} alt="" />
+              <span className="thumb-x" aria-hidden>
+                ✕
+              </span>
+            </button>
+            {i === 0 ? (
+              <span className="thumb-cover hint">{t("sell.photo_cover")}</span>
+            ) : (
+              <button
+                className="link thumb-cover"
+                onClick={() =>
+                  api
+                    .reorderPhotos(listing.id, [p.id, ...listing.photos.filter((x) => x.id !== p.id).map((x) => x.id)])
+                    .then(onChange)
+                    .catch((e) => setError(e instanceof ApiError ? e.message : t("common.error")))
+                }
+                data-testid="photo-make-cover"
+              >
+                {t("sell.photo_make_cover")}
+              </button>
+            )}
+          </div>
         ))}
         {listing.photos.length < 10 && (
           <label className="thumb add-thumb">

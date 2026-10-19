@@ -73,6 +73,7 @@ export const REASON_LABEL: Record<string, string> = {
   duplicate_photos: "Фото как у другого продавца",
   duplicate_text: "Текст как у другого продавца",
   duplicate_imei: "IMEI как у другого продавца",
+  imei_listed: "IMEI в базе утерянных/украденных",
   complaints: "Жалобы",
   other: "Другое",
   scam: "Мошенничество",

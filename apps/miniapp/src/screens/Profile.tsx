@@ -7,7 +7,7 @@ const LINKS = {
   privacy: import.meta.env.VITE_PRIVACY_URL ?? "",
 };
 
-type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications";
+type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications" | "stolen" | "away";
 
 interface Props {
   staff?: "admin" | "operator" | null;
@@ -15,10 +15,12 @@ interface Props {
   onOpen: (s: Target) => void;
   onLanguage: (lang: Lang) => void;
   onDeleteAccount: () => void;
+  /** «Скачать мои данные»: the bot sends a JSON file. */
+  onExport: () => void;
 }
 
 /** Everything personal: the seller's cabinet, saved items, language, legal texts, account removal. */
-export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount }: Props) {
+export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, onExport }: Props) {
   const t = useT();
   const lang = useLang();
   const row = (target: Target, icon: string, title: string, desc: string) => (
@@ -55,7 +57,9 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount }
         {row("favorites", "❤️", t("home.favorites.title"), t("home.favorites.desc"))}
         {row("check", "🔎", t("home.tekshir.title"), t("home.tekshir.desc"))}
         {row("notifications", "🔔", t("notify.open"), t("notify.desc"))}
+        {row("away", "🏖", t("away.open"), t("away.desc"))}
         {row("blocks", "🚫", t("blocks.open"), t("blocks.desc"))}
+        {row("stolen", "🚨", t("stolen.open"), t("stolen.desc"))}
         {staff && row("admin", "🛠", staff === "admin" ? "Админка" : "Заказы на доставку", "Ishonch staff")}
       </section>
 
@@ -84,6 +88,9 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount }
         </section>
       )}
 
+      <button className="link" onClick={onExport} data-testid="export-data">
+        {t("export.button")}
+      </button>
       <button className="link danger" onClick={onDeleteAccount}>
         {t("home.delete_account")}
       </button>

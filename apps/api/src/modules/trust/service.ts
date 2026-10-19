@@ -179,6 +179,9 @@ export class TrustService {
 
     // Compare-and-set on "pending": two moderators clicking at once (or approve vs reject) decide only once.
     if (decision === "approve") {
+      if (l.imeiRegistry?.status === "listed" && l.imeiRegistry.imei === l.imei) {
+        await this.db.update(listings).set({ imeiRegistry: { ...l.imeiRegistry, cleared: true } }).where(eq(listings.id, listingId));
+      }
       try {
         await this.d.listings.activate(listingId, prev?.pendingChannelIds ?? [], record, ["pending"]);
       } catch (err) {

@@ -32,3 +32,40 @@ test("notification settings: a type switched off stays off after reopening", asy
   const me = await asBot<{ notifyOff: string[] }>("GET", "/me", BUYER);
   expect(me.notifyOff).toEqual(["price_drop"]);
 });
+
+test("stolen phone: the owner reports an IMEI, sees it by its last digits, then marks it found", async ({ page }) => {
+  await open(page, BUYER);
+  await page.getByTestId("tab-profile").click();
+  await page.getByTestId("open-stolen").click();
+  await page.getByTestId("stolen-imei").fill("35 7000 1122 3344 7");
+  await expect(page.getByTestId("stolen-send")).toBeDisabled(); // wrong check digit
+  await page.getByTestId("stolen-imei").fill("356100112233448");
+  await page.getByTestId("stolen-police").fill("123/45");
+  await page.getByTestId("stolen-send").click();
+  await expect(page.getByText("Сообщение принято")).toBeVisible();
+  const row = page.getByTestId("stolen-row").filter({ hasText: "…3448" });
+  await expect(row).toBeVisible();
+  page.once("dialog", (d) => void d.accept());
+  await row.getByTestId("stolen-found").click();
+  await expect(row).toHaveCount(0);
+});
+
+test("away mode: the seller leaves, buyers see the return date and no order button; back — the button returns", async ({ page, browser }) => {
+  const [l] = await asBot<Array<{ id: string }>>("GET", "/listings/mine?status=active", PRIVATE_SELLER);
+  await open(page, PRIVATE_SELLER);
+  await page.getByTestId("tab-profile").click();
+  await page.getByTestId("open-away").click();
+  await page.getByTestId("away-on").click();
+  await expect(page.getByTestId("away-status")).toBeVisible();
+
+  const buyer = await browser.newPage();
+  await open(buyer, BUYER, `startapp=listing_${l!.id}`);
+  await expect(buyer.getByTestId("seller-away")).toBeVisible();
+  await expect(buyer.getByTestId("buy-delivery")).toHaveCount(0);
+
+  await page.getByTestId("away-off").click();
+  await expect(page.getByTestId("away-on")).toBeVisible();
+  await buyer.reload();
+  await expect(buyer.getByTestId("buy-delivery")).toBeVisible();
+  await expect(buyer.getByTestId("seller-away")).toHaveCount(0);
+});
