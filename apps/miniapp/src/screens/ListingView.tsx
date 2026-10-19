@@ -375,7 +375,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
             {l.price && offer?.status !== "pending" && offer?.status !== "accepted" &&
               (offering === null ? (
                 <button className="link" onClick={() => setOffering("")} data-testid="offer-open">
-                  🤝 {t("offer.make")}
+                  🏷️ {t("offer.make")}
                 </button>
               ) : (
                 <div className="card stack" data-testid="offer-form">

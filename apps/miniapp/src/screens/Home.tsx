@@ -91,23 +91,26 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
       </form>
 
       {howTo && (
-        <section className="card stack-tight" data-testid="trust-intro">
-          <strong>🛡 {t("home.trust.title")}</strong>
-          <ol className="trust-steps">
-            <li>{t("home.trust.step1")}</li>
-            <li>{t("home.trust.step2")}</li>
-            <li>{t("home.trust.step3")}</li>
-          </ol>
-          <button
-            className="link"
-            onClick={() => {
-              writePref("trust_intro_seen", "1");
-              setHowTo(false);
-            }}
-            data-testid="trust-intro-close"
-          >
-            {t("home.trust.close")}
-          </button>
+        <section className="card trust-intro" data-testid="trust-intro">
+          <div className="row between">
+            <strong>🛡 {t("home.trust.title")}</strong>
+            <button
+              className="link trust-close"
+              aria-label={t("home.trust.close")}
+              onClick={() => {
+                writePref("trust_intro_seen", "1");
+                setHowTo(false);
+              }}
+              data-testid="trust-intro-close"
+            >
+              ✕
+            </button>
+          </div>
+          <ul className="trust-steps">
+            <li>📋 {t("home.trust.step1")}</li>
+            <li>👀 {t("home.trust.step2")}</li>
+            <li>⚖️ {t("home.trust.step3")}</li>
+          </ul>
         </section>
       )}
 
@@ -135,7 +138,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
       <div className="quick-actions">
         <button className="quick primary-quick" onClick={() => onOpen("check")} data-testid="open-check">
           <span className="quick-icon">🔎</span>
-          <strong>Tekshir</strong>
+          <strong>{t("home.quick.check_title")}</strong>
           <span className="hint">{t("home.quick.check", { n: remaining })}</span>
         </button>
         <button className="quick" onClick={() => onOpen("assistant")} data-testid="open-assistant">
