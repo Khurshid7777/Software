@@ -280,7 +280,9 @@ describe.skipIf(!reachable)("item passport: grade, checks, IMEI history, grade f
     const media = await app.inject({ url });
     expect(media.statusCode).toBe(200);
     expect(media.headers["content-type"]).toBe("image/jpeg");
-    expect((await app.inject({ url: url.replace(/s=./, "s=x") })).statusCode).toBe(404);
+    // Always change the first character: a signature that already starts with "x" would stay valid.
+    const tampered = url.replace(/s=(.)/, (_, c: string) => `s=${c === "x" ? "y" : "x"}`);
+    expect((await app.inject({ url: tampered })).statusCode).toBe(404);
 
     // The courier's photos: operators only; a passed inspection puts them into the passport.
     expect((await upload(BUYER, `/operator/orders/${id}/inspection/photos`, [await jpeg(5)])).statusCode).toBe(403);
