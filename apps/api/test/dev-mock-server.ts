@@ -9,6 +9,7 @@ import { FsStorage } from "../src/storage/storage.js";
 import { readFileSync } from "node:fs";
 import { PROMPTS_DIR } from "@ishonch/shared/node";
 import { fixtures, listingFixtures, mockAiByPrompt } from "./helpers.js";
+import { prepareDemoUsers, registerDemoLogin } from "./demo-login.js";
 
 const assistantCases = JSON.parse(readFileSync(`${PROMPTS_DIR}__fixtures__/assistant.json`, "utf8")).cases;
 
@@ -77,6 +78,11 @@ const app = await buildApp({
     },
   },
 });
-await app.listen({ port: Number(process.env.PORT ?? 3000), host: "127.0.0.1" });
+// Demo mode (docker-compose.demo.yml): a page with one-click logins as the demo users, outside Telegram.
+const demo = process.env.DEMO === "1";
+if (demo) registerDemoLogin(app, botToken);
+
+await app.listen({ port: Number(process.env.PORT ?? 3000), host: process.env.HOST ?? "127.0.0.1" });
+if (demo) await prepareDemoUsers(app, config.INTERNAL_API_TOKEN);
 const user = { id: Number(process.env.DEV_USER_ID ?? 777000111), first_name: "Dev", language_code: process.env.E2E_LANG ?? "ru" };
 console.log("INIT_DATA=" + buildInitData(user, botToken));

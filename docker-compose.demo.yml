@@ -1,0 +1,53 @@
+# Demo of the Mini App in a browser: no Telegram, no keys, test data only.
+#   docker compose -f docker-compose.demo.yml up
+#   open http://localhost:8080/api/demo and pick a role
+# Ready images come from GitHub (.github/workflows/demo-images.yml builds them on every push to main), so this
+# one file is enough. In a clone, `up --build` builds them from the sources instead.
+# A separate project (own database volume), it does not touch the production stack. Stop: `... down -v`.
+name: ishonch-demo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ishonch
+      POSTGRES_DB: ishonch
+      # Demo only: the database is reachable just from the api container, so no password.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ishonch"]
+      interval: 3s
+      retries: 20
+
+  # The service is called "api": the Mini App's nginx proxies /api to http://api:3000.
+  api:
+    image: ghcr.io/khurshid7777/ishonch-demo-api:latest
+    build: { context: ., target: demo }
+    init: true
+    environment:
+      DEMO: "1"
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgres://ishonch@postgres:5432/ishonch
+      STORAGE_DIR: /app/data/storage
+      ADMIN_TELEGRAM_IDS: "777000333"
+      OPERATOR_TELEGRAM_IDS: "777000222"
+      RATE_LIMITS: "off"
+      QUIET_HOURS: "false"
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 5s
+      retries: 30
+      start_period: 30s
+
+  miniapp:
+    image: ghcr.io/khurshid7777/ishonch-demo-miniapp:latest
+    build:
+      context: .
+      dockerfile: apps/miniapp/Dockerfile
+    depends_on:
+      api: { condition: service_healthy }
+    # Loopback by default; DEMO_BIND=0.0.0.0 opens it to phones in the same Wi-Fi network.
+    ports: ["${DEMO_BIND:-127.0.0.1}:${DEMO_PORT:-8080}:80"]
