@@ -22,3 +22,11 @@ CMD ["sh", "-c", "npx tsx src/db/migrate.ts && npx tsx src/db/seed.ts && exec np
 FROM base AS bot
 WORKDIR /app/apps/bot
 CMD ["npx", "tsx", "src/index.ts"]
+
+# Demo (docker-compose.demo.yml): the real API with demo data, deterministic AI from fixtures, no Telegram
+# and no keys. Never use it for a real deployment.
+FROM base AS demo
+WORKDIR /app/apps/api
+ENV NODE_ENV=development
+EXPOSE 3000
+CMD ["sh", "-c", "npx tsx src/db/migrate.ts && npx tsx src/db/seed.ts && npx tsx test/dev-seed-catalog.ts && exec npx tsx test/dev-mock-server.ts"]

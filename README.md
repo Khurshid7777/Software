@@ -54,6 +54,14 @@ apps/miniapp    React + Vite + @telegram-apps/sdk-react: согласие, гл�
 packages/shared типы, i18n (i18n/ru.json, i18n/uz.json), промпты (prompts/*.vN.md), цены, скоринг риска
 ```
 
+## Демо в браузере (Docker, без Telegram и ключей)
+
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+
+Через 1–2 минуты откройте **http://localhost:8080/api/demo** и выберите роль: покупатель, частный продавец, магазин (узбекский), оператор доставки или администратор. Внутри настоящий API и база с демо-объявлениями; AI отвечает заготовками, Telegram не нужен. Удобнее смотреть в режиме телефона (DevTools → Toggle device toolbar). С телефона в той же Wi-Fi-сети: `DEMO_BIND=0.0.0.0 docker compose -f docker-compose.demo.yml up` и адрес `http://<IP компьютера>:8080/api/demo`. Остановить и стереть демо-данные: `docker compose -f docker-compose.demo.yml down -v`. Боевой стек и его база не затрагиваются.
+
 ## Быстрый старт (локально)
 
 ```bash
