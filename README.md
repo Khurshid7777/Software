@@ -73,6 +73,8 @@ Mini App в Telegram должен открываться по HTTPS: для ра
 
 ## Продакшн (VPS в Узбекистане)
 
+Пошаговая памятка по предварительному запуску (сервер, `.env`, Telegram, живая проверка, люди, первые недели) — [docs/launch.md](docs/launch.md).
+
 ```bash
 cp .env.example .env   # реальные значения
 docker compose up -d --build
