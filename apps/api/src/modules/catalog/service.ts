@@ -312,7 +312,8 @@ export class CatalogService {
         const clash = others.some((o) => o.seller !== row.seller && ["active", "pending", "reserved"].includes(o.status));
         checks.push({ code: "imei", source: "ishonch", status: clash ? "fail" : "ok" });
         // Only when a registry answered for this very IMEI: without access there is nothing to show.
-        if (row.registry?.imei === row.imei) {
+        // Ishonch's own base only ever says "listed": a closed report (kept "clean" for the moderator) shows nothing.
+        if (row.registry?.imei === row.imei && !(row.registry.provider === "ishonch" && row.registry.status !== "listed")) {
           checks.push({ code: "imei_registry", source: "registry", status: row.registry.status === "clean" ? "ok" : "fail" });
         }
         const past = others.filter((o) => o.publishedAt).sort((a, b) => b.publishedAt!.getTime() - a.publishedAt!.getTime());
@@ -529,6 +530,7 @@ export class CatalogService {
           gte(listings.shopsOfferAt, new Date(Date.now() - SHOPS_OFFER_EVERY_DAYS * DAY)),
           sql`not exists (select 1 from user_blocks b where (b.blocker_user_id = ${user.id} and b.blocked_user_id = ${listings.sellerUserId})
                 or (b.blocker_user_id = ${listings.sellerUserId} and b.blocked_user_id = ${user.id}))`,
+          sql`not exists (select 1 from users u where u.id = ${listings.sellerUserId} and u.away_until > now())`,
         ),
       )
       .orderBy(desc(listings.shopsOfferAt))
@@ -619,7 +621,7 @@ export class CatalogService {
           and (${savedSearches.filters}->>'district' is null or ${savedSearches.filters}->>'district' = ${l.district ?? ""})`,
       )
       .orderBy(desc(savedSearches.createdAt))
-      .limit(300);
+      .limit(150);
     const searching = new Set<string>();
     const cheaper = new Map<string, number>();
     for (const s of searches) {
@@ -627,13 +629,11 @@ export class CatalogService {
       const { priceMax: cap, priceMin, belowMarketPct, ...rest } = s.filters as CatalogFilters;
       if (priceMin != null && l.price != null && l.price < priceMin) continue;
       if (!(await this.searchIds(rest, "newest", 0, 1, [eq(listings.id, l.id)])).length) continue;
-      // «Ниже рынка на N %» is one more price cap: the market median minus N %.
+      // «Ниже рынка на N %» is one more price cap: the market median minus N % (the same rule as the alerts).
       let priceMax = cap;
       if (belowMarketPct) {
-        const key = (l.attributes as { modelKey?: string | null }).modelKey;
-        const range = key ? (await this.marketRange(key)).range : null;
-        if (!range) continue;
-        const marketCap = Math.floor((range.median * (1 - belowMarketPct / 100)) / 1000) * 1000;
+        const marketCap = await this.belowMarketCap(l, belowMarketPct);
+        if (marketCap == null) continue;
         priceMax = priceMax == null ? marketCap : Math.min(priceMax, marketCap);
       }
       if (priceMax == null || l.price == null || priceMax >= l.price) {
@@ -740,13 +740,19 @@ export class CatalogService {
     return row!;
   }
 
+  /** «Ниже рынка на N %»: the highest price that still counts, or null when the model's market price is unknown. */
+  private async belowMarketCap(l: Pick<Listing, "attributes">, pct: number) {
+    const key = (l.attributes as { modelKey?: string | null }).modelKey;
+    const range = key ? (await this.marketRange(key)).range : null;
+    return range ? Math.floor(range.median * (1 - pct / 100)) : null;
+  }
+
   /** A saved search's «ниже рынка на N %»: the item must be that far below the model's market median. */
   private async belowMarketOk(l: Pick<Listing, "price" | "attributes">, pct: number | undefined) {
     if (!pct) return true;
-    const key = (l.attributes as { modelKey?: string | null }).modelKey;
-    if (!key || !l.price) return false;
-    const range = (await this.marketRange(key)).range;
-    return !!range && l.price <= range.median * (1 - pct / 100);
+    if (!l.price) return false;
+    const cap = await this.belowMarketCap(l, pct);
+    return cap != null && l.price <= cap;
   }
 
   listSearches(user: User) {
@@ -784,9 +790,9 @@ export class CatalogService {
 
   /** «Куплю» for a seller: open requests, the ones their live listings fit first. */
   async wanted(seller: User): Promise<WantedRequest[]> {
-    const rows = await this.openWanted(seller).orderBy(desc(savedSearches.createdAt)).limit(100);
+    const rows = await this.openWanted(seller).orderBy(desc(savedSearches.createdAt)).limit(50);
     const mine = await this.db
-      .select({ id: listings.id, titleRu: listings.titleRu, titleUz: listings.titleUz, price: listings.price })
+      .select({ id: listings.id, titleRu: listings.titleRu, titleUz: listings.titleUz, price: listings.price, attributes: listings.attributes })
       .from(listings)
       .where(and(eq(listings.sellerUserId, seller.id), eq(listings.status, "active")));
     const lang = seller.language as Lang;
@@ -794,7 +800,13 @@ export class CatalogService {
     const out: WantedRequest[] = [];
     for (const { s } of rows) {
       const f = s.filters as CatalogFilters;
-      const ids = mine.length ? await this.searchIds(f, "newest", 0, 5, [eq(listings.sellerUserId, seller.id)]) : [];
+      const found = mine.length ? await this.searchIds(f, "newest", 0, 5, [eq(listings.sellerUserId, seller.id)]) : [];
+      // The same rule «Отправить» checks: a listing above the buyer's «ниже рынка» is not offered.
+      const ids: string[] = [];
+      for (const id of found) {
+        const m = byId.get(id);
+        if (m && (await this.belowMarketOk({ price: m.price, attributes: m.attributes }, f.belowMarketPct))) ids.push(id);
+      }
       const offered = ids.length
         ? new Set(
             (

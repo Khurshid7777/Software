@@ -299,6 +299,8 @@
   "bot.reply_failed": "Yuborib bo'lmadi: suhbatdosh botdan xabarlarni cheklagan.",
   "bot.saved_search_hit": "🔔 «{query}» obunangiz bo'yicha yangi e'lon:\n{title} — {price}",
   "staff.moderation_pending": "🛡 Tekshiruvga: «{title}» — {price}\n{notes}",
+  "staff.stolen_reserved": "🚨 Egasi telefon o'g'irlangani yoki yo'qolgani haqida xabar berdi, «{title}» e'loni esa allaqachon buyurtmada. Kuryer olishidan oldin IMEI ni tekshiring.",
+  "staff.stolen_pending": "🚨 Tekshiruvdagi «{title}» e'loniga shu IMEI bilan telefon o'g'irlangani yoki yo'qolgani haqida egasidan xabar keldi.",
   "moderation.hidden": "⏸ «{title}» e'loni vaqtincha yashirildi va moderator tekshiruvini kutmoqda. Odatda bu bir necha soat oladi.",
   "moderation.rejected": "⛔️ «{title}» e'loni moderatsiyadan o'tmadi. Uni «Mening e'lonlarim»da tuzating va qayta joylang.",
   "moderation.approved": "✅ «{title}» e'loni tekshirildi va joylandi.",

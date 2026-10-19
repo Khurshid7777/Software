@@ -12,6 +12,7 @@ import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
 import { listings } from "../src/db/schema.js";
 import { FsStorage } from "../src/storage/storage.js";
+import type { ChannelPublisher, Notifier } from "../src/telegram/publisher.js";
 import { mockAiByPrompt } from "./helpers.js";
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://ishonch:ishonch@localhost:5432/ishonch";
@@ -34,6 +35,7 @@ describe.skipIf(!reachable)("«Украли телефон»: owner-reported IME
   let close: () => Promise<unknown>;
   let db: ReturnType<typeof createDb>["db"];
   let storageDir: string;
+  const staffMessages: string[] = [];
   const tma = (id: number) => ({ authorization: `tma ${buildInitData({ id, language_code: "ru" }, BOT_TOKEN)}` });
   const internal = (id: number) => ({ authorization: "Internal internal-secret", "x-telegram-user": JSON.stringify({ id, language_code: "ru" }) });
   const userId = async (tg: number) => (await app.inject({ url: "/me", headers: tma(tg) })).json().id as string;
@@ -76,7 +78,12 @@ describe.skipIf(!reachable)("«Украли телефон»: owner-reported IME
     db = created.db;
     close = () => created.sql.end();
     const ai = mockAiByPrompt({ listing_moderate: { decision: "approved", reasons: [], seller_message_ru: "", seller_message_uz: "" } });
-    app = await buildApp({ config, db, ai, storage: new FsStorage(storageDir), publisher: null });
+    const gateway: ChannelPublisher & Notifier = {
+      post: async () => ({ messageId: 1 }),
+      miniAppLink: async (p) => `https://t.me/ishonch_bot/app?startapp=${p}`,
+      send: async (chatId, text) => void (chatId === ADMIN && staffMessages.push(text)),
+    };
+    app = await buildApp({ config, db, ai, storage: new FsStorage(storageDir), publisher: gateway });
   });
   beforeEach(async () => {
     await db.execute(dsql.raw(`delete from users where telegram_id in (${ALL.join(",")})`));
@@ -115,9 +122,32 @@ describe.skipIf(!reachable)("«Украли телефон»: owner-reported IME
     // «Нашёлся»: the passport line goes, and a new listing with the IMEI stays live.
     const [r] = mine as Array<{ id: number }>;
     expect((await app.inject({ method: "DELETE", url: `/me/stolen/${r!.id}`, headers: tma(OWNER) })).statusCode).toBe(200);
-    expect((await fetchRow(l.id)).imeiRegistry).toBeNull();
+    // Only the moderator's clearance is kept (as "clean"), so a report filed again later doesn't hold it again.
+    expect((await fetchRow(l.id)).imeiRegistry).toMatchObject({ status: "clean", cleared: true });
     expect((await card(l.id)).passport!.checks.map((c) => c.code)).not.toContain("imei_registry");
     expect((await app.inject({ url: "/me/stolen", headers: tma(OWNER) })).json()).toEqual([]);
+  });
+
+  it("a reserved listing alerts staff, a pending one gets the reason; a withdrawn report keeps the moderator's clearance", async () => {
+    const reserved = await liveListing(SELLER, OTHER[1]!);
+    await db.update(listings).set({ status: "reserved" }).where(eq(listings.id, reserved.id));
+    staffMessages.length = 0;
+    expect((await report(OWNER, OTHER[1]!)).json().held).toBe(1);
+    expect(staffMessages.some((m) => m.includes("уже в заказе"))).toBe(true);
+    expect((await fetchRow(reserved.id)).imeiRegistry).toMatchObject({ status: "listed", provider: "ishonch" });
+
+    // Approved by a moderator, then the owner withdraws and reports again: the listing is not held again.
+    const l = await liveListing(SELLER, OTHER[2]!);
+    await report(OWNER, OTHER[2]!);
+    await app.inject({ method: "POST", url: `/admin/listings/${l.id}/moderate`, headers: tma(ADMIN), payload: { decision: "approve" } });
+    const mine = (await app.inject({ url: "/me/stolen", headers: tma(OWNER) })).json() as Array<{ id: number; imeiTail: string }>;
+    const r = mine.find((x) => x.imeiTail === OTHER[2]!.slice(-4))!;
+    await app.inject({ method: "DELETE", url: `/me/stolen/${r.id}`, headers: tma(OWNER) });
+    await report(OWNER, OTHER[2]!);
+    await app.inject({ method: "PATCH", url: `/listings/${l.id}`, headers: tma(SELLER), payload: { descriptionRu: "Ещё одна правка" } });
+    expect((await fetchRow(l.id)).status).toBe("active");
+
+    expect((await app.inject({ method: "DELETE", url: "/me/stolen/abc", headers: tma(OWNER) })).statusCode).toBe(404);
   });
 
   it("checks: valid IMEI, a phone on the account, no duplicates, at most 3 open; own listings untouched", async () => {

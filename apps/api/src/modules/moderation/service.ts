@@ -178,18 +178,20 @@ export class ModerationService {
       .where(and(eq(stolenReports.imei, l.imei), ne(stolenReports.userId, l.sellerUserId), sql`${stolenReports.withdrawnAt} is null`))
       .limit(1);
     if (report) {
-      const cleared = cached?.imei === l.imei && cached.status === "listed" && cached.cleared === true;
+      // A moderator's clearance for this IMEI also covers a report filed again later.
+      const cleared = cached?.imei === l.imei && cached.cleared === true;
       const stored = { imei: l.imei, status: "listed" as const, provider: "ishonch", at: now.toISOString(), ...(cleared ? { cleared } : {}) };
       await this.db.update(listings).set({ imeiRegistry: stored }).where(eq(listings.id, l.id));
       return stored;
     }
-    // The report was withdrawn: forget the old answer.
-    if (cached?.provider === "ishonch") {
-      await this.db.update(listings).set({ imeiRegistry: null }).where(eq(listings.id, l.id));
-      if (!this.d.imeiRegistry) return null;
+    // The report was withdrawn: forget the answer, keeping only a moderator's clearance (as "clean").
+    if (cached?.provider === "ishonch" && cached.status === "listed") {
+      const kept = cached.cleared && cached.imei === l.imei ? { ...cached, status: "clean" as const } : null;
+      await this.db.update(listings).set({ imeiRegistry: kept }).where(eq(listings.id, l.id));
     }
     if (!this.d.imeiRegistry) return null;
     if (cached && cached.provider !== "ishonch" && cached.imei === l.imei && now.getTime() - Date.parse(cached.at) < REGISTRY_TTL_MS) return cached;
+    if (cached?.provider === "ishonch" && !this.d.imeiRegistry) return null;
     const res = await this.d.imeiRegistry.check(l.imei);
     if (!res) {
       this.d.logger?.warn({ listingId: l.id, provider: this.d.imeiRegistry.name }, "IMEI registry did not answer");

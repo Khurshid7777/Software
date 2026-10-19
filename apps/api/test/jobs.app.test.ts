@@ -48,6 +48,16 @@ describe.skipIf(!reachable)("job queue and singleton lock (integration)", () => 
     expect(left.every((j) => j.doneAt !== null)).toBe(true);
   });
 
+  it("a worker leaves job kinds it has no handler for", async () => {
+    await db.insert(jobs).values({ kind: "test_unknown_kind", payload: {} });
+    const q = new JobQueue(db, { inline: false });
+    q.register("test_some_other_kind", async () => undefined);
+    expect(await q.runOnce()).toBe(0);
+    const [j] = await db.select().from(jobs).where(eq(jobs.kind, "test_unknown_kind"));
+    expect(j!.attempts).toBe(0);
+    await db.delete(jobs).where(eq(jobs.kind, "test_unknown_kind"));
+  });
+
   it("a failing job is retried later with backoff and keeps the error", async () => {
     let tries = 0;
     const q = new JobQueue(db, { inline: false });

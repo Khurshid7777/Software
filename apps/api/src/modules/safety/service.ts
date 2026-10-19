@@ -66,12 +66,18 @@ export class SafetyService {
     if (!user.phone) throw new SafetyRejected("phone_required", 409);
     const open = await this.stolenReports(user);
     if (open.length >= STOLEN_REPORTS_MAX) throw new SafetyRejected("stolen_limit", 409);
+    // Report → «нашёлся» → report again would move listings back and forth: a few new reports a day at most.
+    const reservation = await this.d.repo.reserveDaily(user.id, "stolen_report", STOLEN_REPORTS_MAX);
+    if (reservation == null) throw new SafetyRejected("stolen_limit", 409);
     const [row] = await this.db
       .insert(stolenReports)
       .values({ userId: user.id, imei, kind: input.kind, policeReport: input.policeReport?.trim().slice(0, 100) || null })
       .onConflictDoNothing()
       .returning();
-    if (!row) throw new SafetyRejected("stolen_exists", 409);
+    if (!row) {
+      await this.d.repo.refundDaily(reservation);
+      throw new SafetyRejected("stolen_exists", 409);
+    }
     const held = (await this.d.recheckImei?.(imei, user.id)) ?? 0;
     await this.d.repo.event(user.id, "stolen_reported", { kind: input.kind, held });
     return { id: row.id, held };
@@ -86,8 +92,9 @@ export class SafetyService {
       .returning();
     if (!row) throw new SafetyRejected("not_found", 404);
     // Passports stop showing the report right away (no other open report for the IMEI).
+    // A moderator's clearance stays: a report filed again later must not send the same listing back each time.
     await this.db.execute(sql`
-      update ${listings} set imei_registry = null
+      update ${listings} set imei_registry = case when (imei_registry->>'cleared')::boolean then jsonb_set(imei_registry, '{status}', '"clean"') else null end
       where imei = ${row.imei} and imei_registry->>'provider' = 'ishonch'
         and not exists (select 1 from ${stolenReports} s where s.imei = ${row.imei} and s.withdrawn_at is null)`);
     return { ok: true };

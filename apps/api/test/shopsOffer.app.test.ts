@@ -149,5 +149,20 @@ describe.skipIf(!reachable)("«Предложить магазинам» (integr
     dms.length = 0;
     expect((await post(STRANGER, `/listings/${l.id}/offers`, { amount: 4_000_000 })).statusCode).toBe(200);
     expect(dmsTo(SELLER)[0]!.text).not.toContain("магазин");
+
+    // On a listing nobody sent to shops, the shop owner offers as a private person.
+    const other = await liveListing();
+    dms.length = 0;
+    expect((await post(SHOP, `/listings/${other.id}/offers`, { amount: 3_900_000 })).statusCode).toBe(200);
+    expect(dmsTo(SELLER)[0]!.text).not.toContain("Malika Mobile");
+  });
+
+  it("an away seller's requests leave the shops' inbox", async () => {
+    const l = await liveListing();
+    await post(SELLER, `/listings/${l.id}/offer-shops`);
+    const inbox = async () => ((await app.inject({ url: "/shops/mine/requests", headers: tma(SHOP) })).json() as Array<{ listing: { id: string } }>).map((i) => i.listing.id);
+    expect(await inbox()).toContain(l.id);
+    await app.inject({ method: "PUT", url: "/me/away", headers: tma(SELLER), payload: { until: new Date(Date.now() + 3 * 864e5).toISOString() } });
+    expect(await inbox()).not.toContain(l.id);
   });
 });

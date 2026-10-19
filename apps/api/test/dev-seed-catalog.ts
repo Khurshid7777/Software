@@ -32,7 +32,9 @@ await db.execute(dsql`delete from stolen_reports where user_id in (select id fro
 await db.execute(dsql`delete from saved_searches where user_id in (select id from users where telegram_id in (999000001, 999000002, 777000111, 777000222))`);
 await db.execute(dsql`delete from user_blocks where blocker_user_id in (${shopOwner.id}, ${privateSeller.id}) or blocked_user_id in (${shopOwner.id}, ${privateSeller.id})`);
 // Daily quotas of the demo buyer (offers): repeated e2e runs on one day must not hit the limit.
-await db.execute(dsql`delete from events where name = 'offer_made' and user_id in (select id from users where telegram_id in (777000111, 777000222))`);
+// Daily quotas the scenarios use up: repeated runs on one day would hit them.
+await db.execute(dsql`delete from events where name in ('offer_made', 'wanted_offer', 'stolen_report', 'data_export')
+  and user_id in (select id from users where telegram_id in (999000001, 999000002, 777000111, 777000222))`);
 await db.delete(listings).where(eq(listings.sellerUserId, shopOwner.id));
 await db.delete(listings).where(eq(listings.sellerUserId, privateSeller.id));
 

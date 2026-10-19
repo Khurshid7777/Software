@@ -428,10 +428,32 @@ export class ListingService {
    */
   async recheckImei(imei: string, reporterId: string) {
     const rows = await this.db
-      .select({ id: listings.id })
+      .select()
       .from(listings)
-      .where(and(eq(listings.imei, imei), eq(listings.status, "active"), ne(listings.sellerUserId, reporterId)));
-    for (const r of rows) await this.remoderate(r.id);
+      .where(and(eq(listings.imei, imei), inArray(listings.status, ["active", "pending", "reserved"]), ne(listings.sellerUserId, reporterId)));
+    for (const l of rows) {
+      if (l.status === "active") {
+        await this.remoderate(l.id);
+        continue;
+      }
+      // Already with a moderator, or in an order: record the report on the listing and tell people now — a
+      // reserved phone may be on its way to a buyer.
+      const registry = this.d.moderation ? await this.d.moderation.checkRegistry(l) : null;
+      if (l.status === "pending") {
+        const record = l.moderation as ModerationRecord | null;
+        if (record && !record.reasons.some((r) => r.code === "imei_listed")) {
+          record.reasons.unshift({ code: "imei_listed", note: "Владелец сообщил в Ishonch о краже или потере телефона с этим IMEI" });
+          await this.db.update(listings).set({ moderation: record }).where(eq(listings.id, l.id));
+        }
+      }
+      if (registry?.cleared) continue;
+      const url = this.d.publisher ? await this.d.publisher.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
+      await this.d.staff?.moderators(
+        t("ru", l.status === "reserved" ? "staff.stolen_reserved" : "staff.stolen_pending", { title: l.titleRu || l.titleUz }),
+        url ? [[{ text: "Открыть", url }]] : [],
+      );
+      if (l.status === "reserved") await this.d.staff?.operators(t("ru", "staff.stolen_reserved", { title: l.titleRu || l.titleUz }));
+    }
     return rows.length;
   }
 
@@ -666,10 +688,16 @@ export class ListingService {
    * "Новый товар у продавца, на которого вы подписаны" (Depop / Vinted follow): at most one message per
    * follower and seller a Tashkent day — the day is claimed in follows.last_notified_at before sending.
    */
+  /** «В отъезде» (stage 28): an away seller's listings send nobody to a card they can't buy from. */
+  async sellerAway(userId: string, now = new Date()) {
+    const [u] = await this.db.select({ until: users.awayUntil }).from(users).where(eq(users.id, userId));
+    return !!u?.until && u.until > now;
+  }
+
   async followerAlerts(listingId: string, now = new Date()) {
     if (!this.d.notifier) return 0;
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
-    if (!l || l.status !== "active") return 0;
+    if (!l || l.status !== "active" || (await this.sellerAway(l.sellerUserId, now))) return 0;
     const claimed = await this.db
       .update(follows)
       .set({ lastNotifiedAt: now })
@@ -744,7 +772,7 @@ export class ListingService {
   async priceDropAlerts(listingId: string, price: number) {
     if (!this.d.notifier) return;
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
-    if (!l || l.status !== "active" || l.price !== price || !l.previousPrice) return;
+    if (!l || l.status !== "active" || l.price !== price || !l.previousPrice || (await this.sellerAway(l.sellerUserId))) return;
     const fans = await this.db
       .select({ id: users.id, telegramId: users.telegramId, language: users.language })
       .from(favorites)

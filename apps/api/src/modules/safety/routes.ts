@@ -58,7 +58,11 @@ export function safetyRoutes(
     }),
   );
   app.delete<{ Params: { id: string } }>("/me/stolen/:id", { preHandler: auth.requireUser }, (req, reply) =>
-    handle(req, reply, () => svc.withdrawStolen(req.user!, Number(req.params.id))),
+    handle(req, reply, async () => {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return reply.code(404).send({ error: "not_found" });
+      return svc.withdrawStolen(req.user!, id);
+    }),
   );
   app.delete<{ Params: { userId: string } }>("/me/blocks/:userId", { preHandler: auth.requireUser }, (req, reply) =>
     isUuid(req.params.userId) ? svc.unblock(req.user!, req.params.userId) : reply.code(404).send({ error: "not_found" }),

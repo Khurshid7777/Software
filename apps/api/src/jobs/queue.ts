@@ -47,11 +47,19 @@ export class JobQueue {
 
   /** Claims and runs up to `limit` due jobs; returns how many ran. */
   async runOnce(limit = 20): Promise<number> {
+    // Only kinds this worker can run: during a rolling deploy an older replica must not claim (and burn the
+    // attempts of) a job kind it doesn't know yet.
+    const kinds = [...this.handlers.keys()];
+    if (!kinds.length) return 0;
     const claimed = (await this.db.execute(sql`
       update ${jobs} set locked_until = now() + make_interval(secs => ${LOCK_SECONDS}), attempts = attempts + 1
       where id in (
         select id from ${jobs}
         where done_at is null and run_at <= now() and attempts < ${MAX_ATTEMPTS}
+          and kind in (${sql.join(
+            kinds.map((k) => sql`${k}`),
+            sql`, `,
+          )})
           and (locked_until is null or locked_until < now())
         order by run_at
         limit ${limit}

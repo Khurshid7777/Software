@@ -185,12 +185,17 @@ export class OrderService {
     return (l.allowedDeliveryModes as DeliveryMode[]).filter((m) => this.d.codPlatformEnabled || MVP_DELIVERY_MODES.includes(m));
   }
 
+  /** «В отъезде»: deferred messages (quiet hours) are dropped if the seller left meanwhile. */
+  private async sellerIsAway(userId: string) {
+    const [u] = await this.db.select({ until: users.awayUntil }).from(users).where(eq(users.id, userId));
+    return !!u?.until && u.until > new Date();
+  }
+
   private async availableListing(listingId: string) {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
     if (!l) throw new OrderRejected("not_found", 404);
     if (l.status !== "active" || !l.price || (l.expiresAt && l.expiresAt <= new Date())) throw new OrderRejected("not_available", 409);
-    const [seller] = await this.db.select({ awayUntil: users.awayUntil }).from(users).where(eq(users.id, l.sellerUserId));
-    if (seller?.awayUntil && seller.awayUntil > new Date()) throw new OrderRejected("seller_away", 409);
+    if (await this.sellerIsAway(l.sellerUserId)) throw new OrderRejected("seller_away", 409);
     return l;
   }
 
@@ -364,11 +369,15 @@ export class OrderService {
     if (seller) {
       const lang = seller.language as Lang;
       const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
-      // A verified shop says so: the seller who asked shops for offers can tell them from private buyers.
-      const [shop] = await this.db
-        .select({ name: shops.name })
-        .from(shops)
-        .where(and(eq(shops.ownerUserId, buyer.id), eq(shops.verified, true)));
+      // A verified shop says so — only to a seller who asked shops this week: on any other listing its owner
+      // makes offers as a private person, and their shop is nobody's business.
+      const askedShops = !!l.shopsOfferAt && now.getTime() - l.shopsOfferAt.getTime() < SHOPS_OFFER_EVERY_DAYS * DAY_MS;
+      const [shop] = askedShops
+        ? await this.db
+            .select({ name: shops.name })
+            .from(shops)
+            .where(and(eq(shops.ownerUserId, buyer.id), eq(shops.verified, true)))
+        : [];
       await this.dm(
         seller,
         t(lang, "offer.new_for_seller", {
@@ -605,7 +614,7 @@ export class OrderService {
   /** The request messages to shops (now, or in the morning after quiet hours). */
   async shopsOfferDms(listingId: string) {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
-    if (!l || l.status !== "active" || !l.price) return 0;
+    if (!l || l.status !== "active" || !l.price || (await this.sellerIsAway(l.sellerUserId))) return 0;
     const recipients = await this.shopsForRequest(l);
     const url = this.d.notifier ? await this.d.notifier.miniAppLink(`listing_${l.id}`).catch(() => null) : null;
     for (const { u } of recipients) {
@@ -627,7 +636,7 @@ export class OrderService {
   /** The messages of an offer to likers: to everyone whose personal price is still open. */
   async likersOfferDms(listingId: string, price: number) {
     const [l] = await this.db.select().from(listings).where(eq(listings.id, listingId));
-    if (!l || l.status !== "active" || l.likersOfferPrice !== price) return 0;
+    if (!l || l.status !== "active" || l.likersOfferPrice !== price || (await this.sellerIsAway(l.sellerUserId))) return 0;
     const rows = await this.db
       .select({ u: users })
       .from(offers)
