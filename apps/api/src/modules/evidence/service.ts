@@ -1,9 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import type { CheckCategory, VideoCheckResult } from "@ishonch/shared";
+import type { AiService } from "../../ai/aiService.js";
 import type { Repo } from "../../db/repo.js";
 import { evidence } from "../../db/schema.js";
 import { processImage } from "../../storage/images.js";
 import type { Storage } from "../../storage/storage.js";
+import { checkVideo, extractFrames, unknownCheck } from "./videoCheck.js";
 
 /** dispute_photo: the buyer's, inspection_photo: the courier's at pickup, listing_video: the seller's check. */
 export type EvidenceKind = "dispute_photo" | "inspection_photo" | "listing_video";
@@ -28,8 +31,22 @@ export interface UploadedMedia {
  * listing photos; videos are kept as uploaded. Every file is served by a signed URL, so <img>/<video> work
  * without auth headers and ids cannot be guessed.
  */
+export interface ListingVideo {
+  url: string;
+  check: VideoCheckResult | null;
+}
+
 export class EvidenceService {
-  constructor(private d: { repo: Repo; storage: Storage; secret: string }) {}
+  constructor(
+    private d: {
+      repo: Repo;
+      storage: Storage;
+      secret: string;
+      /** Reads the frames of a video passport; null = videos are kept without an AI check. */
+      ai?: Pick<AiService, "structured"> | null;
+      logger?: { warn: (obj: unknown, msg: string) => void };
+    },
+  ) {}
 
   private get db() {
     return this.d.repo.db;
@@ -95,18 +112,33 @@ export class EvidenceService {
     return out;
   }
 
-  /** The seller's video check: one per listing, a new upload replaces the old one. */
-  async setVideo(listingId: string, userId: string, file: UploadedMedia) {
+  /**
+   * The seller's video passport: one per listing, a new upload replaces the old one. The AI reads a few frames
+   * right away (the seller sees at once what is missing); any failure there leaves the check `unknown`.
+   */
+  async setVideo(listingId: string, userId: string, file: UploadedMedia, listing: { category: CheckCategory; title: string }): Promise<ListingVideo> {
     if (!VIDEO_TYPES.test(file.mimeType) || !file.data.length) throw new EvidenceRejected("bad_video");
     await this.removeVideo(listingId);
-    const ext = file.mimeType.split("/")[1] === "quicktime" ? "mov" : file.mimeType.split("/")[1];
+    const ext = file.mimeType.split("/")[1] === "quicktime" ? "mov" : file.mimeType.split("/")[1]!;
     const key = `evidence/listings/${listingId}/video-${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
     await this.d.storage.put(key, file.data, file.mimeType);
+    const check = await this.inspect(file.data, ext, listing);
     const [row] = await this.db
       .insert(evidence)
-      .values({ kind: "listing_video", listingId, uploadedBy: userId, storageKey: key, mime: file.mimeType, bytes: file.data.length })
+      .values({ kind: "listing_video", listingId, uploadedBy: userId, storageKey: key, mime: file.mimeType, bytes: file.data.length, meta: check })
       .returning();
-    return this.url(row!);
+    return { url: this.url(row!), check };
+  }
+
+  private async inspect(data: Buffer, ext: string, listing: { category: CheckCategory; title: string }): Promise<VideoCheckResult> {
+    if (!this.d.ai) return unknownCheck();
+    try {
+      return await checkVideo(this.d.ai, await extractFrames(data, ext), listing);
+    } catch (err) {
+      // No key, the monthly budget, a provider outage: the video stays, the passport says "the seller's word".
+      this.d.logger?.warn({ err: String(err) }, "video check skipped");
+      return unknownCheck();
+    }
   }
 
   async removeVideo(listingId: string) {
@@ -114,16 +146,16 @@ export class EvidenceService {
     await Promise.all(old.map((o) => this.d.storage.delete(o.storageKey).catch(() => undefined)));
   }
 
-  /** Video URL per listing (the newest one). */
+  /** Video URL and AI check per listing (the newest clip). */
   async listingVideos(listingIds: string[]) {
-    const out = new Map<string, string>();
+    const out = new Map<string, ListingVideo>();
     if (!listingIds.length) return out;
     const rows = await this.db
       .select()
       .from(evidence)
       .where(and(inArray(evidence.listingId, listingIds), eq(evidence.kind, "listing_video")))
       .orderBy(desc(evidence.id));
-    for (const r of rows) if (!out.has(r.listingId)) out.set(r.listingId, this.url(r));
+    for (const r of rows) if (!out.has(r.listingId)) out.set(r.listingId, { url: this.url(r), check: (r.meta as VideoCheckResult | null) ?? null });
     return out;
   }
 }

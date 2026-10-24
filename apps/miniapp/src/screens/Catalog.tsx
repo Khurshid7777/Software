@@ -13,6 +13,8 @@ import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { ItemCard } from "../components/ItemCard";
 import { LoadError } from "../components/LoadError";
+import { BuyerPromise } from "../components/Promise";
+import { toggleCompare, useCompare } from "../compare";
 import { Toast } from "../components/Toast";
 import { digitsOnly, groupDigits } from "../prefs";
 import { haptic } from "../telegram";
@@ -23,10 +25,13 @@ interface Props {
   initial?: CatalogFilters;
   onOpen: (id: string) => void;
   onFiltersChange?: (f: CatalogFilters) => void;
+  /** «Как проходит проверка» from the promise strip under the search. */
+  onHow?: () => void;
 }
 
-export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
+export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props) {
   const t = useT();
+  const compareIds = useCompare();
   const [filters, setFilters] = useState<CatalogFilters>(initial ?? {});
   const [draft, setDraft] = useState<CatalogFilters>(initial ?? {});
   const [query, setQuery] = useState(initial?.q ?? "");
@@ -96,6 +101,11 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
 
   const activeFilters = Object.entries(filters).filter(([k, v]) => k !== "q" && v !== undefined && v !== false).length;
 
+  function compare(item: CatalogItem) {
+    if (toggleCompare(item.listing.id)) haptic("light");
+    else setToast(t("versus.full", { n: compareIds.length }));
+  }
+
   return (
     <div className="stack">
       <div className="catalog-head">
@@ -121,6 +131,7 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
             {activeFilters ? ` · ${activeFilters}` : ""}
           </button>
         </div>
+        <BuyerPromise variant="strip" onOpen={onHow} />
       </div>
 
       <div className="chips scroll-x bleed">
@@ -250,7 +261,14 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
       {!!items?.length && (
         <div className="catalog-grid">
           {items.map((i) => (
-            <ItemCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
+            <ItemCard
+              key={i.listing.id}
+              item={i}
+              onOpen={() => onOpen(i.listing.id)}
+              onFavorite={(on) => favorite(i, on)}
+              compared={compareIds.includes(i.listing.id)}
+              onCompare={() => compare(i)}
+            />
           ))}
         </div>
       )}

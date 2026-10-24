@@ -86,9 +86,12 @@ const EnvSchema = z.object({
     .transform((v) => v === "true"),
   // Optional notifications wait from 22:00 to 08:00 Tashkent. Off by default only in tests (time-of-day independent).
   QUIET_HOURS: z.enum(["true", "false"]).optional(),
+  // Phones, tablets and laptops need a video passport before publication. On by default in production only:
+  // tests, the demo and local development publish without one unless set explicitly.
+  VIDEO_REQUIRED: z.enum(["true", "false"]).optional(),
 });
 
-export type Config = Omit<z.infer<typeof EnvSchema>, "QUIET_HOURS"> & { QUIET_HOURS: boolean };
+export type Config = Omit<z.infer<typeof EnvSchema>, "QUIET_HOURS" | "VIDEO_REQUIRED"> & { QUIET_HOURS: boolean; VIDEO_REQUIRED: boolean };
 
 const WEAK_SECRETS = new Set(["dev-internal-token", "change-me-long-random", ""]);
 
@@ -107,7 +110,11 @@ export function productionWarnings(config: Config): string[] {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = EnvSchema.parse(env);
-  const config = { ...parsed, QUIET_HOURS: (parsed.QUIET_HOURS ?? (parsed.NODE_ENV === "test" ? "false" : "true")) === "true" };
+  const config = {
+    ...parsed,
+    QUIET_HOURS: (parsed.QUIET_HOURS ?? (parsed.NODE_ENV === "test" ? "false" : "true")) === "true",
+    VIDEO_REQUIRED: (parsed.VIDEO_REQUIRED ?? (parsed.NODE_ENV === "production" ? "true" : "false")) === "true",
+  };
   if (config.NODE_ENV === "production") {
     // The internal token lets the bot act as any user, admins included: never start with a placeholder.
     if (WEAK_SECRETS.has(config.INTERNAL_API_TOKEN) || config.INTERNAL_API_TOKEN.length < 32) {

@@ -294,7 +294,12 @@ export class CatalogService {
         status: l.verified?.passed ? "ok" : "unknown",
         ...(inspectionPhotos.length ? { params: { photos: inspectionPhotos.length } } : {}),
       },
-      { code: "video", source: "seller", status: l.video ? "ok" : "unknown" },
+      // The video passport: the AI read the frames (Ishonch) or nobody did yet (the seller's word).
+      !l.video
+        ? { code: "video", source: "seller", status: "unknown" }
+        : !l.videoCheck || l.videoCheck.verdict === "unknown"
+          ? { code: "video", source: "seller", status: "ok" }
+          : { code: "video", source: "ishonch", status: l.videoCheck.verdict === "pass" ? "ok" : l.videoCheck.verdict === "warn" ? "warn" : "fail" },
     ];
     let history: ItemHistory | null = null;
 
@@ -506,11 +511,14 @@ export class CatalogService {
   }
 
   /** Cards by id, in the given order (the Mini App's "recently viewed" list); non-public ones are skipped. */
-  async batch(ids: string[], viewer: User | null): Promise<CatalogItem[]> {
+  async batch(ids: string[], viewer: User | null, opts: { passport?: boolean } = {}): Promise<CatalogItem[]> {
     const unique = [...new Set(ids)].filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 20);
     const items = await this.items(unique, viewer);
     const byId = new Map(items.map((i) => [i.listing.id, i]));
-    return unique.map((x) => byId.get(x)).filter((i): i is CatalogItem => !!i && i.listing.status === "active");
+    const out = unique.map((x) => byId.get(x)).filter((i): i is CatalogItem => !!i && i.listing.status === "active");
+    // The compare screen («Versus») needs "N of M checks" per item; cards and rails do not.
+    if (opts.passport) for (const i of out) i.passport = await this.passport(i.listing, i.market);
+    return out;
   }
 
   /**

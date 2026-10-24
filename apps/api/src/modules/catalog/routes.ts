@@ -5,6 +5,7 @@ import {
   BELOW_MARKET_STEPS,
   CATALOG_SORTS,
   CatalogFiltersSchema,
+  COMPARE_MAX,
   CONDITIONS,
   LANGS,
   t,
@@ -100,8 +101,8 @@ export function catalogRoutes(
 
   // ---- discovery: similar listings, recently viewed, seller page, seller insights ----
   const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
-  app.get<{ Querystring: { ids?: string } }>("/catalog/batch", { preHandler: auth.optionalUser }, (req) =>
-    catalog.batch((req.query.ids ?? "").split(",").filter(Boolean), req.user ?? null),
+  app.get<{ Querystring: { ids?: string; passport?: string } }>("/catalog/batch", { preHandler: auth.optionalUser }, (req) =>
+    catalog.batch((req.query.ids ?? "").split(",").filter(Boolean), req.user ?? null, { passport: req.query.passport === "1" }),
   );
   app.get<{ Params: { id: string } }>("/catalog/:id/similar", { preHandler: auth.optionalUser }, (req, reply) =>
     handle(req, reply, async () => {
@@ -246,7 +247,7 @@ export function catalogRoutes(
   );
   app.post<{ Body: { ids?: unknown; needs?: string; lang?: string } }>("/assistant/compare", { preHandler: requireUser }, (req, reply) =>
     handle(req, reply, async () => {
-      const ids = z.array(z.string().uuid()).min(2).max(3).safeParse(req.body?.ids);
+      const ids = z.array(z.string().uuid()).min(2).max(COMPARE_MAX).safeParse(req.body?.ids);
       if (!ids.success) return reply.code(400).send({ error: "bad_request" });
       const lang = (LANGS as readonly string[]).includes(req.body?.lang ?? "") ? (req.body!.lang as Lang) : (req.user!.language as Lang);
       return assistant.compare(req.user!, lang, ids.data, req.body?.needs?.slice(0, 300));

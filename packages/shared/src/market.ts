@@ -285,6 +285,43 @@ export const MAX_INSPECTION_PHOTOS = 4;
 /** The seller's video check: a short clip (switching on, screen, camera), one per listing. */
 export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
 
+// ---------- buyer's promise and the video passport (stages 34–36) ----------
+/** How long the buyer has at handover to check the item before paying the seller or sending it back. */
+export const INSPECTION_MINUTES = 10;
+/** Categories whose listings need a scripted video passport before publication (VIDEO_REQUIRED). */
+export const VIDEO_REQUIRED_CATEGORIES = ["smartphone", "tablet", "laptop"] as const;
+export const videoRequiredFor = (category: string) => (VIDEO_REQUIRED_CATEGORIES as readonly string[]).includes(category);
+/** Steps the seller shows in the video passport; the AI looks for each on the frames it is given. */
+export const VIDEO_STEPS = ["device_on", "identifier", "battery", "account", "body"] as const;
+export type VideoStep = (typeof VIDEO_STEPS)[number];
+/** Which steps apply to a category (a TV has no battery screen; only phones have *#06#). */
+export const VIDEO_STEPS_BY_CATEGORY: Partial<Record<CheckCategory, readonly VideoStep[]>> = {
+  smartphone: ["device_on", "identifier", "battery", "account", "body"],
+  tablet: ["device_on", "identifier", "battery", "account", "body"],
+  laptop: ["device_on", "identifier", "battery", "account", "body"],
+  smartwatch: ["device_on", "battery", "account", "body"],
+};
+export const videoSteps = (category: string): readonly VideoStep[] =>
+  VIDEO_STEPS_BY_CATEGORY[category as CheckCategory] ?? ["device_on", "body"];
+export type VideoVerdict = "pass" | "warn" | "fail" | "unknown";
+/**
+ * What the AI saw on the frames of the seller's video. `unknown` means the AI did not look (no key, an outage,
+ * a clip we could not read): the video is still shown, the passport says it is the seller's word only.
+ */
+export interface VideoCheckResult {
+  verdict: VideoVerdict;
+  /** Steps of the script the AI found on the frames. */
+  seen: VideoStep[];
+  /** Short note for the seller and the buyer (Russian / Uzbek), empty when `unknown`. */
+  noteRu: string;
+  noteUz: string;
+  /** Clip length, seconds, when known. */
+  seconds: number | null;
+  at: string;
+}
+/** How many listings fit on the compare screen («Versus»). */
+export const COMPARE_MAX = 4;
+
 // ---------- selling faster (stage 16, docs/plan.md) ----------
 /** «Предложить избранным» (Poshmark "Offer to Likers"): at least this much below the price, 24 h, every 3 days. */
 export const LIKERS_OFFER_MIN_PCT = 10;

@@ -169,7 +169,13 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     imeiRegistry: imeiRegistry !== undefined ? imeiRegistry : createImeiRegistry(config),
     logger: app.log,
   });
-  const evidenceSvc = new EvidenceService({ repo, storage: store, secret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos` });
+  const evidenceSvc = new EvidenceService({
+    repo,
+    storage: store,
+    secret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
+    ai: aiService,
+    logger: app.log,
+  });
   const listingsSvc = new ListingService({
     repo,
     evidence: evidenceSvc,
@@ -196,6 +202,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     photoSecret: config.PHOTO_URL_SECRET || `${config.INTERNAL_API_TOKEN}:photos`,
     usdRate: config.USD_RATE,
     codPlatformEnabled: config.COD_PLATFORM_ENABLED,
+    videoRequired: config.VIDEO_REQUIRED,
   });
 
   catalog = new CatalogService(repo, listingsSvc, gateway);

@@ -56,5 +56,5 @@ test("the seller's video check shows on the listing and in the passport", async 
   await open(page, BUYER, `startapp=listing_${coffee.listing.id}`);
   await expect(page.getByTestId("listing-video")).toBeVisible();
   await page.getByTestId("passport-toggle").click();
-  await expect(page.getByTestId("passport-video")).toContainText("Есть видео-проверка");
+  await expect(page.getByTestId("passport-video")).toContainText("Видео-паспорт");
 });

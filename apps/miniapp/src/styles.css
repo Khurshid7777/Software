@@ -497,6 +497,97 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .trust-intro { display: flex; flex-direction: column; gap: 6px; }
 .trust-close { font-size: 18px; line-height: 1; padding: 4px 6px; color: var(--ink-2); }
 
+/* ---- 13b. Versus, the buyer's promise, «Как проходит проверка», the video passport ---- */
+.hero-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 4px; position: relative; z-index: 1; }
+.hero-actions .hero-cta { margin-top: 0; }
+.hero-link { background: none; border: 0; color: rgba(255, 255, 255, 0.85); font-weight: 500; font-size: 14px; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+.promise { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; color: var(--ink); font: inherit; }
+.promise-card { background: var(--ok-soft); border-radius: var(--r); padding: 12px 14px; }
+.promise-strip { background: var(--brand-soft); border-radius: var(--pill); padding: 8px 14px 8px 10px; font-size: 13px; }
+.promise-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--card); color: var(--ok); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: var(--shadow-sm); }
+.promise-strip .promise-icon { width: 28px; height: 28px; color: var(--brand); }
+.promise-strip .promise-icon .icon { width: 16px; height: 16px; }
+.promise-icon .icon { width: 20px; height: 20px; }
+.promise-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.promise-text strong { font-size: 14px; line-height: 1.3; }
+.promise-strip .promise-text strong { font-size: 13px; font-weight: 600; }
+.promise-more { display: inline-flex; align-items: center; gap: 2px; color: var(--brand); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.promise-more .icon { width: 16px; height: 16px; }
+.item-compare { color: var(--ink-2); }
+.item-compare.on { color: var(--brand); background: var(--brand-soft); }
+.mini-note { font-size: 12px; font-weight: 600; color: var(--ok); background: var(--ok-soft); border-radius: var(--pill); padding: 2px 8px; align-self: flex-start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.compare-tray {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 11;
+  display: flex; align-items: center; gap: 4px; background: var(--ink); color: var(--surface); border-radius: var(--pill); padding: 4px 4px 4px 6px; box-shadow: var(--shadow);
+  max-width: calc(100% - 2 * var(--gutter));
+}
+.compare-tray.above-tabbar { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+.compare-tray-main { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; color: inherit; padding: 8px 10px; font-weight: 600; font-size: 14px; }
+.compare-tray-main .icon { width: 20px; height: 20px; color: var(--spark); }
+.compare-dots { display: inline-flex; gap: 3px; }
+.compare-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); }
+.compare-dots i.on { background: var(--spark); }
+.compare-tray-clear { width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.14); color: inherit; display: inline-flex; align-items: center; justify-content: center; }
+.compare-tray-clear .icon { width: 14px; height: 14px; }
+.app.with-tray { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+.versus-wrap { margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); }
+.versus-table { min-width: 100%; border-collapse: separate; border-spacing: 0; }
+.versus-table th, .versus-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; min-width: 128px; vertical-align: middle; }
+.versus-table thead th { vertical-align: top; border-bottom-width: 2px; }
+.versus-table tbody th { position: sticky; left: 0; z-index: 1; background: var(--page); color: var(--ink-2); font-weight: 500; white-space: normal; min-width: 104px; max-width: 128px; font-size: 12.5px; }
+.versus-table thead th:first-child { position: sticky; left: 0; z-index: 2; background: var(--page); min-width: 104px; }
+.versus-table td.best { background: var(--ok-soft); font-weight: 600; border-radius: 10px; }
+.versus-table .versus-ai td { background: var(--brand-soft); font-size: 12.5px; }
+.versus-item { display: flex; flex-direction: column; gap: 6px; align-items: stretch; position: relative; }
+.versus-open { background: none; border: 0; padding: 0; color: var(--ink); text-align: left; display: flex; flex-direction: column; gap: 6px; }
+.versus-photo { display: block; aspect-ratio: 1; width: 100%; max-width: 132px; border-radius: 12px; overflow: hidden; background: var(--surface-2); }
+.versus-photo img, .versus-photo .no-photo { width: 100%; height: 100%; object-fit: cover; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.versus-title { font-size: 12.5px; font-weight: 500; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.versus-remove { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0, 0, 0, 0.55); color: #fff; display: inline-flex; align-items: center; justify-content: center; z-index: 1; }
+.versus-remove .icon { width: 12px; height: 12px; }
+.ok-text { color: var(--ok); display: inline-flex; align-items: center; gap: 4px; }
+.ok-text .icon { width: 16px; height: 16px; }
+.versus button.secondary .icon { width: 18px; height: 18px; margin-right: 6px; }
+.how-head { display: flex; flex-direction: column; gap: 8px; }
+.how-badge { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; background: var(--brand-soft); color: var(--brand); border-radius: var(--pill); padding: 5px 12px; font-size: 13px; font-weight: 600; }
+.how-badge .icon { width: 16px; height: 16px; }
+.how-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
+.how-step { display: grid; grid-template-columns: 40px 1fr; gap: 12px; padding: 12px 0; position: relative; }
+.how-step + .how-step::before { content: ""; position: absolute; left: 19px; top: -16px; height: 28px; border-left: 2px dashed var(--line); }
+.how-num { width: 40px; height: 40px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 17px; box-shadow: 0 6px 16px rgba(0, 83, 226, 0.3); }
+.how-step:nth-child(3) .how-num { background: var(--ok); box-shadow: 0 6px 16px rgba(26, 138, 90, 0.3); }
+.how-step-body { display: flex; flex-direction: column; gap: 4px; }
+.how-step-body strong { font-size: 16px; display: flex; align-items: center; gap: 6px; }
+.how-step-body strong .icon { width: 18px; height: 18px; color: var(--brand); }
+.how-checklist { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.how-checklist li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; }
+.how-checklist .icon { width: 18px; height: 18px; color: var(--ok); margin-top: 1px; }
+.how-before { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.how-before li { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.how-before .tile-icon { width: 36px; height: 36px; flex-shrink: 0; }
+.tag { font-size: 11px; font-weight: 600; color: var(--ink-2); background: var(--surface-3); border-radius: var(--pill); padding: 2px 8px; margin-left: 6px; }
+.tag-required { color: var(--bad); background: var(--bad-soft); }
+.video-passport legend .icon { width: 18px; height: 18px; color: var(--brand); }
+.video-passport.required { border-color: var(--brand); }
+.video-script { margin: 0; padding: 0 0 0 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.video-script li::marker { color: var(--brand); font-weight: 700; }
+.video-script strong { display: block; font-size: 14px; }
+.video-script .hint { font-size: 12.5px; }
+.video-verdict { display: flex; flex-direction: column; gap: 8px; border-radius: var(--r); padding: 10px 12px; background: var(--surface-2); }
+.video-verdict.verdict-pass { background: var(--ok-soft); }
+.video-verdict.verdict-warn { background: var(--warn-soft); }
+.video-verdict.verdict-fail { background: var(--bad-soft); }
+.video-verdict-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.video-verdict-head .icon { width: 20px; height: 20px; flex-shrink: 0; }
+.verdict-pass .video-verdict-head .icon { color: var(--ok); }
+.verdict-warn .video-verdict-head .icon { color: var(--warn); }
+.verdict-fail .video-verdict-head .icon { color: var(--bad); }
+.video-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.video-step { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; border-radius: var(--pill); padding: 3px 9px; background: var(--card); color: var(--ink-2); border: 1px solid var(--line); }
+.video-step .icon { width: 13px; height: 13px; }
+.video-step.seen { color: var(--ok); border-color: transparent; }
+.lv-head + .promise { margin-top: -4px; }
+
 /* ---- 14. Motion: entrances, hover, taps. Off for people who asked their phone for less motion. ---- */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 /* Opacity only: a transform on the screen would turn its fixed action bar into a child of the scrolling box. */
@@ -527,6 +618,12 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
   .dots button { transition: background-color 0.25s, transform 0.25s; }
   .dots button.active { transform: scale(1.25); }
   .market { animation: rise 0.4s var(--ease) both; }
+  .compare-tray { animation: rise 0.3s var(--ease) both; }
+  .how-steps > * { animation: rise 0.5s var(--ease) both; }
+  .how-steps > :nth-child(2) { animation-delay: 0.08s; }
+  .how-steps > :nth-child(3) { animation-delay: 0.16s; }
+  .how-steps > :nth-child(4) { animation-delay: 0.24s; }
+  .versus-table td.best { animation: rise 0.4s var(--ease) both; }
   .toast-float { animation: toast-in 0.22s var(--ease); }
 }
 @media (hover: hover) {
@@ -552,6 +649,7 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
   .tabbar button { max-width: 150px; }
   .action-bar-inner { max-width: 712px; }
   .brand-bar { border-radius: 0 0 32px 32px; }
+  .versus-table th, .versus-table td { min-width: 150px; }
 }
 @media (min-width: 900px) {
   .app { --cols: 4; max-width: 1040px; }

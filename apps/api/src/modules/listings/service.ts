@@ -41,6 +41,7 @@ import {
   type ListingStatus,
   type ModerationRecord,
   type PriceSuggestion,
+  videoRequiredFor,
 } from "@ishonch/shared";
 import { startOfTashkentDay, type Repo } from "../../db/repo.js";
 import {
@@ -69,7 +70,7 @@ import { buildCaption, type ChannelPublisher, type Notifier } from "../../telegr
 import type { StaffNotifier } from "../../telegram/staff.js";
 import { hasContactInfo, type ModerationService } from "../moderation/service.js";
 import { analyzeListing, generateListingText } from "./ai.js";
-import type { EvidenceService } from "../evidence/service.js";
+import type { EvidenceService, ListingVideo } from "../evidence/service.js";
 
 export const MAX_PHOTOS = 10;
 /** A price cut deeper than this (percent) sends a live listing back through moderation. */
@@ -91,6 +92,7 @@ export type ListingError =
   | "bad_state"
   | "phone_required"
   | "need_photo"
+  | "need_video"
   | "fill_required"
   | "limit_reached"
   | "bump_too_soon"
@@ -176,6 +178,8 @@ export interface ListingServiceDeps {
   usdRate: number;
   /** Feature flag: `cod_platform` stays off until there is a legal entity and a courier contract. */
   codPlatformEnabled: boolean;
+  /** VIDEO_REQUIRED: phones, tablets and laptops cannot be published without a video passport. */
+  videoRequired?: boolean;
   /** A listing left sale (sold, archived, hidden, expired): open "new" delivery requests are closed. */
   onUnavailable?: (listingId: string, reason: string) => Promise<unknown>;
   /** Background jobs (channel posts, saved-search alerts). Without it they run inside the request. */
@@ -542,6 +546,10 @@ export class ListingService {
       .from(listingPhotos)
       .where(eq(listingPhotos.listingId, id))) as [{ photos: number }];
     if (photos === 0) throw new ListingRejected("need_photo", 400);
+    // Phones, tablets and laptops: the scripted video passport is part of the listing, not an extra.
+    if (this.d.videoRequired && videoRequiredFor(l.category) && !(await this.d.evidence?.listingVideos([id]))?.has(id)) {
+      throw new ListingRejected("need_video", 400);
+    }
     if (hasContactInfo(l)) throw new ListingRejected("contact_info", 400);
 
     const shop = await this.shopOf(user.id);
@@ -1346,7 +1354,7 @@ export class ListingService {
       .orderBy(asc(listingPhotos.position), asc(listingPhotos.id));
     const photosOf = new Map<string, typeof photos>();
     for (const p of photos) photosOf.set(p.listingId, [...(photosOf.get(p.listingId) ?? []), p]);
-    const videoOf = this.d.evidence ? await this.d.evidence.listingVideos(ids) : new Map<string, string>();
+    const videoOf = this.d.evidence ? await this.d.evidence.listingVideos(ids) : new Map<string, ListingVideo>();
 
     const sellerIds = [...new Set(rows.map((r) => r.sellerUserId))];
     const needSellers = opts.withSeller || rows.some((r) => r.sellerUserId === viewerId && r.moderationReason);
@@ -1386,7 +1394,8 @@ export class ListingService {
         checklist: (l.checklist as ConditionChecklist) ?? {},
         acceptsTrade: l.acceptsTrade,
         grade: (l.grade as Grade | null) ?? null,
-        video: videoOf.get(l.id) ?? null,
+        video: videoOf.get(l.id)?.url ?? null,
+        videoCheck: videoOf.get(l.id)?.check ?? null,
         ...(isOwner
           ? {
               autoDrop: l.autoDropFloor && l.autoDropAt ? { floor: l.autoDropFloor, nextAt: l.autoDropAt.toISOString() } : null,

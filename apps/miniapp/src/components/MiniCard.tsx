@@ -5,7 +5,8 @@ import { MarketBadge } from "./ItemCard";
 import { GradeChip } from "./Passport";
 
 /** Compact two-column card for the storefront: photo first, then price and title. */
-export function MiniCard({ item, onOpen }: { item: CatalogItem; onOpen: () => void }) {
+/** `note`: a short comparison with the listing the buyer is looking at («дешевле на 12%», «класс выше»). */
+export function MiniCard({ item, onOpen, note }: { item: CatalogItem; onOpen: () => void; note?: string | null }) {
   const t = useT();
   const lang = useLang();
   const l = item.listing;
@@ -27,7 +28,7 @@ export function MiniCard({ item, onOpen }: { item: CatalogItem; onOpen: () => vo
             {l.previousPrice && <s className="old-price"> {formatUzs(l.previousPrice)}</s>}
           </strong>
         )}
-        <MarketBadge item={item} />
+        {note ? <span className="mini-note">{note}</span> : <MarketBadge item={item} />}
         <span className="mini-title">{listingTitle(l, lang)}</span>
         {l.district && <span className="hint">{t(`district.${l.district}`)}</span>}
       </span>

@@ -26,6 +26,7 @@ import type {
   InspectionCheck,
   Lang,
   ListingDto,
+  VideoCheckResult,
   ListingInsights,
   ListingSeller,
   ListingStatus,
@@ -255,9 +256,9 @@ export function createApi(initData: string | null) {
     uploadVideo: (id: string, video: File) => {
       const form = new FormData();
       form.append("video", video, video.name || "video.mp4");
-      return request<{ video: string }>(`/listings/${id}/video`, { method: "POST", body: form });
+      return request<{ video: string; videoCheck: VideoCheckResult | null }>(`/listings/${id}/video`, { method: "POST", body: form });
     },
-    deleteVideo: (id: string) => request<{ video: null }>(`/listings/${id}/video`, { method: "DELETE" }),
+    deleteVideo: (id: string) => request<{ video: null; videoCheck: null }>(`/listings/${id}/video`, { method: "DELETE" }),
     disputePhotos: (orderId: string, photos: Blob[]) => {
       const form = new FormData();
       photos.forEach((p, i) => form.append("photos", p, `photo-${i}.jpg`));
@@ -296,7 +297,8 @@ export function createApi(initData: string | null) {
     catalog: (f: CatalogFilters, sort: CatalogSort, offset = 0) => request<CatalogPage>(`/catalog?${filtersToQuery(f, sort, offset)}`),
     catalogItem: (id: string) => request<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
     similar: (listingId: string) => request<CatalogItem[]>(`/catalog/${listingId}/similar`),
-    catalogBatch: (ids: string[]) => (ids.length ? request<CatalogItem[]>(`/catalog/batch?ids=${ids.join(",")}`) : Promise.resolve([])),
+    catalogBatch: (ids: string[], opts: { passport?: boolean } = {}) =>
+      ids.length ? request<CatalogItem[]>(`/catalog/batch?ids=${ids.join(",")}${opts.passport ? "&passport=1" : ""}`) : Promise.resolve([]),
     sellerPage: (sellerId: string) =>
       request<{ seller: ListingSeller; trust: TrustLevel; items: CatalogItem[]; following: boolean }>(`/sellers/${sellerId}/page`),
     follow: (sellerId: string, on: boolean) =>

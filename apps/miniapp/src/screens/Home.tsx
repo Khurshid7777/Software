@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
+import { CHECK_CATEGORIES, INSPECTION_MINUTES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
 import type { Api } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
@@ -32,7 +32,7 @@ interface Props {
   /** Staff see an entry to the admin panel (operators: delivery orders only). */
   staff?: "admin" | "operator" | null;
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation") => void;
+  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation" | "how") => void;
   onCatalog: (filters?: CatalogFilters) => void;
   onListing: (id: string) => void;
 }
@@ -134,15 +134,20 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
               <Icon name="check" /> {t("home.trust.step1")}
             </li>
             <li>
-              <Icon name="check" /> {t("home.trust.step2")}
+              <Icon name="check" /> {t("home.trust.step2", { min: INSPECTION_MINUTES })}
             </li>
             <li>
               <Icon name="check" /> {t("home.trust.step3")}
             </li>
           </ul>
-          <button className="hero-cta" onClick={() => onCatalog({})}>
-            {t("home.hero.cta")} <Icon name="arrow" />
-          </button>
+          <div className="hero-actions">
+            <button className="hero-cta" onClick={() => onOpen("how")} data-testid="open-how">
+              {t("home.hero.cta")} <Icon name="arrow" />
+            </button>
+            <button className="hero-link" onClick={() => onCatalog({})}>
+              {t("home.hero.catalog")}
+            </button>
+          </div>
         </section>
       )}
 

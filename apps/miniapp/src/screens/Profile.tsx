@@ -1,4 +1,4 @@
-import type { Lang } from "@ishonch/shared/client";
+import { COMPARE_MAX, GUARANTEE_DAYS, INSPECTION_MINUTES, type Lang } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
 import { DocLink } from "../components/DocLink";
 import { Icon, type IconName } from "../components/Icon";
@@ -8,7 +8,7 @@ const LINKS = {
   privacy: import.meta.env.VITE_PRIVACY_URL ?? "",
 };
 
-type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications" | "stolen" | "away";
+type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications" | "stolen" | "away" | "how" | "compare";
 
 interface Props {
   staff?: "admin" | "operator" | null;
@@ -56,7 +56,9 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
         {row("my", "list", t("home.my.title"), t("home.my.desc"))}
         {row("shop", "shop", t("home.shop.title"), t("home.shop.desc"))}
         {row("favorites", "heart", t("home.favorites.title"), t("home.favorites.desc"))}
+        {row("compare", "compare", t("versus.title"), t("versus.empty_text", { n: COMPARE_MAX }))}
         {row("check", "verify", t("home.tekshir.title"), t("home.tekshir.desc"))}
+        {row("how", "timer", t("how.open"), t("how.desc", { min: INSPECTION_MINUTES, days: GUARANTEE_DAYS }))}
         {row("notifications", "bell", t("notify.open"), t("notify.desc"))}
         {row("away", "sun", t("away.open"), t("away.desc"))}
         {row("blocks", "ban", t("blocks.open"), t("blocks.desc"))}

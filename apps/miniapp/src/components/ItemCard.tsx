@@ -32,10 +32,13 @@ interface Props {
   onFavorite?: (on: boolean) => void;
   selected?: boolean;
   onSelect?: (on: boolean) => void;
+  /** «Versus»: the scales button adds the listing to the compare list (on = already there). */
+  compared?: boolean;
+  onCompare?: () => void;
 }
 
 /** Product card for the catalog grid: photo first, then the price, the title and the trust marks. */
-export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props) {
+export function ItemCard({ item, onOpen, onFavorite, selected, onSelect, compared, onCompare }: Props) {
   const t = useT();
   const lang = useLang();
   const l = item.listing;
@@ -63,7 +66,7 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props
           <TrustBadge item={item} />
         </span>
       </button>
-      {(onFavorite || onSelect) && (
+      {(onFavorite || onSelect || onCompare) && (
         <div className="item-actions">
           {onFavorite && (
             <button
@@ -72,6 +75,17 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props
               onClick={() => onFavorite(!item.favorite)}
             >
               <Icon name="heart" filled={item.favorite} />
+            </button>
+          )}
+          {onCompare && (
+            <button
+              className={compared ? "icon-btn item-fav item-compare on" : "icon-btn item-fav item-compare"}
+              aria-label={compared ? t("versus.remove") : t("versus.add")}
+              aria-pressed={compared}
+              onClick={onCompare}
+              data-testid="item-compare"
+            >
+              <Icon name="compare" />
             </button>
           )}
           {onSelect && (

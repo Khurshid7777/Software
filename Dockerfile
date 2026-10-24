@@ -1,6 +1,7 @@
 # Shared image for api and bot (TypeScript runs via tsx; no build step needed for the MVP).
 FROM node:22-alpine AS base
-RUN corepack enable
+# ffmpeg: stills from the seller's video passport for the AI check (apps/api/src/modules/evidence/videoCheck.ts).
+RUN corepack enable && apk add --no-cache ffmpeg
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/

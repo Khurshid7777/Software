@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { and, eq } from "drizzle-orm";
-import { MAX_DISPUTE_PHOTOS, MAX_INSPECTION_PHOTOS, MAX_VIDEO_BYTES, t, type Lang } from "@ishonch/shared";
+import { MAX_DISPUTE_PHOTOS, MAX_INSPECTION_PHOTOS, MAX_VIDEO_BYTES, t, type CheckCategory, type Lang } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import { disputes, listings, orders } from "../../db/schema.js";
 import { EvidenceRejected, VIDEO_TYPES, type EvidenceService, type UploadedMedia } from "./service.js";
@@ -101,14 +101,15 @@ export function evidenceRoutes(
       if (!l) return reply.code(404).send({ error: "not_found" });
       const [file] = await readFiles(req, VIDEO_TYPES, { fileSize: MAX_VIDEO_BYTES, files: 1 });
       if (!file) throw new EvidenceRejected("bad_video");
-      await repo.event(req.user!.id, "listing_video_added", { listingId: l.id, bytes: file.data.length });
-      return { video: await svc.setVideo(l.id, req.user!.id, file) };
+      const video = await svc.setVideo(l.id, req.user!.id, file, { category: l.category as CheckCategory, title: l.titleRu || l.titleUz });
+      await repo.event(req.user!.id, "listing_video_added", { listingId: l.id, bytes: file.data.length, verdict: video.check?.verdict ?? "unknown" });
+      return { video: video.url, videoCheck: video.check };
     }),
   );
   app.delete<{ Params: { id: string } }>("/listings/:id/video", { preHandler: auth.requireUser }, async (req, reply) => {
     const l = await ownListing(req);
     if (!l) return reply.code(404).send({ error: "not_found" });
     await svc.removeVideo(l.id);
-    return { video: null };
+    return { video: null, videoCheck: null };
   });
 }

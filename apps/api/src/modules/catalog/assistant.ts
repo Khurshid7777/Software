@@ -14,6 +14,7 @@ import {
   type CatalogItem,
   type CompareResponse,
   type Lang,
+  COMPARE_MAX,
 } from "@ishonch/shared";
 import type { AiService } from "../../ai/aiService.js";
 import { AiLimitExceededError, AiOutputError } from "../../ai/aiService.js";
@@ -170,7 +171,7 @@ export class AssistantService {
 
   async compare(user: User, lang: Lang, ids: string[], needs?: string): Promise<CompareResponse> {
     const unique = [...new Set(ids)];
-    if (unique.length < 2 || unique.length > 3) throw new AssistantRejected("bad_request", 400);
+    if (unique.length < 2 || unique.length > COMPARE_MAX) throw new AssistantRejected("bad_request", 400);
     const items = await this.catalog.items(unique, user);
     if (items.length !== unique.length) throw new AssistantRejected("bad_request", 400);
     const reservation = await this.reserve(user);

@@ -1,12 +1,15 @@
 // Seeds the demo catalog (fixtures/assistant.json) with generated photos for local development.
 //   pnpm --filter @ishonch/api dev:seed-catalog
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq, inArray, sql as dsql } from "drizzle-orm";
 import { PROMPTS_DIR } from "@ishonch/shared/node";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
 import { Repo } from "../src/db/repo.js";
-import { follows, listingPhotos, listings, shops, users } from "../src/db/schema.js";
+import { evidence, follows, listingPhotos, listings, shops, users } from "../src/db/schema.js";
 import { processImage } from "../src/storage/images.js";
 import { FsStorage, type Storage } from "../src/storage/storage.js";
 import { testPhoto } from "./helpers.js";
@@ -74,6 +77,40 @@ for (const [i, f] of catalog.entries()) {
   const key = `listings/${row!.id}/demo.jpg`;
   await storage.put(key, img.full, "image/jpeg");
   await db.insert(listingPhotos).values({ listingId: row!.id, storageKey: key, phash: img.phash, width: img.width, height: img.height });
+  // One phone carries a video passport the AI has read, so the demo shows the verdict on the card and in Versus.
+  if (f.key === "iphone13") await demoVideo(row!.id, privateSeller.id);
+}
+
+/** A 2-second clip made by ffmpeg (skipped silently where ffmpeg is missing) with a `pass` verdict attached. */
+async function demoVideo(listingId: string, userId: string) {
+  const dir = mkdtempSync(join(tmpdir(), "ishonch-demo-video-"));
+  try {
+    const out = join(dir, "clip.mp4");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x0053e2:s=320x240:d=2", "-pix_fmt", "yuv420p", "-r", "10", out], { stdio: "ignore" });
+    const clip = readFileSync(out);
+    const key = `evidence/listings/${listingId}/video-demo.mp4`;
+    await storage.put(key, clip, "video/mp4");
+    await db.insert(evidence).values({
+      kind: "listing_video",
+      listingId,
+      uploadedBy: userId,
+      storageKey: key,
+      mime: "video/mp4",
+      bytes: clip.length,
+      meta: {
+        verdict: "pass",
+        seen: ["device_on", "identifier", "battery", "account", "body"],
+        noteRu: "Телефон включается, на экране виден IMEI и состояние аккумулятора 86%, Apple ID не привязан.",
+        noteUz: "Telefon yonadi, ekranda IMEI va batareya holati 86% ko'rinadi, Apple ID bog'lanmagan.",
+        seconds: 2,
+        at: new Date().toISOString(),
+      },
+    });
+  } catch {
+    /* no ffmpeg here: the demo phone simply has no video */
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 // The newer categories (not in the assistant fixture, whose cases count its items): a shop's stock, older than
 // the fixture items so the storefront order stays the same.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   COMPLAINT_REASONS,
+  GRADES,
   OFFER_PENDING_HOURS,
   formatUzs,
   isCargo,
@@ -12,11 +13,15 @@ import {
   type ListingDto,
   type OfferDto,
   type ReviewDto,
+  videoSteps,
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { Gallery } from "../components/Gallery";
 import { Icon } from "../components/Icon";
 import { MiniCard } from "../components/MiniCard";
+import { BuyerPromise } from "../components/Promise";
+import { VideoVerdict } from "../components/VideoVerdict";
+import { setCompare, toggleCompare, useCompare } from "../compare";
 import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { MarketBadge, TrustBadge } from "../components/ItemCard";
@@ -38,11 +43,25 @@ interface Props {
   onEdit?: (l: ListingDto) => void;
   onOpen?: (id: string) => void;
   onSeller?: (sellerId: string) => void;
+  /** «Как проходит проверка» for this item's category. */
+  onHow?: (category: ListingDto["category"]) => void;
+  /** Opens «Versus» (after the listing was added, or with the closest similar ones). */
+  onCompare?: () => void;
 }
 
-export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: Props) {
+/** Why a similar listing may be the better pick: cheaper, a better grade, inspected, has a video passport. */
+function similarNote(t: ReturnType<typeof useT>, base: ListingDto, other: ListingDto): string | null {
+  if (base.price && other.price && other.price < base.price) return t("listing.similar_cheaper", { pct: Math.round((1 - other.price / base.price) * 100) });
+  if (other.grade && (!base.grade || GRADES.indexOf(other.grade) < GRADES.indexOf(base.grade))) return t("listing.similar_better");
+  if (other.verified && !base.verified) return t("listing.similar_verified");
+  if (other.video && !base.video) return t("listing.similar_video");
+  return null;
+}
+
+export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, onHow, onCompare }: Props) {
   const t = useT();
   const lang = useLang();
+  const compareIds = useCompare();
   const [item, setItem] = useState<CatalogItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -160,8 +179,11 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
       <Gallery photos={l.photos} />
       {l.video && (
         <section className="stack-tight" data-testid="listing-video">
-          <strong>{t("listing.video")}</strong>
+          <strong>
+            <Icon name="video" /> {t("listing.video")}
+          </strong>
           <video className="video-check" src={apiUrl(l.video)} controls playsInline preload="metadata" />
+          {l.videoCheck && <VideoVerdict check={l.videoCheck} steps={videoSteps(l.category)} />}
         </section>
       )}
       <div className="lv-head">
@@ -216,6 +238,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
         </span>
       </div>
       </div>
+      {!own && l.status === "active" && <BuyerPromise onOpen={onHow ? () => onHow(l.category) : undefined} />}
       {l.verified && (
         <p className="hint-card" data-testid="verified-badge">
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
@@ -232,6 +255,22 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
       <p className="description">{listingDescription(l, lang)}</p>
       {["active", "reserved"].includes(l.status) && (
         <div className="row wrap">
+          {!own && onCompare && (
+            <button
+              className={compareIds.includes(l.id) ? "chip active" : "chip"}
+              aria-pressed={compareIds.includes(l.id)}
+              onClick={() => {
+                if (compareIds.includes(l.id)) return onCompare();
+                if (toggleCompare(l.id)) {
+                  haptic("light");
+                  setToast(t("versus.added"));
+                } else setToast(t("versus.full", { n: compareIds.length }));
+              }}
+              data-testid="listing-compare"
+            >
+              <Icon name="compare" /> {compareIds.includes(l.id) ? t("versus.added") : t("versus.add")}
+            </button>
+          )}
           <button className="chip" onClick={() => share("chat")} data-testid="share-chat">
             📤 {t("share.chat")}
           </button>
@@ -440,10 +479,24 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
 
       {similar.length > 0 && onOpen && (
         <section className="stack-tight" data-testid="similar">
-          <h2>{t("listing.similar")}</h2>
+          <div className="section-head">
+            <h2>{t("listing.similar")}</h2>
+            {onCompare && !own && (
+              <button
+                className="link"
+                onClick={() => {
+                  setCompare([l.id, ...similar.slice(0, 3).map((i) => i.listing.id)]);
+                  onCompare();
+                }}
+                data-testid="compare-similar"
+              >
+                <Icon name="compare" /> {t("versus.with_similar")}
+              </button>
+            )}
+          </div>
           <div className="mini-grid">
             {similar.map((i) => (
-              <MiniCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} />
+              <MiniCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} note={similarNote(t, l, i.listing)} />
             ))}
           </div>
         </section>

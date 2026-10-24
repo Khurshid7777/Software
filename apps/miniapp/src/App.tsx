@@ -1,11 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { loadLanguage, normalizeLang, t, type CatalogFilters, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared/client";
+import { loadLanguage, normalizeLang, t, type CatalogFilters, type CheckCategory, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared/client";
 import { ApiError, createApi, SESSION_EXPIRED_EVENT, setApiLang, type Me } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { alertDialog, closeApp, confirmDialog } from "./dialogs";
 import { LangContext } from "./i18n";
 import { Assistant } from "./screens/Assistant";
 import { Catalog } from "./screens/Catalog";
+import { Compare } from "./screens/Compare";
+import { HowItWorks } from "./screens/HowItWorks";
 import { Check } from "./screens/Check";
 import { Checkout } from "./screens/Checkout";
 import { Favorites } from "./screens/Favorites";
@@ -24,6 +26,8 @@ import { Stolen } from "./screens/Stolen";
 import { Away } from "./screens/Away";
 import { Notifications } from "./screens/Notifications";
 import { Valuation } from "./screens/Valuation";
+import { CompareTray } from "./components/CompareTray";
+import { useCompare } from "./compare";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
 import { setBackButton, setChrome, type TelegramEnv } from "./telegram";
@@ -48,6 +52,8 @@ type Screen =
   | { name: "profile" }
   | { name: "seller"; id: string }
   | { name: "valuation" }
+  | { name: "compare" }
+  | { name: "how"; category?: CheckCategory }
   | { name: "admin" };
 
 /** A navigation entry: screens below the top stay mounted (state, loaded lists) and remember their scroll. */
@@ -100,6 +106,8 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_notifications") return { name: "notifications" };
   if (startParam === "screen_shop") return { name: "shop" };
   if (startParam === "screen_valuation") return { name: "valuation" };
+  if (startParam === "screen_how") return { name: "how" };
+  if (startParam === "screen_compare") return { name: "compare" };
   return { name: "home" };
 }
 
@@ -202,6 +210,8 @@ export function App({ env }: { env: TelegramEnv }) {
   // The storefront's blue brand bar continues into Telegram's own header; every other screen keeps it plain.
   useEffect(() => setChrome(stack.length === 1 && screen.name === "home"), [stack.length, screen.name]);
   const tabbar = stack.length === 1 && !!TAB_OF[screen.name];
+  // «Versus» tray floats over the lists while the buyer collects listings; the page leaves room for it.
+  const tray = useCompare().length > 0 && ["home", "catalog", "favorites", "seller", "assistant"].includes(screen.name);
 
   // Bot button "Find similar" → similar_<checkId>: open the catalog with the checked item.
   useEffect(() => {
@@ -322,11 +332,13 @@ export function App({ env }: { env: TelegramEnv }) {
             onEdit={(listing) => go({ name: "sell", existing: listing })}
             onOpen={(id) => go({ name: "listing", id })}
             onSeller={(id) => go({ name: "seller", id })}
+            onHow={(category) => go({ name: "how", category })}
+            onCompare={() => go({ name: "compare" })}
           />
         );
         break;
       case "checkout":
-        body = <Checkout api={api} listing={screen.listing} onDone={(id) => replace({ name: "orders", focusId: id })} />;
+        body = <Checkout api={api} listing={screen.listing} onDone={(id) => replace({ name: "orders", focusId: id })} onHow={() => go({ name: "how", category: screen.listing.category })} />;
         break;
       case "admin":
         body =
@@ -357,6 +369,7 @@ export function App({ env }: { env: TelegramEnv }) {
             initial={screen.filters}
             onFiltersChange={(filters) => update(key, { name: "catalog", filters })}
             onOpen={(id) => go({ name: "listing", id })}
+            onHow={() => go({ name: "how", category: screen.filters?.category })}
           />
         );
         break;
@@ -377,6 +390,12 @@ export function App({ env }: { env: TelegramEnv }) {
         break;
       case "valuation":
         body = <Valuation api={api} onSell={() => go({ name: "sell" })} />;
+        break;
+      case "compare":
+        body = <Compare api={api} onOpen={(id) => go({ name: "listing", id })} onCatalog={() => go({ name: "catalog" })} />;
+        break;
+      case "how":
+        body = <HowItWorks category={screen.category} onCatalog={() => go({ name: "catalog" })} />;
         break;
       case "seller":
         body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;
@@ -438,13 +457,14 @@ export function App({ env }: { env: TelegramEnv }) {
           </div>
         )}
         {screens}
+        {tray && <CompareTray withTabbar={tabbar} onOpen={() => go({ name: "compare" })} />}
       </>
     );
   }
 
   return (
     <LangContext.Provider value={lang}>
-      <main className={[tabbar ? "app with-tabbar" : "app", stack.length > 1 && !env.inTelegram ? "has-backrow" : ""].join(" ").trim()}>{content}</main>
+      <main className={[tabbar ? "app with-tabbar" : "app", tray ? "with-tray" : "", stack.length > 1 && !env.inTelegram ? "has-backrow" : ""].join(" ").trim()}>{content}</main>
       {tabbar && me?.acceptedTerms && <TabBar active={TAB_OF[screen.name] ?? null} onSelect={(tab) => void openTab(tab)} />}
     </LangContext.Provider>
   );

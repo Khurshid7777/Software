@@ -520,6 +520,8 @@ export const evidence = pgTable(
     storageKey: text("storage_key").notNull(),
     mime: text("mime").notNull(),
     bytes: integer("bytes").notNull(),
+    /** listing_video: what the AI saw on the clip (VideoCheckResult); null until checked. */
+    meta: jsonb("meta"),
     createdAt: createdAt(),
   },
   (t) => [index("evidence_listing_idx").on(t.listingId, t.kind), index("evidence_order_idx").on(t.orderId, t.kind)],

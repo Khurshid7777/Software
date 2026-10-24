@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   GUARANTEE_DAYS,
+  INSPECTION_MINUTES,
   MAX_FLOOR,
   TASHKENT_DISTRICTS,
   formatUzs,
@@ -13,6 +14,7 @@ import {
   type ListingDto,
 } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
+import { BuyerPromise } from "../components/Promise";
 import { useLang, useT } from "../i18n";
 import { sharePhoneAndWait } from "../phone";
 import { useLeaveGuard } from "../leave";
@@ -23,10 +25,11 @@ interface Props {
   api: Api;
   listing: ListingDto;
   onDone: (orderId: string) => void;
+  onHow?: () => void;
 }
 
 /** "Buy with delivery": mode, district and address → price breakdown → order request to the seller. */
-export function Checkout({ api, listing, onDone }: Props) {
+export function Checkout({ api, listing, onDone, onHow }: Props) {
   const t = useT();
   const lang = useLang();
   const modes = listing.allowedDeliveryModes;
@@ -274,8 +277,9 @@ export function Checkout({ api, listing, onDone }: Props) {
       )}
 
       {district && !quote && !error && <p className="hint center">⏳ {t("checkout.calculating")}</p>}
-      <p className="hint-card">
-        🔍 {t("checkout.inspection")}
+      <BuyerPromise onOpen={onHow} />
+      <p className="hint-card" data-testid="checkout-inspection">
+        {t("checkout.inspection", { min: INSPECTION_MINUTES })}
         <br />
         {t("guarantee.checkout", { days: GUARANTEE_DAYS })}
       </p>

@@ -161,6 +161,21 @@ export const AssistantRecommendSchema = z.object({
 
 export type AssistantRecommend = z.infer<typeof AssistantRecommendSchema>;
 
+/** The AI's reading of 3–5 frames from the seller's video passport (prompt video_check). */
+export const VideoCheckSchema = z.object({
+  device_visible: z.boolean().describe("a real device of the listing's category is in the frames"),
+  powered_on: z.boolean().describe("the screen is lit / the device visibly works"),
+  identifier_screen: z.boolean().describe("an IMEI (*#06#), serial number or 'About' screen is readable"),
+  battery_screen: z.boolean().describe("a battery health / capacity screen is shown"),
+  account_screen: z.boolean().describe("the account (iCloud / Google / Microsoft) screen is shown"),
+  body_shown: z.boolean().describe("the body is shown from more than one side"),
+  screen_damage: z.enum(["none", "minor", "major", "unknown"]).describe("visible cracks or dead areas on the screen"),
+  concerns: z.array(z.string()).describe("short facts a buyer should know, in Russian; empty when nothing"),
+  note_ru: z.string().describe("one sentence for the seller and the buyer, Russian"),
+  note_uz: z.string().describe("the same in Uzbek, Latin script"),
+});
+export type VideoCheckAi = z.infer<typeof VideoCheckSchema>;
+
 export const AssistantCompareSchema = z.object({
   summary: z.string(),
   verdicts: z.array(z.object({ listing_id: z.string(), best_for: z.string() })),

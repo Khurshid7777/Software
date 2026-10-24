@@ -52,6 +52,19 @@ const ai = mockAiByPrompt({
   listing_analyze: listing.mock_analysis,
   listing_generate: listing.mock_text,
   listing_moderate: { decision: "approved", reasons: [], seller_message_ru: "", seller_message_uz: "" },
+  // A real clip uploaded in the demo passes the video passport; a file that is not a video never gets here.
+  video_check: {
+    device_visible: true,
+    powered_on: true,
+    identifier_screen: true,
+    battery_screen: true,
+    account_screen: true,
+    body_shown: true,
+    screen_damage: "none",
+    concerns: [],
+    note_ru: "Устройство включается, экран IMEI и аккумулятора видны, аккаунт отвязан.",
+    note_uz: "Qurilma yonadi, IMEI va batareya ekrani ko'rinadi, akkaunt bog'lanmagan.",
+  },
   chat_suggest: {
     replies: [
       "Да, ещё в продаже. Состояние как на фото, без ремонтов.",
