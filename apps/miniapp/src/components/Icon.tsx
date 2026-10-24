@@ -1,24 +1,65 @@
-/** Line icons (24 px grid) used by the shell: crisp on every platform, unlike emoji. */
-const PATHS = {
-  home: "M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10",
-  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
-  plus: "M12 5v14M5 12h14",
-  box: "M3.5 8 12 3.5 20.5 8v8L12 20.5 3.5 16zM3.5 8 12 12.5 20.5 8M12 12.5v8",
-  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20c.8-3.5 3.9-5.5 7.5-5.5s6.7 2 7.5 5.5",
-  search: "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM16 16l5 5",
-  arrow: "M5 12h14M13 6l6 6-6 6",
-  chevron: "M9 6l6 6-6 6",
-  close: "M6 6l12 12M18 6 6 18",
-  heart: "M12 20.5s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.8a4.3 4.3 0 0 1 7.5 2.7c0 5.4-7.5 10-7.5 10z",
-  check: "M5 12.5 10 17 19 7",
-  shield: "M12 3.5 5 6v5.5c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6z",
-} as const;
-export type IconName = keyof typeof PATHS;
+import type { CSSProperties } from "react";
 
-export function Icon({ name, filled = false, className = "icon" }: { name: IconName; filled?: boolean; className?: string }) {
+/**
+ * Line icons on a 24 px grid, one stroke weight everywhere: crisp on every platform and theme, unlike emoji.
+ * `soft` paths are drawn under the strokes with a translucent fill (duotone), which gives the big tiles depth.
+ */
+const ICONS: Record<string, { d: string; soft?: string }> = {
+  // Shell
+  home: { d: "M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10" },
+  grid: { d: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
+  plus: { d: "M12 5v14M5 12h14" },
+  box: { d: "M3.5 8 12 3.5 20.5 8v8L12 20.5 3.5 16zM3.5 8 12 12.5 20.5 8M12 12.5v8" },
+  user: { d: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20c.8-3.5 3.9-5.5 7.5-5.5s6.7 2 7.5 5.5" },
+  search: { d: "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM16 16l5 5" },
+  arrow: { d: "M5 12h14M13 6l6 6-6 6" },
+  chevron: { d: "M9 6l6 6-6 6" },
+  close: { d: "M6 6l12 12M18 6 6 18" },
+  heart: { d: "M12 20.5s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.8a4.3 4.3 0 0 1 7.5 2.7c0 5.4-7.5 10-7.5 10z" },
+  check: { d: "M5 12.5 10 17 19 7" },
+  shield: { d: "M12 3.5 5 6v5.5c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6z", soft: "M12 3.5 5 6v5.5c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6z" },
+  // Categories
+  smartphone: { d: "M8 2.5h8a1.5 1.5 0 0 1 1.5 1.5v16A1.5 1.5 0 0 1 16 21.5H8A1.5 1.5 0 0 1 6.5 20V4A1.5 1.5 0 0 1 8 2.5zM10.5 18.5h3", soft: "M6.5 4A1.5 1.5 0 0 1 8 2.5h8a1.5 1.5 0 0 1 1.5 1.5v16A1.5 1.5 0 0 1 16 21.5H8A1.5 1.5 0 0 1 6.5 20z" },
+  laptop: { d: "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5zM2.5 18h19M3 15h18l.5 3h-19z", soft: "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5V15H5z" },
+  tablet: { d: "M6 2.5h12A1.5 1.5 0 0 1 19.5 4v16a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V4A1.5 1.5 0 0 1 6 2.5zM11 18.5h2", soft: "M4.5 4A1.5 1.5 0 0 1 6 2.5h12A1.5 1.5 0 0 1 19.5 4v16a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20z" },
+  headphones: { d: "M4 14v-2a8 8 0 0 1 16 0v2M4 14h2.5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM20 14h-2.5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1H19a1 1 0 0 0 1-1z", soft: "M4 14h2.5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM20 14h-2.5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1H19a1 1 0 0 0 1-1z" },
+  smartwatch: { d: "M8 7h8a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 17H8a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 8 7zM9 7l.6-3.5h4.8L15 7M9 17l.6 3.5h4.8L15 17M12 10v2.5l1.5 1", soft: "M6.5 8.5A1.5 1.5 0 0 1 8 7h8a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 17H8a1.5 1.5 0 0 1-1.5-1.5z" },
+  console: { d: "M6.5 7h11a4.5 4.5 0 0 1 4.4 5.4l-.8 4a2.5 2.5 0 0 1-4.4 1.1L15 15.5H9l-1.7 2a2.5 2.5 0 0 1-4.4-1.1l-.8-4A4.5 4.5 0 0 1 6.5 7zM7.5 11.5h3M9 10v3M15 10.5h.01M17.5 12.5h.01", soft: "M6.5 7h11a4.5 4.5 0 0 1 4.4 5.4l-.8 4a2.5 2.5 0 0 1-4.4 1.1L15 15.5H9l-1.7 2a2.5 2.5 0 0 1-4.4-1.1l-.8-4A4.5 4.5 0 0 1 6.5 7z" },
+  tv: { d: "M4 5.5h16A1.5 1.5 0 0 1 21.5 7v9a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 16V7A1.5 1.5 0 0 1 4 5.5zM8 21h8M12 17.5V21", soft: "M2.5 7A1.5 1.5 0 0 1 4 5.5h16A1.5 1.5 0 0 1 21.5 7v9a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 16z" },
+  camera: { d: "M4 8h3l1.5-2.5h7L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8zM12 16a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z", soft: "M4 8h3l1.5-2.5h7L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8z" },
+  pc_parts: { d: "M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M12 3v4M15 3v4M9 17v4M12 17v4M15 17v4M3 9h4M3 12h4M3 15h4M17 9h4M17 12h4M17 15h4", soft: "M7 7h10v10H7z" },
+  monitor: { d: "M4 4.5h16A1.5 1.5 0 0 1 21.5 6v9.5A1.5 1.5 0 0 1 20 17H4a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 4 4.5zM9 21h6M12 17v4", soft: "M2.5 6A1.5 1.5 0 0 1 4 4.5h16A1.5 1.5 0 0 1 21.5 6v9.5A1.5 1.5 0 0 1 20 17H4a1.5 1.5 0 0 1-1.5-1.5z" },
+  home_appliance: { d: "M6 3.5h12A1.5 1.5 0 0 1 19.5 5v15a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V5A1.5 1.5 0 0 1 6 3.5zM4.5 8h15M8 5.8h.01M11 5.8h.01M12 18a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", soft: "M4.5 8h15v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20z" },
+  large_appliance: { d: "M7 2.5h10A1.5 1.5 0 0 1 18.5 4v16a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4A1.5 1.5 0 0 1 7 2.5zM5.5 10h13M9 6v1.5M9 13v3", soft: "M5.5 10h13v10a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20z" },
+  other: { d: "M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM8.5 12h.01M12 12h.01M15.5 12h.01" },
+  // Tools and profile
+  verify: { d: "M10 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM15.5 15.5 21 21M7 10.5l2 2 4-4", soft: "M10 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14z" },
+  sparkles: { d: "M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6-5.7-1.8L10.2 9zM19 3v3M17.5 4.5h3M5 17v3M3.5 18.5h3", soft: "M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6-5.7-1.8L10.2 9z" },
+  tag: { d: "M3.5 12.5V5A1.5 1.5 0 0 1 5 3.5h7.5l8 8-9 9zM8 8h.01", soft: "M3.5 12.5V5A1.5 1.5 0 0 1 5 3.5h7.5l8 8-9 9z" },
+  coins: { d: "M9 11a6 2.5 0 1 0 0-5 6 2.5 0 0 0 0 5zM3 8.5v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4M3 12.5v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4M15 11.2c3.3 0 6 1 6 2.4v3.9c0 1.4-2.7 2.5-6 2.5", soft: "M9 11a6 2.5 0 1 0 0-5 6 2.5 0 0 0 0 5z" },
+  list: { d: "M6 3.5h12A1.5 1.5 0 0 1 19.5 5v15a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V5A1.5 1.5 0 0 1 6 3.5zM8.5 8.5h7M8.5 12h7M8.5 15.5h4", soft: "M4.5 5A1.5 1.5 0 0 1 6 3.5h12A1.5 1.5 0 0 1 19.5 5v15a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20z" },
+  shop: { d: "M4 9.5 5.5 4h13L20 9.5M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0M5 12v8h14v-8M10 20v-5h4v5", soft: "M5 12v8h14v-8z" },
+  bell: { d: "M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15zM10 19.5a2 2 0 0 0 4 0", soft: "M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z" },
+  sun: { d: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8", soft: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" },
+  ban: { d: "M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM6 6l12 12" },
+  alert: { d: "M12 3.5 21 19.5H3zM12 10v4M12 16.5h.01", soft: "M12 3.5 21 19.5H3z" },
+  wrench: { d: "M14.5 6.5a4 4 0 0 0 5 5L9 22l-3-3L16.5 8.5zM14.5 6.5 19 2l3 3-4.5 4.5" },
+  doc: { d: "M6 2.5h8l5 5V20a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V4A1.5 1.5 0 0 1 6 2.5zM14 2.5v5h5M8.5 12.5h7M8.5 16h5", soft: "M4.5 4A1.5 1.5 0 0 1 6 2.5h8l5 5V20a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20z" },
+  lock: { d: "M6 10.5h12A1.5 1.5 0 0 1 19.5 12v7a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19v-7A1.5 1.5 0 0 1 6 10.5zM8 10.5V8a4 4 0 0 1 8 0v2.5M12 14.5v2", soft: "M4.5 12A1.5 1.5 0 0 1 6 10.5h12A1.5 1.5 0 0 1 19.5 12v7a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19z" },
+  truck: { d: "M2.5 6.5h11v9h-11zM13.5 9.5h4l3 3.5v2.5h-7zM6 18.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 18.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4z", soft: "M2.5 6.5h11v9h-11z" },
+  camera_plus: { d: "M4 8h3l1.5-2.5h5M20 12v5.5A1.5 1.5 0 0 1 18.5 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8M12 16a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM18.5 2.5v6M15.5 5.5h6" },
+  download: { d: "M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M4.5 17v2A1.5 1.5 0 0 0 6 20.5h12a1.5 1.5 0 0 0 1.5-1.5v-2" },
+  trend_down: { d: "M3.5 7l6 6 3.5-3.5 7.5 7.5M14.5 17h6v-6" },
+  clock: { d: "M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 7.5V12l3 2" },
+};
+export type IconName = keyof typeof ICONS;
+
+export function Icon({ name, filled = false, className = "icon", style }: { name: IconName; filled?: boolean; className?: string; style?: CSSProperties }) {
+  const i = ICONS[name]!;
   return (
-    <svg className={className} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={PATHS[name]} />
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {i.soft && !filled && <path d={i.soft} fill="currentColor" fillOpacity={0.14} stroke="none" />}
+      <path d={i.d} fill={filled ? "currentColor" : "none"} />
     </svg>
   );
 }

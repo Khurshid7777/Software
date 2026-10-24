@@ -1,6 +1,7 @@
 import type { Lang } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
 import { DocLink } from "../components/DocLink";
+import { Icon, type IconName } from "../components/Icon";
 
 const LINKS = {
   offer: import.meta.env.VITE_OFFER_URL ?? "",
@@ -23,10 +24,10 @@ interface Props {
 export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, onExport }: Props) {
   const t = useT();
   const lang = useLang();
-  const row = (target: Target, icon: string, title: string, desc: string) => (
+  const row = (target: Target, icon: IconName, title: string, desc: string) => (
     <button className="menu-row" onClick={() => onOpen(target)} data-testid={`open-${target}`}>
       <span className="tile-icon" aria-hidden>
-        {icon}
+        <Icon name={icon} />
       </span>
       <span className="menu-text">
         <strong>{title}</strong>
@@ -49,18 +50,18 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
           ))}
         </div>
       </div>
-      {!hasPhone && <p className="hint-card">📱 {t("profile.phone_hint")}</p>}
+      {!hasPhone && <p className="hint-card"><Icon name="smartphone" /> {t("profile.phone_hint")}</p>}
 
       <section className="menu">
-        {row("my", "📋", t("home.my.title"), t("home.my.desc"))}
-        {row("shop", "🏪", t("home.shop.title"), t("home.shop.desc"))}
-        {row("favorites", "❤️", t("home.favorites.title"), t("home.favorites.desc"))}
-        {row("check", "🔎", t("home.tekshir.title"), t("home.tekshir.desc"))}
-        {row("notifications", "🔔", t("notify.open"), t("notify.desc"))}
-        {row("away", "🏖", t("away.open"), t("away.desc"))}
-        {row("blocks", "🚫", t("blocks.open"), t("blocks.desc"))}
-        {row("stolen", "🚨", t("stolen.open"), t("stolen.desc"))}
-        {staff && row("admin", "🛠", staff === "admin" ? "Админка" : "Заказы на доставку", "Ishonch staff")}
+        {row("my", "list", t("home.my.title"), t("home.my.desc"))}
+        {row("shop", "shop", t("home.shop.title"), t("home.shop.desc"))}
+        {row("favorites", "heart", t("home.favorites.title"), t("home.favorites.desc"))}
+        {row("check", "verify", t("home.tekshir.title"), t("home.tekshir.desc"))}
+        {row("notifications", "bell", t("notify.open"), t("notify.desc"))}
+        {row("away", "sun", t("away.open"), t("away.desc"))}
+        {row("blocks", "ban", t("blocks.open"), t("blocks.desc"))}
+        {row("stolen", "alert", t("stolen.open"), t("stolen.desc"))}
+        {staff && row("admin", "wrench", staff === "admin" ? "Админка" : "Заказы на доставку", "Ishonch staff")}
       </section>
 
       {(LINKS.offer || LINKS.privacy) && (
@@ -68,7 +69,7 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
           {LINKS.offer && (
             <DocLink className="menu-row" url={LINKS.offer}>
               <span className="tile-icon" aria-hidden>
-                📄
+                <Icon name="doc" />
               </span>
               <span className="menu-text">
                 <strong>{t("terms.offer")}</strong>
@@ -78,7 +79,7 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
           {LINKS.privacy && (
             <DocLink className="menu-row" url={LINKS.privacy}>
               <span className="tile-icon" aria-hidden>
-                🔒
+                <Icon name="lock" />
               </span>
               <span className="menu-text">
                 <strong>{t("terms.privacy")}</strong>

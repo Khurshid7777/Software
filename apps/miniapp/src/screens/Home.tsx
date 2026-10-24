@@ -1,27 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
 import type { Api } from "../api";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { LoadError } from "../components/LoadError";
 import { useT } from "../i18n";
 import { readPref, readRecent, writePref } from "../prefs";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
-/** Category circles on the storefront (the catch-all ones live in the catalog filters). */
-export const CATEGORY_ICONS: Record<string, string> = {
-  smartphone: "📱",
-  laptop: "💻",
-  tablet: "📲",
-  headphones: "🎧",
-  smartwatch: "⌚️",
-  console: "🎮",
-  tv: "📺",
-  camera: "📷",
-  pc_parts: "🧩",
-  monitor: "🖥️",
-  home_appliance: "🏠",
-  large_appliance: "🧊",
+/** Category circles on the storefront (the catch-all ones live in the catalog filters): icon and tint. */
+export const CATEGORY_ICONS: Record<string, { icon: IconName; tint: string }> = {
+  smartphone: { icon: "smartphone", tint: "#0053e2" },
+  laptop: { icon: "laptop", tint: "#6b4ee6" },
+  tablet: { icon: "tablet", tint: "#0a8fa3" },
+  headphones: { icon: "headphones", tint: "#d6336c" },
+  smartwatch: { icon: "smartwatch", tint: "#1a8a5a" },
+  console: { icon: "console", tint: "#e0591e" },
+  tv: { icon: "tv", tint: "#3b5bdb" },
+  camera: { icon: "camera", tint: "#5c5f66" },
+  pc_parts: { icon: "pc_parts", tint: "#2f9e44" },
+  monitor: { icon: "monitor", tint: "#1971c2" },
+  home_appliance: { icon: "home_appliance", tint: "#c2255c" },
+  large_appliance: { icon: "large_appliance", tint: "#0b7285" },
 };
 const CATEGORIES = CHECK_CATEGORIES.filter((c) => c in CATEGORY_ICONS);
 /** The "below market" rail: listings priced at least this much under the reference. */
@@ -149,8 +149,8 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
       <div className="category-strip scroll-x bleed" role="list">
         {CATEGORIES.map((c) => (
           <button key={c} role="listitem" className="category" onClick={() => onCatalog({ category: c })}>
-            <span className="category-icon" aria-hidden>
-              {CATEGORY_ICONS[c]}
+            <span className="category-icon" aria-hidden style={{ "--tint": CATEGORY_ICONS[c]!.tint } as CSSProperties}>
+              <Icon name={CATEGORY_ICONS[c]!.icon} />
             </span>
             <span>{t(`category.${c}`)}</span>
           </button>
@@ -160,7 +160,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
       {deals.length > 0 && (
         <section className="section" data-testid="deals">
           <div className="section-head">
-            <h2>📉 {t("home.deals")}</h2>
+            <h2 className="row"><Icon name="trend_down" className="icon h-icon" /> {t("home.deals")}</h2>
             <button className="link" onClick={() => onCatalog({ belowMarketPct: DEALS_PCT })}>
               {t("home.see_all")} ›
             </button>
@@ -171,7 +171,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
 
       {staff && (
         <button className="tile primary-tile" onClick={() => onOpen("admin")} data-testid="open-admin">
-          <span className="tile-icon">🛠</span>
+          <span className="tile-icon"><Icon name={staff === "admin" ? "wrench" : "truck"} /></span>
           <span>
             <strong>{staff === "admin" ? "Админка" : "Заказы на доставку"}</strong>
             <span className="hint">{staff === "admin" ? "Метрики, модерация, заказы, пользователи" : "Курьеры и статусы"}</span>
@@ -183,22 +183,22 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
         <h2>{t("home.tools")}</h2>
         <div className="tools">
           <button className="tool primary-quick" onClick={() => onOpen("check")} data-testid="open-check">
-            <span className="tool-icon">🔎</span>
+            <span className="tool-icon" style={{ "--tint": "#0053e2" } as CSSProperties}><Icon name="verify" /></span>
             <strong>{t("home.quick.check_title")}</strong>
             <span className="hint">{t("home.quick.check", { n: remaining })}</span>
           </button>
           <button className="tool" onClick={() => onOpen("assistant")} data-testid="open-assistant">
-            <span className="tool-icon">🤖</span>
+            <span className="tool-icon" style={{ "--tint": "#6b4ee6" } as CSSProperties}><Icon name="sparkles" /></span>
             <strong>{t("home.quick.assistant")}</strong>
             <span className="hint">{t("home.quick.assistant_desc")}</span>
           </button>
           <button className="tool" onClick={() => onOpen("valuation")} data-testid="open-valuation">
-            <span className="tool-icon">💰</span>
+            <span className="tool-icon" style={{ "--tint": "#b8860b" } as CSSProperties}><Icon name="coins" /></span>
             <strong>{t("home.quick.valuation")}</strong>
             <span className="hint">{t("home.quick.valuation_desc")}</span>
           </button>
           <button className="tool" onClick={() => onOpen("favorites")} data-testid="open-favorites">
-            <span className="tool-icon">❤️</span>
+            <span className="tool-icon" style={{ "--tint": "#d6336c" } as CSSProperties}><Icon name="heart" /></span>
             <strong>{t("home.quick.favorites")}</strong>
             <span className="hint">{t("home.quick.favorites_desc")}</span>
           </button>
@@ -246,8 +246,8 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
         }}
         data-testid="open-sell"
       >
-        <span className="spark" aria-hidden>
-          ✦
+        <span className="sell-icon" aria-hidden>
+          <Icon name="camera_plus" />
         </span>
         <span>
           <strong>{t("home.sell_banner.title")}</strong>
@@ -266,7 +266,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
             setHomeScreen(false);
           }}
         >
-          📲 {t("home.add_to_home")}
+          <Icon name="download" /> {t("home.add_to_home")}
         </button>
       )}
     </div>
