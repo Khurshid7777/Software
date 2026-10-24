@@ -34,8 +34,10 @@
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
   --gutter: 16px;
   --app-top: calc(12px + var(--tg-viewport-safe-area-inset-top, 0px) + var(--tg-viewport-content-safe-area-inset-top, 0px));
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Inter: the open-source face closest to Apple's SF Pro and Walmart's Bogle (both proprietary). System fonts until it loads. */
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: light;
 
   /* Names the screens were written with: they now point at the tokens above. */
@@ -76,7 +78,8 @@
 /* ---- 2. Base ---- */
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--surface); color: var(--ink); }
-body { font: 15px/1.47 var(--font); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { font: 15px/1.47 var(--font); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; font-feature-settings: "cv11", "ss03", "tnum" 0; }
+
 h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; }
 h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
 h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2; }
@@ -117,7 +120,10 @@ strong { font-weight: 600; }
 
 /* ---- 4. Controls ---- */
 button { font: inherit; cursor: pointer; color: inherit; }
-button:active:not(:disabled), .mini-card:active, .menu-row:active, .tool:active, .category:active { opacity: 0.72; }
+button, .mini-card, .item-card, .tool, .category, .menu-row, .chip, .tile { transition: transform 0.18s var(--ease), background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.25s var(--ease), opacity 0.2s; }
+button:active:not(:disabled), .mini-card:active, .item-card:active, .menu-row:active, .tool:active, .tile:active { transform: scale(0.97); }
+.category:active .category-icon { transform: scale(0.92); }
+.category-icon, .tool-icon, .item-fav, .search-go, .hero-close { transition: transform 0.18s var(--ease), background-color 0.2s, box-shadow 0.25s; }
 button.primary {
   background: var(--brand); color: var(--brand-ink); border: 0; border-radius: var(--pill);
   padding: 0 20px; min-height: 48px; font-weight: 600; font-size: 15px; width: 100%;
@@ -273,6 +279,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); width:
 .hero-close .icon { width: 14px; height: 14px; }
 .trust-steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 14px; color: rgba(255, 255, 255, 0.92); }
 .trust-steps li { display: flex; gap: 8px; align-items: center; }
+.hero-cta { align-self: flex-start; margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; background: #fff; color: #0041b3; border: 0; border-radius: var(--pill); padding: 0 16px; min-height: 40px; font-weight: 600; font-size: 14px; position: relative; z-index: 1; }
+.hero-cta .icon { width: 16px; height: 16px; }
 
 .category-strip { display: flex; gap: 14px; padding-top: 2px; }
 .category { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 72px; background: none; color: var(--ink); border: 0; padding: 0; font-size: 12px; font-weight: 500; line-height: 1.2; text-align: center; }
@@ -311,7 +319,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); width:
 .sell-hero strong { font-family: var(--font-display); font-size: 19px; letter-spacing: -0.015em; }
 .sell-hero .hint { color: inherit; opacity: 0.7; font-size: 13px; }
 .sell-hero .spark { font-size: 28px; }
-.sell-hero .chevron { color: inherit; opacity: 0.8; }
+.sell-cta { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); color: var(--ink); border-radius: var(--pill); padding: 0 14px; min-height: 38px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+.sell-cta .icon { width: 16px; height: 16px; }
 
 /* ---- 8. Catalog grid ---- */
 .catalog-head { display: flex; flex-direction: column; gap: 10px; }
@@ -463,3 +472,47 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .sell-banner > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .trust-intro { display: flex; flex-direction: column; gap: 6px; }
 .trust-close { font-size: 18px; line-height: 1; padding: 4px 6px; color: var(--ink-2); }
+
+/* ---- 14. Motion: entrances, hover, taps. Off for people who asked their phone for less motion. ---- */
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+/* Opacity only: a transform on the screen would turn its fixed action bar into a child of the scrolling box. */
+@keyframes screen-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@keyframes hero-drift { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
+@keyframes spark-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes glow { 0%, 100% { box-shadow: 0 6px 16px rgba(0, 83, 226, 0.35); } 50% { box-shadow: 0 8px 24px rgba(0, 83, 226, 0.55); } }
+@media (prefers-reduced-motion: no-preference) {
+  .screen { animation: screen-in 0.32s var(--ease) both; }
+  .home > * { animation: rise 0.55s var(--ease) both; }
+  .home > :nth-child(2) { animation-delay: 0.05s; }
+  .home > :nth-child(3) { animation-delay: 0.1s; }
+  .home > :nth-child(4) { animation-delay: 0.15s; }
+  .home > :nth-child(5) { animation-delay: 0.2s; }
+  .home > :nth-child(6) { animation-delay: 0.25s; }
+  .home > :nth-child(n + 7) { animation-delay: 0.3s; }
+  .mini-grid > *, .catalog-grid > * { animation: rise 0.45s var(--ease) both; }
+  .mini-grid > :nth-child(2n), .catalog-grid > :nth-child(2n) { animation-delay: 0.06s; }
+  .hero { background-size: 200% 200%; animation: rise 0.55s var(--ease) both, hero-drift 12s ease-in-out infinite alternate; }
+  .hero::after { animation: spark-spin 40s linear infinite; }
+  .brand-logo .spark { display: inline-block; animation: spark-spin 18s linear infinite; }
+  .tab-sell { animation: glow 3s ease-in-out infinite; }
+  .item-fav.on .icon { animation: pop 0.35s var(--ease); }
+  .tabbar button .tab-icon { transition: transform 0.2s var(--ease); }
+  .tabbar button.active .tab-icon:not(.tab-sell) { transform: translateY(-2px); }
+  .gallery-slide img { transition: transform 0.4s var(--ease); }
+  .dots button { transition: background-color 0.25s, transform 0.25s; }
+  .dots button.active { transform: scale(1.25); }
+  .market { animation: rise 0.4s var(--ease) both; }
+  .toast-float { animation: toast-in 0.22s var(--ease); }
+}
+@media (hover: hover) {
+  .mini-card:hover, .item-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: transparent; }
+  .tool:hover, .tile:hover, .menu-row:hover { background: var(--surface-3); }
+  .category:hover .category-icon { transform: translateY(-3px); box-shadow: var(--shadow); }
+  button.primary:hover { background: var(--brand-deep); }
+  button.secondary:hover { background: var(--brand-soft); }
+  .chip:hover:not(.active) { border-color: var(--ink-3); }
+  .search-go:hover, .hero-cta:hover { transform: scale(1.06); }
+  .item-fav:hover { transform: scale(1.1); }
+  button.link:hover { text-decoration: underline; }
+}

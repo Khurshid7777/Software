@@ -82,7 +82,7 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
   );
 
   return (
-    <div className="stack" data-testid="home">
+    <div className="stack home" data-testid="home">
       <header className="brand-bar">
         <div className="brand-row">
           <span className="brand-logo">
@@ -140,6 +140,9 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
               <Icon name="check" /> {t("home.trust.step3")}
             </li>
           </ul>
+          <button className="hero-cta" onClick={() => onCatalog({})}>
+            {t("home.hero.cta")} <Icon name="arrow" />
+          </button>
         </section>
       )}
 
@@ -250,8 +253,8 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
           <strong>{t("home.sell_banner.title")}</strong>
           <span className="hint">{t("home.sell_banner.text")}</span>
         </span>
-        <span className="chevron" aria-hidden>
-          <Icon name="chevron" />
+        <span className="sell-cta">
+          {t("home.sell_banner.cta")} <Icon name="arrow" />
         </span>
       </button>
 

@@ -5,7 +5,7 @@ test.beforeAll(resetDemo);
 
 test("new users see how a purchase is protected, once", async ({ page }) => {
   await open(page, BUYER);
-  await expect(page.getByTestId("trust-intro")).toContainText("Как Ishonch защищает покупку");
+  await expect(page.getByTestId("trust-intro")).toContainText("Покупайте спокойно");
   await page.getByTestId("trust-intro-close").click();
   await expect(page.getByTestId("trust-intro")).toHaveCount(0);
   await page.reload();
