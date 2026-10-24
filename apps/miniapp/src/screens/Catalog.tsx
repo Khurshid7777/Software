@@ -10,6 +10,7 @@ import {
 } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
 import { Empty } from "../components/Empty";
+import { Icon } from "../components/Icon";
 import { ItemCard } from "../components/ItemCard";
 import { LoadError } from "../components/LoadError";
 import { Toast } from "../components/Toast";
@@ -97,28 +98,32 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
 
   return (
     <div className="stack">
-      <h1>{t("catalog.title")}</h1>
-      <div className="row">
-        <input
-          className="search"
-          type="search"
-          placeholder={t("catalog.search")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          data-testid="catalog-search"
-        />
-        <button
-          className={activeFilters ? "chip active" : "chip"}
-          onClick={() => setShowFilters(!showFilters)}
-          aria-expanded={showFilters}
-          data-testid="catalog-filters"
-        >
-          ⚙️ {t("catalog.filters")}
-          {activeFilters ? ` · ${activeFilters}` : ""}
-        </button>
+      <div className="catalog-head">
+        <h1>{t("catalog.title")}</h1>
+        <div className="row">
+          <label className="search-box inset">
+            <Icon name="search" />
+            <input
+              type="search"
+              placeholder={t("catalog.search")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              data-testid="catalog-search"
+            />
+          </label>
+          <button
+            className={activeFilters ? "chip active" : "chip"}
+            onClick={() => setShowFilters(!showFilters)}
+            aria-expanded={showFilters}
+            data-testid="catalog-filters"
+          >
+            {t("catalog.filters")}
+            {activeFilters ? ` · ${activeFilters}` : ""}
+          </button>
+        </div>
       </div>
 
-      <div className="chips scroll-x">
+      <div className="chips scroll-x bleed">
         <button className={`chip ${!filters.category ? "active" : ""}`} onClick={() => setFilters({ ...filters, category: undefined })}>
           {t("catalog.all_categories")}
         </button>
@@ -226,22 +231,29 @@ export function Catalog({ api, initial, onOpen, onFiltersChange }: Props) {
       </div>
 
       {toast && <Toast text={toast} onClose={() => setToast(null)} />}
-      {items === null &&
-        Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="card item-skeleton" aria-hidden>
-            <span className="sk-photo" />
-            <span className="sk-text">
-              <span className="sk-line" />
-              <span className="sk-line short" />
-              <span className="sk-line short" />
-            </span>
-          </div>
-        ))}
+      {items === null && (
+        <div className="catalog-grid" aria-hidden>
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="item-skeleton">
+              <span className="sk-photo" />
+              <span className="sk-text">
+                <span className="sk-line" />
+                <span className="sk-line short" />
+                <span className="sk-line short" />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {failed && <LoadError onRetry={() => void load(0)} />}
       {items?.length === 0 && !failed && <Empty icon="🔍" title={t("catalog.nothing")} text={t("catalog.empty")} />}
-      {items?.map((i) => (
-        <ItemCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
-      ))}
+      {!!items?.length && (
+        <div className="catalog-grid">
+          {items.map((i) => (
+            <ItemCard key={i.listing.id} item={i} onOpen={() => onOpen(i.listing.id)} onFavorite={(on) => favorite(i, on)} />
+          ))}
+        </div>
+      )}
       {next !== null && (
         <button className="secondary" disabled={loadingMore} onClick={() => load(next)}>
           {t("catalog.load_more")}

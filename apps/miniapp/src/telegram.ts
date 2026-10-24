@@ -32,6 +32,8 @@ export interface TelegramEnv {
  */
 export function initTelegram(): TelegramEnv {
   if (!isTMA()) {
+    applyTheme();
+    watchTheme();
     const fromUrl = new URLSearchParams(window.location.search).get("initData");
     const initData = fromUrl ?? import.meta.env.VITE_DEV_INIT_DATA ?? null;
     let languageCode: string | undefined;
@@ -46,10 +48,9 @@ export function initTelegram(): TelegramEnv {
 
   init();
   if (miniApp.mountSync.isAvailable()) miniApp.mountSync();
-  if (themeParams.mountSync.isAvailable()) {
-    themeParams.mountSync();
-    if (themeParams.bindCssVars.isAvailable()) themeParams.bindCssVars();
-  }
+  if (themeParams.mountSync.isAvailable()) themeParams.mountSync();
+  applyTheme();
+  watchTheme();
   if (backButton.mount.isAvailable()) backButton.mount();
   try {
     // Full height from the start, safe-area insets as CSS variables, and the page's own scroll instead of
@@ -67,8 +68,6 @@ export function initTelegram(): TelegramEnv {
       swipeBehavior.mount();
       swipeBehavior.disableVertical.ifAvailable();
     }
-    miniApp.setHeaderColor.ifAvailable("secondary_bg_color");
-    miniApp.setBackgroundColor.ifAvailable("secondary_bg_color");
   } catch {
     /* old client: defaults are fine */
   }
@@ -82,6 +81,60 @@ export function initTelegram(): TelegramEnv {
     startParam:
       lp.tgWebAppStartParam ?? new URLSearchParams(window.location.search).get("startapp") ?? screenParam() ?? undefined,
   };
+}
+
+const DARK = "#000000";
+const LIGHT = "#ffffff";
+const BRAND = "#0053e2";
+let brandChrome = false;
+
+/** Dark or light? Telegram's choice inside the app, the system's outside; our own palette either way. */
+function isDark(): boolean {
+  try {
+    if (isTMA() && miniApp.isMounted()) return miniApp.isDark();
+  } catch {
+    /* fall through */
+  }
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
+
+/**
+ * Sets `data-theme` on <html> (styles.css keys every colour off it) and paints Telegram's own chrome to match:
+ * the page background and the bottom bar follow the theme, the header is the brand blue on the storefront
+ * and the page colour elsewhere. Re-run on every theme change.
+ */
+export function applyTheme() {
+  const dark = isDark();
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (!isTMA()) return;
+  try {
+    const page = dark ? DARK : LIGHT;
+    miniApp.setBackgroundColor.ifAvailable(page);
+    miniApp.setBottomBarColor.ifAvailable(page);
+    const header = brandChrome ? BRAND : page;
+    if (miniApp.setHeaderColor.isAvailable()) miniApp.setHeaderColor(miniApp.setHeaderColor.supports.rgb() ? header : "bg_color");
+  } catch {
+    /* old client */
+  }
+}
+
+/** The storefront has a blue header band; Telegram's top bar takes the same colour so the two merge. */
+export function setChrome(brand: boolean) {
+  if (brandChrome === brand) return;
+  brandChrome = brand;
+  applyTheme();
+}
+
+let themeWatched = false;
+function watchTheme() {
+  if (themeWatched) return;
+  themeWatched = true;
+  try {
+    if (isTMA()) miniApp.isDark.sub(() => applyTheme());
+    else window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
+  } catch {
+    /* unsupported */
+  }
 }
 
 function screenParam() {

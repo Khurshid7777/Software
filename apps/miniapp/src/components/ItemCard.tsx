@@ -1,6 +1,7 @@
 import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared/client";
 import { photoUrl } from "../api";
 import { useLang, useT } from "../i18n";
+import { Icon } from "./Icon";
 import { GradeChip } from "./Passport";
 
 export function MarketBadge({ item }: { item: CatalogItem }) {
@@ -33,18 +34,20 @@ interface Props {
   onSelect?: (on: boolean) => void;
 }
 
+/** Product card for the catalog grid: photo first, then the price, the title and the trust marks. */
 export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props) {
   const t = useT();
   const lang = useLang();
   const l = item.listing;
   return (
-    <article className="card item-card" data-testid="item-card">
+    <article className="item-card" data-testid="item-card">
       <button className="item-main" onClick={onOpen}>
-        {l.photos[0] ? <img src={photoUrl(l.photos[0].url, 240)} alt="" loading="lazy" width={96} height={96} /> : <div className="no-photo">📦</div>}
+        <span className="item-photo">
+          {l.photos[0] ? <img src={photoUrl(l.photos[0].url, 480)} alt="" loading="lazy" width={300} height={300} /> : <span className="no-photo">📦</span>}
+          {l.grade && <GradeChip grade={l.grade} />}
+          {l.verified && <span className="mini-badge">✅ {t("verified.short")}</span>}
+        </span>
         <span className="item-body">
-          <strong>
-            {l.grade && <GradeChip grade={l.grade} />} {listingTitle(l, lang)}
-          </strong>
           {l.price && (
             <span className="item-price">
               {formatUzs(l.price)}
@@ -52,30 +55,32 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect }: Props
             </span>
           )}
           <MarketBadge item={item} />
-          {l.verified && <span className="badge">✅ {t("verified.badge")}</span>}
+          <span className="item-title">{listingTitle(l, lang)}</span>
           <span className="hint">
-            {l.district ? `📍 ${t(`district.${l.district}`)} · ` : ""}
+            {l.district ? `${t(`district.${l.district}`)} · ` : ""}
             {l.condition ? t(`condition.${l.condition}`) : ""}
           </span>
           <TrustBadge item={item} />
         </span>
       </button>
-      <div className="item-actions">
-        {onFavorite && (
-          <button
-            className="icon-btn"
-            aria-label={item.favorite ? t("listing.favorite_remove") : t("listing.favorite_add")}
-            onClick={() => onFavorite(!item.favorite)}
-          >
-            {item.favorite ? "❤️" : "🤍"}
-          </button>
-        )}
-        {onSelect && (
-          <label className="check-row">
-            <input type="checkbox" checked={!!selected} onChange={(e) => onSelect(e.target.checked)} />
-          </label>
-        )}
-      </div>
+      {(onFavorite || onSelect) && (
+        <div className="item-actions">
+          {onFavorite && (
+            <button
+              className={item.favorite ? "icon-btn item-fav on" : "icon-btn item-fav"}
+              aria-label={item.favorite ? t("listing.favorite_remove") : t("listing.favorite_add")}
+              onClick={() => onFavorite(!item.favorite)}
+            >
+              <Icon name="heart" filled={item.favorite} />
+            </button>
+          )}
+          {onSelect && (
+            <label className="item-check">
+              <input type="checkbox" checked={!!selected} onChange={(e) => onSelect(e.target.checked)} />
+            </label>
+          )}
+        </div>
+      )}
     </article>
   );
 }

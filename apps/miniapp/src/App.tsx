@@ -26,7 +26,7 @@ import { Notifications } from "./screens/Notifications";
 import { Valuation } from "./screens/Valuation";
 import { TabBar, type Tab } from "./components/TabBar";
 import { confirmLeave } from "./leave";
-import { setBackButton, type TelegramEnv } from "./telegram";
+import { setBackButton, setChrome, type TelegramEnv } from "./telegram";
 
 type Screen =
   | { name: "home" }
@@ -199,6 +199,8 @@ export function App({ env }: { env: TelegramEnv }) {
   }, []);
 
   useEffect(() => setBackButton(stack.length > 1 ? () => void back() : null), [stack.length, back]);
+  // The storefront's blue brand bar continues into Telegram's own header; every other screen keeps it plain.
+  useEffect(() => setChrome(stack.length === 1 && screen.name === "home"), [stack.length, screen.name]);
   const tabbar = stack.length === 1 && !!TAB_OF[screen.name];
 
   // Bot button "Find similar" → similar_<checkId>: open the catalog with the checked item.
@@ -442,7 +444,7 @@ export function App({ env }: { env: TelegramEnv }) {
 
   return (
     <LangContext.Provider value={lang}>
-      <main className={tabbar ? "app with-tabbar" : "app"}>{content}</main>
+      <main className={[tabbar ? "app with-tabbar" : "app", stack.length > 1 && !env.inTelegram ? "has-backrow" : ""].join(" ").trim()}>{content}</main>
       {tabbar && me?.acceptedTerms && <TabBar active={TAB_OF[screen.name] ?? null} onSelect={(tab) => void openTab(tab)} />}
     </LangContext.Provider>
   );

@@ -1,6 +1,7 @@
 import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared/client";
 import { photoUrl } from "../api";
 import { useLang, useT } from "../i18n";
+import { MarketBadge } from "./ItemCard";
 import { GradeChip } from "./Passport";
 
 /** Compact two-column card for the storefront: photo first, then price and title. */
@@ -26,8 +27,9 @@ export function MiniCard({ item, onOpen }: { item: CatalogItem; onOpen: () => vo
             {l.previousPrice && <s className="old-price"> {formatUzs(l.previousPrice)}</s>}
           </strong>
         )}
+        <MarketBadge item={item} />
         <span className="mini-title">{listingTitle(l, lang)}</span>
-        {l.district && <span className="hint">📍 {t(`district.${l.district}`)}</span>}
+        {l.district && <span className="hint">{t(`district.${l.district}`)}</span>}
       </span>
     </button>
   );

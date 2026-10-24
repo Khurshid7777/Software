@@ -15,6 +15,7 @@ import {
 } from "@ishonch/shared/client";
 import { ApiError, apiUrl, type Api } from "../api";
 import { Gallery } from "../components/Gallery";
+import { Icon } from "../components/Icon";
 import { MiniCard } from "../components/MiniCard";
 import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
@@ -163,11 +164,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           <video className="video-check" src={apiUrl(l.video)} controls playsInline preload="metadata" />
         </section>
       )}
-      <div className="row between">
+      <div className="lv-head">
+      <div className="lv-title">
         <h1>{listingTitle(l, lang)}</h1>
         {!own && (
           <button
-            className="icon-btn"
+            className={item.favorite ? "icon-btn item-fav on" : "icon-btn item-fav"}
             aria-label={item.favorite ? t("listing.favorite_remove") : t("listing.favorite_add")}
             onClick={async () => {
               const on = !item.favorite;
@@ -182,7 +184,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
               }
             }}
           >
-            {item.favorite ? "❤️" : "🤍"}
+            <Icon name="heart" filled={item.favorite} />
           </button>
         )}
       </div>
@@ -206,11 +208,14 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller }: 
           )}
         </p>
       )}
-      <MarketBadge item={item} />
-      <p className="hint">
-        {l.condition && t(`condition.${l.condition}`)}
-        {l.district && ` · 📍 ${t(`district.${l.district}`)}`}
-      </p>
+      <div className="lv-meta">
+        <MarketBadge item={item} />
+        <span className="hint">
+          {l.condition && t(`condition.${l.condition}`)}
+          {l.district && ` · 📍 ${t(`district.${l.district}`)}`}
+        </span>
+      </div>
+      </div>
       {l.verified && (
         <p className="hint-card" data-testid="verified-badge">
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}

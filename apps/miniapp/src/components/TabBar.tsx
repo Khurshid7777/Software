@@ -1,9 +1,10 @@
 import { useT } from "../i18n";
 import { haptic } from "../telegram";
+import { Icon, type IconName } from "./Icon";
 
 export const TABS = ["home", "catalog", "sell", "orders", "profile"] as const;
 export type Tab = (typeof TABS)[number];
-const ICONS: Record<Tab, string> = { home: "🏠", catalog: "🛍️", sell: "➕", orders: "📦", profile: "👤" };
+const ICONS: Record<Tab, IconName> = { home: "home", catalog: "grid", sell: "plus", orders: "box", profile: "user" };
 
 /** Bottom navigation on the top-level screens (detail screens use Telegram's Back button). */
 export function TabBar({ active, onSelect, badges = {} }: { active: Tab | null; onSelect: (t: Tab) => void; badges?: Partial<Record<Tab, number>> }) {
@@ -22,7 +23,7 @@ export function TabBar({ active, onSelect, badges = {} }: { active: Tab | null; 
           data-testid={`tab-${tab}`}
         >
           <span className={tab === "sell" ? "tab-icon tab-sell" : "tab-icon"} aria-hidden>
-            {ICONS[tab]}
+            <Icon name={ICONS[tab]} />
             {!!badges[tab] && <span className="tab-badge">{badges[tab]}</span>}
           </span>
           <span className="tab-label">{t(`tab.${tab}`)}</span>

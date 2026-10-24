@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { CHECK_CATEGORIES, type CatalogFilters, type CatalogItem } from "@ishonch/shared/client";
 import type { Api } from "../api";
+import { Icon } from "../components/Icon";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { LoadError } from "../components/LoadError";
 import { useT } from "../i18n";
 import { readPref, readRecent, writePref } from "../prefs";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
-/** Category chips on the storefront (the catch-all ones live in the catalog filters). */
+/** Category circles on the storefront (the catch-all ones live in the catalog filters). */
 export const CATEGORY_ICONS: Record<string, string> = {
   smartphone: "📱",
   laptop: "💻",
@@ -23,6 +24,8 @@ export const CATEGORY_ICONS: Record<string, string> = {
   large_appliance: "🧊",
 };
 const CATEGORIES = CHECK_CATEGORIES.filter((c) => c in CATEGORY_ICONS);
+/** The "below market" rail: listings priced at least this much under the reference. */
+const DEALS_PCT = 10;
 
 interface Props {
   api: Api;
@@ -35,12 +38,13 @@ interface Props {
 }
 
 /**
- * Storefront: search, categories, fresh listings and the three "Ishonch" tools (Tekshir, AI assistant,
- * favorites). Everything personal lives in the Profile tab.
+ * Storefront, top to bottom: the blue brand bar with the search, the "how we protect you" hero, category
+ * circles, the below-market rail, the tools, recently viewed, fresh listings and the sell banner.
  */
 export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Props) {
   const t = useT();
   const [fresh, setFresh] = useState<CatalogItem[] | null>(null);
+  const [deals, setDeals] = useState<CatalogItem[]>([]);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
@@ -55,6 +59,10 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
       .catalog({}, "newest", 0)
       .then((p) => current && setFresh(p.items.slice(0, 6)))
       .catch(() => current && (setFresh([]), setFailed(true)));
+    api
+      .catalog({ belowMarketPct: DEALS_PCT }, "relevance", 0)
+      .then((p) => current && setDeals(p.items.slice(0, 8)))
+      .catch(() => undefined);
     canAddToHomeScreen().then((v) => current && setHomeScreen(v));
     api
       .catalogBatch(readRecent())
@@ -65,56 +73,77 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
     };
   }, [api, attempt]);
 
+  const rail = (items: CatalogItem[], testId?: string) => (
+    <div className="rail scroll-x bleed" data-testid={testId}>
+      {items.map((i) => (
+        <MiniCard key={i.listing.id} item={i} onOpen={() => onListing(i.listing.id)} />
+      ))}
+    </div>
+  );
+
   return (
     <div className="stack" data-testid="home">
-      <header className="stack-tight">
-        <h1>{t("app.name")}</h1>
-        <p className="hint">{t("app.tagline")}</p>
+      <header className="brand-bar">
+        <div className="brand-row">
+          <span className="brand-logo">
+            {t("app.name")}
+            <span className="spark" aria-hidden>
+              ✦
+            </span>
+          </span>
+        </div>
+        <span className="brand-tagline">{t("app.tagline")}</span>
+        <form
+          className="search-box"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onCatalog(query.trim() ? { q: query.trim() } : undefined);
+          }}
+        >
+          <Icon name="search" />
+          <input
+            type="search"
+            enterKeyHint="search"
+            placeholder={t("catalog.search")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            data-testid="home-search"
+          />
+          <button type="submit" className="search-go" aria-label={t("home.search_go")}>
+            <Icon name="arrow" />
+          </button>
+        </form>
       </header>
 
-      <form
-        className="search-box"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onCatalog(query.trim() ? { q: query.trim() } : undefined);
-        }}
-      >
-        <span aria-hidden>🔍</span>
-        <input
-          type="search"
-          enterKeyHint="search"
-          placeholder={t("catalog.search")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          data-testid="home-search"
-        />
-      </form>
-
       {howTo && (
-        <section className="card trust-intro" data-testid="trust-intro">
-          <div className="row between">
-            <strong>🛡 {t("home.trust.title")}</strong>
-            <button
-              className="link trust-close"
-              aria-label={t("home.trust.close")}
-              onClick={() => {
-                writePref("trust_intro_seen", "1");
-                setHowTo(false);
-              }}
-              data-testid="trust-intro-close"
-            >
-              ✕
-            </button>
-          </div>
+        <section className="hero" data-testid="trust-intro">
+          <h2>{t("home.trust.title")}</h2>
+          <button
+            className="hero-close"
+            aria-label={t("home.trust.close")}
+            onClick={() => {
+              writePref("trust_intro_seen", "1");
+              setHowTo(false);
+            }}
+            data-testid="trust-intro-close"
+          >
+            <Icon name="close" />
+          </button>
           <ul className="trust-steps">
-            <li>📋 {t("home.trust.step1")}</li>
-            <li>👀 {t("home.trust.step2")}</li>
-            <li>⚖️ {t("home.trust.step3")}</li>
+            <li>
+              <Icon name="check" /> {t("home.trust.step1")}
+            </li>
+            <li>
+              <Icon name="check" /> {t("home.trust.step2")}
+            </li>
+            <li>
+              <Icon name="check" /> {t("home.trust.step3")}
+            </li>
           </ul>
         </section>
       )}
 
-      <div className="category-strip scroll-x" role="list">
+      <div className="category-strip scroll-x bleed" role="list">
         {CATEGORIES.map((c) => (
           <button key={c} role="listitem" className="category" onClick={() => onCatalog({ category: c })}>
             <span className="category-icon" aria-hidden>
@@ -125,8 +154,20 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
         ))}
       </div>
 
+      {deals.length > 0 && (
+        <section className="section" data-testid="deals">
+          <div className="section-head">
+            <h2>📉 {t("home.deals")}</h2>
+            <button className="link" onClick={() => onCatalog({ belowMarketPct: DEALS_PCT })}>
+              {t("home.see_all")} ›
+            </button>
+          </div>
+          {rail(deals)}
+        </section>
+      )}
+
       {staff && (
-        <button className="tile" onClick={() => onOpen("admin")} data-testid="open-admin">
+        <button className="tile primary-tile" onClick={() => onOpen("admin")} data-testid="open-admin">
           <span className="tile-icon">🛠</span>
           <span>
             <strong>{staff === "admin" ? "Админка" : "Заказы на доставку"}</strong>
@@ -135,50 +176,44 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
         </button>
       )}
 
-      <div className="quick-actions">
-        <button className="quick primary-quick" onClick={() => onOpen("check")} data-testid="open-check">
-          <span className="quick-icon">🔎</span>
-          <strong>{t("home.quick.check_title")}</strong>
-          <span className="hint">{t("home.quick.check", { n: remaining })}</span>
-        </button>
-        <button className="quick" onClick={() => onOpen("assistant")} data-testid="open-assistant">
-          <span className="quick-icon">🤖</span>
-          <strong>{t("home.quick.assistant")}</strong>
-          <span className="hint">{t("home.quick.assistant_desc")}</span>
-        </button>
-        <button className="quick" onClick={() => onOpen("favorites")} data-testid="open-favorites">
-          <span className="quick-icon">❤️</span>
-          <strong>{t("home.quick.favorites")}</strong>
-          <span className="hint">{t("home.quick.favorites_desc")}</span>
-        </button>
-      </div>
-
-      <button className="tile" onClick={() => onOpen("valuation")} data-testid="open-valuation">
-        <span className="tile-icon">💰</span>
-        <span>
-          <strong>{t("home.quick.valuation")}</strong>
-          <span className="hint">{t("home.quick.valuation_desc")}</span>
-        </span>
-      </button>
+      <section className="section">
+        <h2>{t("home.tools")}</h2>
+        <div className="tools">
+          <button className="tool primary-quick" onClick={() => onOpen("check")} data-testid="open-check">
+            <span className="tool-icon">🔎</span>
+            <strong>{t("home.quick.check_title")}</strong>
+            <span className="hint">{t("home.quick.check", { n: remaining })}</span>
+          </button>
+          <button className="tool" onClick={() => onOpen("assistant")} data-testid="open-assistant">
+            <span className="tool-icon">🤖</span>
+            <strong>{t("home.quick.assistant")}</strong>
+            <span className="hint">{t("home.quick.assistant_desc")}</span>
+          </button>
+          <button className="tool" onClick={() => onOpen("valuation")} data-testid="open-valuation">
+            <span className="tool-icon">💰</span>
+            <strong>{t("home.quick.valuation")}</strong>
+            <span className="hint">{t("home.quick.valuation_desc")}</span>
+          </button>
+          <button className="tool" onClick={() => onOpen("favorites")} data-testid="open-favorites">
+            <span className="tool-icon">❤️</span>
+            <strong>{t("home.quick.favorites")}</strong>
+            <span className="hint">{t("home.quick.favorites_desc")}</span>
+          </button>
+        </div>
+      </section>
 
       {recent.length > 0 && (
-        <section className="stack-tight" data-testid="recently-viewed">
+        <section className="section" data-testid="recently-viewed">
           <h2>{t("home.recent")}</h2>
-          <div className="recent-strip scroll-x">
-            {recent.map((i) => (
-              <div key={i.listing.id} className="recent-item">
-                <MiniCard item={i} onOpen={() => onListing(i.listing.id)} />
-              </div>
-            ))}
-          </div>
+          {rail(recent)}
         </section>
       )}
 
-      <section className="stack-tight">
-        <div className="row between">
+      <section className="section">
+        <div className="section-head">
           <h2>{t("home.fresh")}</h2>
           <button className="link" onClick={() => onCatalog({})} data-testid="open-catalog">
-            {t("home.see_all")} →
+            {t("home.see_all")} ›
           </button>
         </div>
         {fresh === null ? (
@@ -193,29 +228,31 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
               <MiniCard key={i.listing.id} item={i} onOpen={() => onListing(i.listing.id)} />
             ))}
           </div>
+        ) : failed ? (
+          <LoadError onRetry={() => (setFailed(false), setFresh(null), setAttempt((a) => a + 1))} />
         ) : (
-          failed ? (
-            <LoadError onRetry={() => (setFailed(false), setFresh(null), setAttempt((a) => a + 1))} />
-          ) : (
-            <p className="hint center">{t("home.fresh_empty")}</p>
-          )
+          <p className="hint center">{t("home.fresh_empty")}</p>
         )}
       </section>
 
       <button
-        className="sell-banner"
+        className="sell-hero"
         onClick={() => {
           haptic("light");
           onOpen("sell");
         }}
         data-testid="open-sell"
       >
-        <span className="tile-icon">📸</span>
+        <span className="spark" aria-hidden>
+          ✦
+        </span>
         <span>
           <strong>{t("home.sell_banner.title")}</strong>
           <span className="hint">{t("home.sell_banner.text")}</span>
         </span>
-        <span aria-hidden>→</span>
+        <span className="chevron" aria-hidden>
+          <Icon name="chevron" />
+        </span>
       </button>
 
       {homeScreen && (
