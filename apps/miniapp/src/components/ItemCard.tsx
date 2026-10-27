@@ -16,6 +16,20 @@ export function MarketBadge({ item }: { item: CatalogItem }) {
   );
 }
 
+/** «Samsung · Odyssey G5»: what the seller named, when they named it (from the listing's attributes). */
+export function BrandLine({ item }: { item: CatalogItem }) {
+  const a = item.listing.attributes;
+  if (!a.brand) return null;
+  // The model often repeats the brand ("Samsung Galaxy…"): show it once.
+  const model = a.model?.replace(new RegExp(`^${a.brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "i"), "");
+  return (
+    <span className="brand-line" data-testid="brand-line">
+      <b>{a.brand}</b>
+      {model ? ` · ${model}` : ""}
+    </span>
+  );
+}
+
 export function TrustBadge({ item }: { item: CatalogItem }) {
   const t = useT();
   return (
@@ -51,6 +65,7 @@ export function ItemCard({ item, onOpen, onFavorite, selected, onSelect, compare
           {l.verified && <span className="mini-badge">✅ {t("verified.short")}</span>}
         </span>
         <span className="item-body">
+          <BrandLine item={item} />
           {l.price && (
             <span className="item-price">
               {formatUzs(l.price)}

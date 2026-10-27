@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   COMPLAINT_REASONS,
   GRADES,
+  INSPECTION_MINUTES,
   OFFER_PENDING_HOURS,
   formatUzs,
   isCargo,
@@ -24,7 +25,7 @@ import { VideoVerdict } from "../components/VideoVerdict";
 import { setCompare, toggleCompare, useCompare } from "../compare";
 import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
-import { MarketBadge, TrustBadge } from "../components/ItemCard";
+import { BrandLine, MarketBadge, TrustBadge } from "../components/ItemCard";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
 import { LoadError } from "../components/LoadError";
@@ -187,6 +188,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
         </section>
       )}
       <div className="lv-head">
+      <span className="lv-brand"><BrandLine item={item} /></span>
       <div className="lv-title">
         <h1>{listingTitle(l, lang)}</h1>
         {!own && (
@@ -239,6 +241,29 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
       </div>
       </div>
       {!own && l.status === "active" && <BuyerPromise onOpen={onHow ? () => onHow(l.category) : undefined} />}
+      {/* At a glance, like a marketplace product page: what protects the buyer on this very item. */}
+      <div className="pills" data-testid="listing-pills">
+        {l.status === "active" && !own && (
+          <span className="pill">
+            <Icon name="timer" /> {t("listing.pill.inspection", { min: INSPECTION_MINUTES })}
+          </span>
+        )}
+        {l.allowedDeliveryModes.length > 0 && (
+          <span className="pill">
+            <Icon name="truck" /> {t("listing.pill.delivery")}
+          </span>
+        )}
+        {item.passport && item.passport.total > 0 && (
+          <span className="pill ok">
+            <Icon name="shield" /> {t("listing.pill.passport", { passed: item.passport.passed, total: item.passport.total })}
+          </span>
+        )}
+        {l.video && (
+          <span className="pill ok">
+            <Icon name="video" /> {t("listing.pill.video")}
+          </span>
+        )}
+      </div>
       {l.verified && (
         <p className="hint-card" data-testid="verified-badge">
           ✅ <strong>{t("verified.badge")}</strong> — {t("verified.desc", { date: date(l.verified.at) })}
@@ -252,6 +277,19 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
         </p>
       )}
       {l.imeiTail && <p className="hint-card" data-testid="imei-hint">🔐 {t("listing.imei", { tail: l.imeiTail })}</p>}
+      {l.attributes.specs.length > 0 && (
+        <section className="stack-tight" data-testid="listing-specs">
+          <h3>{t("listing.specs")}</h3>
+          <dl className="specs">
+            {l.attributes.specs.slice(0, 8).map((s) => (
+              <div key={s.name}>
+                <dt>{s.name.replace(/_/g, " ")}</dt>
+                <dd>{s.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
       <p className="description">{listingDescription(l, lang)}</p>
       {["active", "reserved"].includes(l.status) && (
         <div className="row wrap">

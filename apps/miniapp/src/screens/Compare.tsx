@@ -83,7 +83,7 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
     return (
       <div className="stack">
         <h1>{t("versus.title")}</h1>
-        <Empty icon="⚖️" title={t("versus.empty_title")} text={t("versus.empty_text", { n: COMPARE_MAX })} />
+        <Empty icon="⚖️" image={`${import.meta.env.BASE_URL}art/empty-compare.webp`} title={t("versus.empty_title")} text={t("versus.empty_text", { n: COMPARE_MAX })} />
         <button className="primary" onClick={onCatalog} data-testid="compare-catalog">
           {t("versus.to_catalog")}
         </button>

@@ -1,7 +1,7 @@
 import { formatUzs, listingTitle, type CatalogItem } from "@ishonch/shared/client";
 import { photoUrl } from "../api";
 import { useLang, useT } from "../i18n";
-import { MarketBadge } from "./ItemCard";
+import { BrandLine, MarketBadge } from "./ItemCard";
 import { GradeChip } from "./Passport";
 
 /** Compact two-column card for the storefront: photo first, then price and title. */
@@ -22,6 +22,7 @@ export function MiniCard({ item, onOpen, note }: { item: CatalogItem; onOpen: ()
         )}
       </span>
       <span className="mini-body">
+        <BrandLine item={item} />
         {l.price && (
           <strong className="mini-price">
             {formatUzs(l.price)}

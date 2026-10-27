@@ -1109,5 +1109,11 @@
   "video.hint.account": "Покажите экран аккаунта Apple ID / Google — что вы из него вышли",
   "video.hint.body": "Покажите корпус со всех сторон",
   "catalog.promise": "{min} минут на проверку при получении · не подошло — не платите",
-  "how.minutes": "{min} минут"
+  "how.minutes": "{min} минут",
+  "listing.specs": "Характеристики",
+  "listing.pill.inspection": "{min} мин на осмотр",
+  "listing.pill.delivery": "Доставка курьером",
+  "listing.pill.passport": "Проверки {passed} из {total}",
+  "listing.pill.video": "Видео-паспорт",
+  "guarantee.short": "И ещё {days} дня защиты после покупки"
 }

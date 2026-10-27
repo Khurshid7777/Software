@@ -1109,5 +1109,11 @@
   "video.hint.account": "Apple ID / Google akkaunt ekranini ko‘rsating — undan chiqqaningizni",
   "video.hint.body": "Korpusni har tomondan ko‘rsating",
   "catalog.promise": "Qabul qilishda {min} daqiqa tekshiruv · to‘g‘ri kelmasa — to‘lamaysiz",
-  "how.minutes": "{min} daqiqa"
+  "how.minutes": "{min} daqiqa",
+  "listing.specs": "Xususiyatlari",
+  "listing.pill.inspection": "{min} daqiqa ko‘rish",
+  "listing.pill.delivery": "Kuryer yetkazadi",
+  "listing.pill.passport": "Tekshiruv {total} dan {passed}",
+  "listing.pill.video": "Video-pasport",
+  "guarantee.short": "Yana xariddan keyin {days} kun himoya"
 }

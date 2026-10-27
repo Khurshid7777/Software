@@ -17,11 +17,16 @@ export function BuyerPromise({ onOpen, variant = "card" }: { onOpen?: () => void
       </span>
       <span className="promise-text">
         <strong>{t("how.promise", { min: INSPECTION_MINUTES })}</strong>
-        {variant === "card" && <span className="hint">{t("how.desc", { min: INSPECTION_MINUTES, days: GUARANTEE_DAYS })}</span>}
+        {variant === "card" && (
+          <span className="hint">
+            {t("guarantee.short", { days: GUARANTEE_DAYS })}
+            {onOpen && <span className="promise-link"> · {t("how.promise_link")}</span>}
+          </span>
+        )}
       </span>
       {onOpen && (
-        <span className="promise-more">
-          {variant === "card" ? t("how.promise_link") : ""} <Icon name="chevron" />
+        <span className="promise-more" aria-hidden>
+          <Icon name="chevron" />
         </span>
       )}
     </Tag>
