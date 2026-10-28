@@ -1,6 +1,7 @@
 import type { ListingModeration } from "./schemas.js";
 import { DELIVERY_MODES, TASHKENT_DISTRICTS, type DeliveryMode, type District, type FeePayer } from "./listing.js";
 import type { DisputeDto, Inspection } from "./market.js";
+import type { CheckCategory } from "./types.js";
 
 // ---------- delivery orders ----------
 
@@ -169,7 +170,7 @@ export interface OrderDto {
   status: OrderStatus;
   role: "buyer" | "seller" | "operator";
   mode: DeliveryMode;
-  listing: { id: string; titleRu: string; titleUz: string; photoUrl: string | null };
+  listing: { id: string; category: CheckCategory; titleRu: string; titleUz: string; photoUrl: string | null };
   district: District;
   /** The buyer's address is shown only to the buyer and operators (never to the seller before pickup). */
   address: string | null;

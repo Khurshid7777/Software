@@ -3,6 +3,7 @@ import { formatUzs, listingTitle, type DisputeReason, type MeetingDto, type Orde
 import { MeetingCard } from "../components/Meeting";
 import { photoUrl, ApiError, compressImage, type Api } from "../api";
 import { Empty } from "../components/Empty";
+import { Icon } from "../components/Icon";
 import { LoadError } from "../components/LoadError";
 import { Guarantee } from "../components/Guarantee";
 import { Toast } from "../components/Toast";
@@ -18,11 +19,13 @@ interface Props {
   /** Opened from a bot notification (startapp=order_<id>). */
   focusId?: string;
   onOpenListing: (id: string) => void;
+  /** Buyer at handover: the 10-minute inspection screen for this order's item. */
+  onInspect?: (listing: OrderDto["listing"]) => void;
   onCatalog: () => void;
   onSell?: () => void;
 }
 
-export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog, onSell }: Props) {
+export function Orders({ api, visible = true, focusId, onOpenListing, onInspect, onCatalog, onSell }: Props) {
   const t = useT();
   // A notification link: the order's side (buyer/seller) is resolved before the first load (no flash).
   const [role, setRole] = useState<"buyer" | "seller" | null>(focusId ? null : "buyer");
@@ -128,6 +131,7 @@ export function Orders({ api, visible = true, focusId, onOpenListing, onCatalog,
           order={o}
           highlighted={o.id === focusId}
           onOpenListing={() => onOpenListing(o.listing.id)}
+          onInspect={onInspect ? () => onInspect(o.listing) : undefined}
           onAction={(a) => act(() => api.orderAction(o.id, a))}
           onReview={(rating, text) => act(() => api.review(o.id, rating, text), t("orders.review_thanks"))}
           onDispute={(reason, text) => act(() => api.openDispute(o.id, reason, text), t("guarantee.sent"))}
@@ -145,6 +149,7 @@ function OrderCard({
   order: o,
   highlighted,
   onOpenListing,
+  onInspect,
   onAction,
   onReview,
   onDispute,
@@ -154,6 +159,7 @@ function OrderCard({
   order: OrderDto;
   highlighted: boolean;
   onOpenListing: () => void;
+  onInspect?: () => void;
   onAction: (a: "confirm" | "decline" | "cancel") => void;
   onReview: (rating: number, text: string) => void;
   onDispute: (reason: DisputeReason, text: string) => void;
@@ -191,6 +197,11 @@ function OrderCard({
           {o.inspection.passed ? `✅ ${t("verified.badge")}` : `⚠️ ${t("orders.inspection_issues")}`}
           {o.inspection.note && ` — ${o.inspection.note}`}
         </p>
+      )}
+      {o.role === "buyer" && onInspect && (o.status === "courier_assigned" || o.status === "picked_up") && (
+        <button className="secondary" onClick={onInspect} data-testid="order-inspect">
+          <Icon name="timer" /> {t("orders.inspect")}
+        </button>
       )}
       {o.address && <p className="hint">{t("orders.address", { address: o.address })}</p>}
       {o.courier?.name && <p className="hint">{t("order.courier", { name: o.courier.name })}</p>}

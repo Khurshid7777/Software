@@ -10,7 +10,7 @@ const CATEGORIES = Object.keys(CATEGORY_ICONS) as CheckCategory[];
  * «Как проходит проверка»: the promise behind every card, step by step. Ishonch connects the two sides and
  * holds no money: the buyer checks the item for INSPECTION_MINUTES at handover and pays the seller only then.
  */
-export function HowItWorks({ category, onCatalog }: { category?: CheckCategory; onCatalog: () => void }) {
+export function HowItWorks({ category, onCatalog, onTry }: { category?: CheckCategory; onCatalog: () => void; onTry?: (category: CheckCategory) => void }) {
   const t = useT();
   const lang = useLang();
   const [cat, setCat] = useState<CheckCategory>(category && CATEGORIES.includes(category) ? category : "smartphone");
@@ -61,6 +61,11 @@ export function HowItWorks({ category, onCatalog }: { category?: CheckCategory; 
             </button>
           ))}
         </div>
+        {onTry && (
+          <button className="secondary" onClick={() => onTry(cat)} data-testid="how-try">
+            <Icon name="timer" /> {t("how.try")}
+          </button>
+        )}
         <ul className="plain how-checklist">
           {inspectionChecklist(lang, cat).map((line) => (
             <li key={line}>

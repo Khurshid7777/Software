@@ -1,6 +1,8 @@
 import { COMPARE_MAX, GUARANTEE_DAYS, INSPECTION_MINUTES, type Lang } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
+import { useState } from "react";
 import { DocLink } from "../components/DocLink";
+import { readThemePref, setThemePref, type ThemePref } from "../telegram";
 import { Icon, type IconName } from "../components/Icon";
 
 const LINKS = {
@@ -24,6 +26,7 @@ interface Props {
 export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, onExport }: Props) {
   const t = useT();
   const lang = useLang();
+  const [theme, setTheme] = useState<ThemePref>(readThemePref);
   const row = (target: Target, icon: IconName, title: string, desc: string) => (
     <button className="menu-row" onClick={() => onOpen(target)} data-testid={`open-${target}`}>
       <span className="tile-icon" aria-hidden>
@@ -50,13 +53,32 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
           ))}
         </div>
       </div>
+      <div className="row between" data-testid="theme-switch">
+        <span className="hint">{t("profile.theme")}</span>
+        <div className="lang-switch" role="group" aria-label={t("profile.theme")}>
+          {(["auto", "light", "dark"] as const).map((v) => (
+            <button
+              key={v}
+              className={v === theme ? "active" : ""}
+              aria-pressed={v === theme}
+              data-testid={`theme-${v}`}
+              onClick={() => {
+                setTheme(v);
+                setThemePref(v);
+              }}
+            >
+              {t(`profile.theme.${v}`)}
+            </button>
+          ))}
+        </div>
+      </div>
       {!hasPhone && <p className="hint-card"><Icon name="smartphone" /> {t("profile.phone_hint")}</p>}
 
       <section className="menu">
         {row("my", "list", t("home.my.title"), t("home.my.desc"))}
         {row("shop", "shop", t("home.shop.title"), t("home.shop.desc"))}
         {row("favorites", "heart", t("home.favorites.title"), t("home.favorites.desc"))}
-        {row("compare", "compare", t("versus.title"), t("versus.empty_text", { n: COMPARE_MAX }))}
+        {row("compare", "compare", t("versus.title"), t("versus.menu_desc", { n: COMPARE_MAX }))}
         {row("check", "verify", t("home.tekshir.title"), t("home.tekshir.desc"))}
         {row("how", "timer", t("how.open"), t("how.desc", { min: INSPECTION_MINUTES, days: GUARANTEE_DAYS }))}
         {row("notifications", "bell", t("notify.open"), t("notify.desc"))}

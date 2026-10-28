@@ -25,6 +25,8 @@ test("Back returns to the same catalog scroll position without reloading", async
   const cards = page.getByTestId("item-card");
   await expect(cards.nth(5)).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 600));
+  // The click scrolls the card into view first: measure after that, so the check does not depend on the layout above.
+  await cards.nth(5).scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.scrollY);
   await cards.nth(5).locator(".item-main").click();
   await expect(page.getByTestId("listing-view")).toBeVisible();

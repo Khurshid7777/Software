@@ -515,6 +515,40 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .specs dd { margin: 2px 0 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .gallery { background: var(--photo-bg); }
 
+/* ---- 13d. Catalog: quick filters and the list view ---- */
+.chip .icon { width: 16px; height: 16px; }
+.view-switch { display: inline-flex; background: var(--surface-2); border-radius: var(--pill); padding: 3px; margin-left: auto; }
+.view-switch button { border: 0; background: none; color: var(--ink-2); width: 36px; height: 32px; min-height: 0; border-radius: var(--pill); display: inline-flex; align-items: center; justify-content: center; }
+.view-switch button.active { background: var(--card); color: var(--brand); box-shadow: var(--shadow-sm); }
+.view-switch .icon { width: 18px; height: 18px; }
+.catalog-grid.list { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.catalog-grid.list .item-main { flex-direction: row; gap: 12px; align-items: stretch; }
+.catalog-grid.list .item-photo { width: 124px; flex-shrink: 0; }
+.catalog-grid.list .item-body { padding: 2px 4px; justify-content: center; flex: 1; }
+/* Over the photo's lower left corner: the grade chip sits at the top, the text column stays clear. */
+.catalog-grid.list .item-actions { top: auto; right: auto; bottom: 16px; left: 16px; flex-direction: row; }
+.catalog-grid.list .item-fav { width: 32px; height: 32px; }
+
+/* ---- 13c. Inspection mode: timer and tickable checklist ---- */
+.timer-card { display: flex; align-items: center; gap: 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 20px; box-shadow: var(--shadow-card); }
+.timer-ring { width: 112px; height: 112px; flex-shrink: 0; }
+.timer-track { fill: none; stroke: var(--surface-3); stroke-width: 10; }
+.timer-arc { fill: none; stroke: var(--brand); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 0.5s linear, stroke 0.3s; }
+.timer-card.urgent .timer-arc { stroke: var(--bad); }
+.timer-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.timer-time { font-family: var(--font-display); font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.timer-card.urgent .timer-time { color: var(--bad); }
+.inspect-list { display: flex; flex-direction: column; gap: 6px; }
+.inspect-row { width: 100%; display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; text-align: left; background: var(--surface-2); border: 1px solid transparent; border-radius: 12px; padding: 12px; font-size: 14px; color: var(--ink); }
+.inspect-row.on { background: var(--ok-soft); border-color: var(--ok); }
+.inspect-row.on > span:last-child { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ok) 50%, transparent); color: var(--ink-2); }
+.inspect-box { width: 24px; height: 24px; border-radius: 8px; border: 2px solid var(--ink-3); display: inline-flex; align-items: center; justify-content: center; color: #fff; }
+.inspect-row.on .inspect-box { background: var(--ok); border-color: var(--ok); }
+.inspect-box .icon { width: 16px; height: 16px; }
+.hint-card.verdict-ok { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.hint-card.verdict-ok .icon { color: var(--ok); }
+.hint-card .icon { margin-right: 4px; }
+
 /* ---- 13b. Versus, the buyer's promise, «Как проходит проверка», the video passport ---- */
 .hero-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 4px; position: relative; z-index: 1; }
 .hero-actions .hero-cta { margin-top: 0; }

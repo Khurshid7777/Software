@@ -22,6 +22,8 @@ interface Cell {
   node: ReactNode;
   /** Higher is better; null = not comparable (missing). The best cell of a row is highlighted. */
   score: number | null;
+  /** What makes cells differ when there is no score (district): equal signatures = equal cells. */
+  sig?: string;
 }
 interface Row {
   key: string;
@@ -43,6 +45,7 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
   const [ai, setAi] = useState<CompareResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [onlyDiff, setOnlyDiff] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -215,7 +218,7 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
     {
       key: "district",
       label: t("compare.district"),
-      cells: items.map(({ listing: l }) => ({ node: l.district ? t(`district.${l.district}`) : unknown, score: null })),
+      cells: items.map(({ listing: l }) => ({ node: l.district ? t(`district.${l.district}`) : unknown, score: null, sig: l.district ?? "" })),
     },
   ];
   // The best cell of a row is highlighted only when the row actually differs.
@@ -224,6 +227,9 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
     if (scores.length < 2 || new Set(scores).size < 2) return null;
     return Math.max(...scores);
   };
+
+  const differs = (row: Row) => new Set(row.cells.map((c) => c.sig ?? String(c.score))).size > 1;
+  const shown = onlyDiff ? rows.filter(differs) : rows;
 
   return (
     <div className="stack versus" data-testid="compare">
@@ -234,6 +240,12 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
         </button>
       </div>
       <p className="hint">{t("versus.intro")}</p>
+      {items.length >= 2 && (
+        <label className="check-row" data-testid="compare-only-diff">
+          <input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} />
+          <span>{t("versus.only_diff")}</span>
+        </label>
+      )}
 
       <div className="table-wrap versus-wrap">
         <table className="versus-table">
@@ -258,7 +270,7 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {shown.map((r) => {
               const best = bestOf(r);
               return (
                 <tr key={r.key} data-testid={`compare-row-${r.key}`}>

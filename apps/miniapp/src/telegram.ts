@@ -1,3 +1,4 @@
+import { readPref, writePref } from "./prefs";
 import {
   addToHomeScreen,
   backButton,
@@ -88,8 +89,21 @@ const LIGHT = "#ffffff";
 const BRAND = "#0053e2";
 let brandChrome = false;
 
-/** Dark or light? Telegram's choice inside the app, the system's outside; our own palette either way. */
+export type ThemePref = "auto" | "light" | "dark";
+export function readThemePref(): ThemePref {
+  const v = readPref("theme");
+  return v === "light" || v === "dark" ? v : "auto";
+}
+/** «Тема: авто / светлая / тёмная» in the profile: saved on this device and applied at once. */
+export function setThemePref(v: ThemePref) {
+  writePref("theme", v);
+  applyTheme();
+}
+
+/** Dark or light? The user's own choice first, else Telegram's inside the app and the system's outside. */
 function isDark(): boolean {
+  const pref = readThemePref();
+  if (pref !== "auto") return pref === "dark";
   try {
     if (isTMA() && miniApp.isMounted()) return miniApp.isDark();
   } catch {

@@ -16,7 +16,7 @@ import { LoadError } from "../components/LoadError";
 import { BuyerPromise } from "../components/Promise";
 import { toggleCompare, useCompare } from "../compare";
 import { Toast } from "../components/Toast";
-import { digitsOnly, groupDigits } from "../prefs";
+import { digitsOnly, groupDigits, readPref, writePref } from "../prefs";
 import { haptic } from "../telegram";
 import { useT } from "../i18n";
 
@@ -41,6 +41,7 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [view, setView] = useState<"grid" | "list">(() => (readPref("catalog_view") === "list" ? "list" : "grid"));
 
   // Only the latest request may update the list: a slow page for old filters must not land on new results.
   const seq = useRef(0);
@@ -101,6 +102,17 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
 
   const activeFilters = Object.entries(filters).filter(([k, v]) => k !== "q" && v !== undefined && v !== false).length;
 
+  /** One-tap filters under the categories; they use the same fields as the filter panel and keep it in sync. */
+  function quick(patch: Partial<CatalogFilters>) {
+    haptic("selection");
+    setFilters((f) => ({ ...f, ...patch }));
+    setDraft((d) => ({ ...d, ...patch }));
+  }
+  function switchView(v: "grid" | "list") {
+    setView(v);
+    writePref("catalog_view", v);
+  }
+
   function compare(item: CatalogItem) {
     if (toggleCompare(item.listing.id)) haptic("light");
     else setToast(t("versus.full", { n: compareIds.length }));
@@ -143,6 +155,18 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
             {t(`category.${c}`)}
           </button>
         ))}
+      </div>
+
+      <div className="chips scroll-x bleed" data-testid="quick-filters">
+        <button className={filters.goodGrade ? "chip active" : "chip"} aria-pressed={!!filters.goodGrade} onClick={() => quick({ goodGrade: filters.goodGrade ? undefined : true })} data-testid="quick-grade">
+          <Icon name="shield" /> {t("catalog.quick.grade")}
+        </button>
+        <button className={filters.belowMarketPct ? "chip active" : "chip"} aria-pressed={!!filters.belowMarketPct} onClick={() => quick({ belowMarketPct: filters.belowMarketPct ? undefined : 10 })} data-testid="quick-deals">
+          <Icon name="trend_down" /> {t("catalog.quick.deals")}
+        </button>
+        <button className={filters.verifiedOnly ? "chip active" : "chip"} aria-pressed={!!filters.verifiedOnly} onClick={() => quick({ verifiedOnly: filters.verifiedOnly ? undefined : true })} data-testid="quick-verified">
+          <Icon name="verify" /> {t("catalog.quick.verified")}
+        </button>
       </div>
 
       {showFilters && (
@@ -232,6 +256,14 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
       {/* Sorting is visible and applies at once (it used to hide inside the filters panel). */}
       <div className="row between">
         <span className="hint">{items && items.length > 0 ? t("catalog.found", { n: items.length + (next !== null ? "+" : "") }) : ""}</span>
+        <div className="view-switch" role="group" aria-label={t("catalog.view")}>
+          <button className={view === "grid" ? "active" : ""} aria-pressed={view === "grid"} aria-label={t("catalog.view.grid")} onClick={() => switchView("grid")} data-testid="view-grid">
+            <Icon name="grid" />
+          </button>
+          <button className={view === "list" ? "active" : ""} aria-pressed={view === "list"} aria-label={t("catalog.view.list")} onClick={() => switchView("list")} data-testid="view-list">
+            <Icon name="list" />
+          </button>
+        </div>
         <select className="sort-select" aria-label={t("catalog.sort_label")} value={sort} onChange={(e) => setSort(e.target.value as CatalogSort)}>
           {CATALOG_SORTS.map((s) => (
             <option key={s} value={s}>
@@ -259,7 +291,7 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
       {failed && <LoadError onRetry={() => void load(0)} />}
       {items?.length === 0 && !failed && <Empty icon="🔍" title={t("catalog.nothing")} text={t("catalog.empty")} />}
       {!!items?.length && (
-        <div className="catalog-grid">
+        <div className={view === "list" ? "catalog-grid list" : "catalog-grid"} data-testid="catalog-grid">
           {items.map((i) => (
             <ItemCard
               key={i.listing.id}

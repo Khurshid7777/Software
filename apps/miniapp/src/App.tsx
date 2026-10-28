@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { loadLanguage, normalizeLang, t, type CatalogFilters, type CheckCategory, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared/client";
+import { listingTitle, loadLanguage, normalizeLang, t, type CatalogFilters, type CheckCategory, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared/client";
 import { ApiError, createApi, SESSION_EXPIRED_EVENT, setApiLang, type Me } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { alertDialog, closeApp, confirmDialog } from "./dialogs";
@@ -8,6 +8,7 @@ import { Assistant } from "./screens/Assistant";
 import { Catalog } from "./screens/Catalog";
 import { Compare } from "./screens/Compare";
 import { HowItWorks } from "./screens/HowItWorks";
+import { Inspect } from "./screens/Inspect";
 import { Check } from "./screens/Check";
 import { Checkout } from "./screens/Checkout";
 import { Favorites } from "./screens/Favorites";
@@ -54,6 +55,7 @@ type Screen =
   | { name: "valuation" }
   | { name: "compare" }
   | { name: "how"; category?: CheckCategory }
+  | { name: "inspect"; category: CheckCategory; listingId?: string; title?: string }
   | { name: "admin" };
 
 /** A navigation entry: screens below the top stay mounted (state, loaded lists) and remember their scroll. */
@@ -359,6 +361,7 @@ export function App({ env }: { env: TelegramEnv }) {
             onOpenListing={(id) => go({ name: "listing", id })}
             onCatalog={() => go({ name: "catalog" })}
             onSell={() => go({ name: "sell" })}
+            onInspect={(listing) => go({ name: "inspect", category: listing.category, listingId: listing.id, title: listingTitle(listing, lang) })}
           />
         );
         break;
@@ -395,7 +398,16 @@ export function App({ env }: { env: TelegramEnv }) {
         body = <Compare api={api} onOpen={(id) => go({ name: "listing", id })} onCatalog={() => go({ name: "catalog" })} />;
         break;
       case "how":
-        body = <HowItWorks category={screen.category} onCatalog={() => go({ name: "catalog" })} />;
+        body = (
+          <HowItWorks
+            category={screen.category}
+            onCatalog={() => go({ name: "catalog" })}
+            onTry={(category) => go({ name: "inspect", category })}
+          />
+        );
+        break;
+      case "inspect":
+        body = <Inspect category={screen.category} listingId={screen.listingId} title={screen.title} />;
         break;
       case "seller":
         body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;

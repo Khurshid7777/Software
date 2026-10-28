@@ -54,6 +54,7 @@ import {
   type Lang,
   type OfferDto,
   type OfferStatus,
+  type CheckCategory,
   type OrderActor,
   type OrderDto,
   type OrderStatus,
@@ -1544,6 +1545,7 @@ export class OrderService {
         mode: o.mode as DeliveryMode,
         listing: {
           id: o.listingId,
+          category: (l?.category ?? "other") as CheckCategory,
           titleRu: l?.titleRu ?? "",
           titleUz: l?.titleUz ?? "",
           photoUrl: photo ? this.d.listings.photoUrl(photo.id, photo.storageKey) : null,
