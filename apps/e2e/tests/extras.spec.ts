@@ -160,3 +160,34 @@ test("a running inspection can be resumed from the storefront", async ({ page })
   await open(page, BUYER);
   await expect(page.getByTestId("inspect-banner")).toHaveCount(0);
 });
+
+test("IMEI check from the storefront: any phone, a verdict and what to check next", async ({ page }) => {
+  await open(page, BUYER);
+  await page.evaluate(() => localStorage.setItem("ishonch.trust_intro_seen", "1"));
+  await page.getByTestId("open-imei").click();
+  await expect(page.getByTestId("imei-check")).toBeVisible();
+  await expect(page.getByTestId("imei-run")).toBeDisabled();
+
+  // Fifteen digits with a wrong check digit are not an IMEI.
+  await page.getByTestId("imei-input").fill("490154203237519");
+  await page.getByTestId("imei-run").click();
+  await expect(page.getByTestId("imei-result")).toHaveAttribute("data-verdict", "invalid");
+
+  await page.getByTestId("imei-input").fill("490 154 203 237 518");
+  await page.getByTestId("imei-run").click();
+  await expect(page.getByTestId("imei-result")).toHaveAttribute("data-verdict", "clean");
+  await expect(page.getByTestId("imei-seen")).toContainText("не встречался");
+  await expect(page.getByTestId("imei-result")).toContainText("*1170#");
+  await expect(page.getByTestId("imei-result")).toContainText("7518");
+});
+
+test("the storefront opens Versus from a tile; «Как проходит проверка» compares us with a plain board", async ({ page }) => {
+  await open(page, BUYER);
+  await page.evaluate(() => localStorage.setItem("ishonch.trust_intro_seen", "1"));
+  await page.getByTestId("open-versus").click();
+  await expect(page.getByTestId("empty")).toContainText("Пока нечего сравнивать");
+  await open(page, BUYER, "screen=how");
+  await expect(page.getByTestId("how-vs")).toContainText("Чем Ishonch отличается от обычной доски");
+  await expect(page.getByTestId("how-vs")).toContainText("Видео-паспорт");
+  await expect(page.getByTestId("how-vs")).toContainText("денег не берёт");
+});

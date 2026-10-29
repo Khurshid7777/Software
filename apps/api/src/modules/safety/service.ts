@@ -1,23 +1,25 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   CHAT_REPORT_REASONS,
+  IMEI_CHECKS_PER_DAY,
   STOLEN_REPORTS_MAX,
   isValidImei,
   listingTitle,
   normalizeImei,
   t,
   type ChatReportReason,
+  type ImeiCheckDto,
   type Lang,
   type StolenKind,
   type StolenReportDto,
 } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
-import { chatReports, conversationMessages, conversations, listings, meetings, stolenReports, userBlocks, users, type User } from "../../db/schema.js";
+import { chatReports, conversationMessages, conversations, listings, meetings, orders, stolenReports, userBlocks, users, type User } from "../../db/schema.js";
 import type { StaffNotifier } from "../../telegram/staff.js";
 
 export class SafetyRejected extends Error {
   constructor(
-    public code: "not_found" | "bad_request" | "bad_imei" | "phone_required" | "stolen_limit" | "stolen_exists",
+    public code: "not_found" | "bad_request" | "bad_imei" | "phone_required" | "stolen_limit" | "stolen_exists" | "imei_limit",
     public status: number,
   ) {
     super(code);
@@ -41,6 +43,54 @@ export class SafetyService {
       recheckImei?: (imei: string, reporterId: string) => Promise<number>;
     },
   ) {}
+
+  // ---------- «Проверка IMEI» for any phone (stage 39) ----------
+
+  /**
+   * «Autoteka for phones»: anyone can look an IMEI up before buying it anywhere, not only on Ishonch. The answer is
+   * counts and a verdict, never who reported or who sold: that stays between them and the moderators.
+   */
+  async checkImei(user: User, raw: string): Promise<ImeiCheckDto> {
+    const imei = normalizeImei(raw);
+    const none = { listings: 0, active: 0, sellersNow: 0, sold: 0, inspections: { passed: 0, failed: 0 } };
+    if (!isValidImei(imei)) return { verdict: "invalid", tail: null, reported: false, seen: none, checksLeft: IMEI_CHECKS_PER_DAY - (await this.d.repo.usedToday(user.id, "imei_check")) };
+    const reservation = await this.d.repo.reserveDaily(user.id, "imei_check", IMEI_CHECKS_PER_DAY);
+    if (reservation == null) throw new SafetyRejected("imei_limit", 429);
+    const [report] = await this.db
+      .select({ id: stolenReports.id })
+      .from(stolenReports)
+      .where(and(eq(stolenReports.imei, imei), isNull(stolenReports.withdrawnAt)))
+      .limit(1);
+    const rows = await this.db
+      .select({ id: listings.id, seller: listings.sellerUserId, status: listings.status })
+      .from(listings)
+      .where(eq(listings.imei, imei));
+    const live = rows.filter((r) => ["active", "pending", "reserved"].includes(r.status));
+    const [insp] = rows.length
+      ? ((await this.db
+          .select({
+            passed: sql<number>`count(*) filter (where (${orders.inspection}->>'passed')::boolean)::int`,
+            failed: sql<number>`count(*) filter (where not (${orders.inspection}->>'passed')::boolean)::int`,
+          })
+          .from(orders)
+          .where(and(inArray(orders.listingId, rows.map((r) => r.id)), sql`${orders.inspection} is not null`))) as Array<{ passed: number; failed: number }>)
+      : [{ passed: 0, failed: 0 }];
+    const sellersNow = new Set(live.map((r) => r.seller)).size;
+    await this.d.repo.event(user.id, "imei_checked", { reported: !!report, listings: rows.length });
+    return {
+      verdict: report ? "danger" : sellersNow > 1 ? "caution" : "clean",
+      tail: imei.slice(-4),
+      reported: !!report,
+      seen: {
+        listings: rows.length,
+        active: live.length,
+        sellersNow,
+        sold: rows.filter((r) => r.status === "sold").length,
+        inspections: { passed: insp?.passed ?? 0, failed: insp?.failed ?? 0 },
+      },
+      checksLeft: IMEI_CHECKS_PER_DAY - (await this.d.repo.usedToday(user.id, "imei_check")),
+    };
+  }
 
   // ---------- «Украли телефон» (stage 27) ----------
 

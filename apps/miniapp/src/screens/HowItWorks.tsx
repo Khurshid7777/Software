@@ -52,6 +52,28 @@ export function HowItWorks({ category, onCatalog, onTry }: { category?: CheckCat
         ))}
       </ol>
 
+      <section className="stack-tight" data-testid="how-vs">
+        <h3>{t("vs.title")}</h3>
+        <div className="vs-table" role="table">
+          <div className="vs-head" role="row">
+            <span role="columnheader">{t("vs.board")}</span>
+            <span role="columnheader" className="vs-us">
+              {t("vs.ishonch")}
+            </span>
+          </div>
+          {(["photo", "video", "check", "stolen", "compare", "money"] as const).map((k) => (
+            <div className="vs-row" role="row" key={k}>
+              <span role="cell" className="vs-board">
+                <Icon name="close" /> {t(`vs.${k}.board`)}
+              </span>
+              <span role="cell" className="vs-us">
+                <Icon name="check" /> {t(`vs.${k}.ishonch`)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="card stack" data-testid="how-checklist">
         <h3>{t("how.checklist_title", { min: INSPECTION_MINUTES })}</h3>
         <div className="chips scroll-x bleed">

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { z } from "zod";
-import { CHAT_REPORT_REASONS, STOLEN_KINDS, t, type Lang } from "@ishonch/shared";
+import { CHAT_REPORT_REASONS, IMEI_CHECKS_PER_DAY, STOLEN_KINDS, t, type Lang } from "@ishonch/shared";
 import { SafetyRejected, type SafetyService } from "./service.js";
 
 const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
@@ -15,6 +15,7 @@ export function safetyRoutes(
     phone_required: "stolen.err.phone",
     stolen_limit: "stolen.err.limit",
     stolen_exists: "stolen.err.exists",
+    imei_limit: "imei.err.limit",
   };
   async function handle<T>(req: FastifyRequest, reply: FastifyReply, fn: () => Promise<T>) {
     try {
@@ -23,7 +24,7 @@ export function safetyRoutes(
       if (err instanceof SafetyRejected) {
         const key = MESSAGES[err.code];
         const lang = (req.user?.language ?? "ru") as Lang;
-        return reply.code(err.status).send({ error: err.code, ...(key ? { message: t(lang, key, { n: 3 }) } : {}) });
+        return reply.code(err.status).send({ error: err.code, ...(key ? { message: t(lang, key, { n: err.code === "imei_limit" ? IMEI_CHECKS_PER_DAY : 3 }) } : {}) });
       }
       throw err;
     }
@@ -41,6 +42,15 @@ export function safetyRoutes(
       const body = z.object({ reason: z.enum(CHAT_REPORT_REASONS) }).safeParse(req.body);
       if (!isUuid(req.params.id) || !body.success) return reply.code(400).send({ error: "bad_request" });
       return svc.report(req.user!, req.params.id, body.data.reason);
+    }),
+  );
+
+  // «Проверка IMEI»: any phone, before it is bought anywhere (counts and a verdict, nobody's name).
+  app.post("/imei/check", { preHandler: auth.requireUser }, (req, reply) =>
+    handle(req, reply, async () => {
+      const body = z.object({ imei: z.string().max(40) }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "bad_request" });
+      return svc.checkImei(req.user!, body.data.imei);
     }),
   );
 

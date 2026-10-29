@@ -502,6 +502,26 @@ export type StolenKind = (typeof STOLEN_KINDS)[number];
 /** Open reports one person may have at a time. */
 export const STOLEN_REPORTS_MAX = 3;
 
+// ---------- «Проверка IMEI» for any phone (stage 39) ----------
+/** Checks one person may run a day: enough to look at several phones, too few to harvest the base. */
+export const IMEI_CHECKS_PER_DAY = 20;
+export const IMEI_VERDICTS = ["invalid", "danger", "caution", "clean"] as const;
+export type ImeiVerdict = (typeof IMEI_VERDICTS)[number];
+/**
+ * What Ishonch knows about an IMEI, without naming anyone: counts only. `danger`: an owner reported it stolen or
+ * lost; `caution`: it is for sale at several sellers at once; `clean`: no signals in our own data (this does not
+ * replace the state registry or looking at the phone).
+ */
+export interface ImeiCheckDto {
+  verdict: ImeiVerdict;
+  /** Last 4 digits, as everywhere else. */
+  tail: string | null;
+  /** An owner's report about this IMEI is open. */
+  reported: boolean;
+  seen: { listings: number; active: number; sellersNow: number; sold: number; inspections: { passed: number; failed: number } };
+  checksLeft: number;
+}
+
 export interface StolenReportDto {
   id: number;
   /** Last 4 digits only: the full IMEI is not shown back. */

@@ -27,6 +27,7 @@ import type {
   Lang,
   ListingDto,
   VideoCheckResult,
+  ImeiCheckDto,
   ListingInsights,
   ListingSeller,
   ListingStatus,
@@ -321,6 +322,7 @@ export function createApi(initData: string | null) {
     setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
     setSearchBelowMarket: (id: number, pct: number | null) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { belowMarketPct: pct })),
     wanted: () => request<WantedRequest[]>("/wanted"),
+    checkImei: (imei: string) => request<ImeiCheckDto>("/imei/check", json("POST", { imei })),
     stolenReports: () => request<StolenReportDto[]>("/me/stolen"),
     reportStolen: (body: { imei: string; kind: "stolen" | "lost"; policeReport?: string }) =>
       request<{ id: number; held: number }>("/me/stolen", json("POST", body)),

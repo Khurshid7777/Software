@@ -33,7 +33,7 @@ interface Props {
   /** Staff see an entry to the admin panel (operators: delivery orders only). */
   staff?: "admin" | "operator" | null;
   remaining: number;
-  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation" | "how") => void;
+  onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation" | "how" | "imei" | "compare") => void;
   onCatalog: (filters?: CatalogFilters) => void;
   onListing: (id: string) => void;
   /** Back to the running 10-minute inspection. */
@@ -230,6 +230,16 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing, onIn
             <span className="tool-icon" style={{ "--tint": "#b8860b" } as CSSProperties}><Icon name="coins" /></span>
             <strong>{t("home.quick.valuation")}</strong>
             <span className="hint">{t("home.quick.valuation_desc")}</span>
+          </button>
+          <button className="tool" onClick={() => onOpen("imei")} data-testid="open-imei">
+            <span className="tool-icon" style={{ "--tint": "#1a8a5a" } as CSSProperties}><Icon name="lock" /></span>
+            <strong>{t("home.quick.imei")}</strong>
+            <span className="hint">{t("home.quick.imei_desc")}</span>
+          </button>
+          <button className="tool" onClick={() => onOpen("compare")} data-testid="open-versus">
+            <span className="tool-icon" style={{ "--tint": "#0a8fa3" } as CSSProperties}><Icon name="compare" /></span>
+            <strong>{t("home.quick.versus")}</strong>
+            <span className="hint">{t("home.quick.versus_desc")}</span>
           </button>
           <button className="tool" onClick={() => onOpen("favorites")} data-testid="open-favorites">
             <span className="tool-icon" style={{ "--tint": "#d6336c" } as CSSProperties}><Icon name="heart" /></span>

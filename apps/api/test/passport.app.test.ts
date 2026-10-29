@@ -10,7 +10,7 @@ import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
-import { listings, orders, priceReference } from "../src/db/schema.js";
+import { listings, orders, priceReference, stolenReports } from "../src/db/schema.js";
 import type { CourierProvider } from "../src/modules/orders/courier.js";
 import { FsStorage } from "../src/storage/storage.js";
 import type { ChannelPublisher, Notifier, NotifyButton } from "../src/telegram/publisher.js";
@@ -297,6 +297,57 @@ describe.skipIf(!reachable)("item passport: grade, checks, IMEI history, grade f
     expect(p.checks.find((c) => c.code === "inspection")).toMatchObject({ status: "ok", params: { photos: 2 } });
     const admin = (await get<Array<{ orderId: string; photos: string[]; inspectionPhotos: string[] }>>(ADMIN, "/admin/disputes")).find((d) => d.orderId === id)!;
     expect([admin.photos.length, admin.inspectionPhotos.length]).toEqual([2, 2]);
+  });
+
+  it("IMEI check for any phone: invalid, clean, seen, several sellers at once, reported, daily limit", async () => {
+    // Valid IMEIs of our own: 14 digits + the Luhn check digit.
+    const imeiOf = (base: string) => {
+      let sum = 0;
+      for (let i = 0; i < 14; i++) {
+        let d = Number(base[i]);
+        if (i % 2 === 1) {
+          d *= 2;
+          if (d > 9) d -= 9;
+        }
+        sum += d;
+      }
+      return base + String((10 - (sum % 10)) % 10);
+    };
+    const check = async (who: number, imei: string) => app.inject({ method: "POST", url: "/imei/check", headers: tma(who), payload: { imei } });
+    const stamp = String(Date.now()).slice(-8);
+
+    expect((await check(BUYER, "12345")).json()).toMatchObject({ verdict: "invalid", tail: null });
+
+    const fresh = imeiOf(`35${stamp}0000`.slice(0, 14));
+    const clean = (await check(BUYER, fresh.replace(/(\d{2})(\d{6})(\d{6})(\d)/, "$1 $2 $3 $4"))).json();
+    expect(clean).toMatchObject({ verdict: "clean", reported: false, tail: fresh.slice(-4), seen: { listings: 0, active: 0 } });
+
+    // One seller, one live listing and an earlier sold one: counts, still clean.
+    const one = imeiOf(`35${stamp}1111`.slice(0, 14));
+    await liveListing({ imei: one, status: "sold", soldAt: new Date(), publishedAt: new Date(Date.now() - 5 * 864e5) });
+    await liveListing({ imei: one });
+    expect((await check(BUYER, one)).json()).toMatchObject({ verdict: "clean", seen: { listings: 2, active: 1, sellersNow: 1, sold: 1 } });
+
+    // The same device at two sellers at once: caution.
+    const two = imeiOf(`35${stamp}2222`.slice(0, 14));
+    await liveListing({ imei: two }, SELLER);
+    await liveListing({ imei: two }, SELLER2);
+    expect((await check(BUYER, two)).json()).toMatchObject({ verdict: "caution", seen: { sellersNow: 2 } });
+
+    // An owner's open report: danger. Withdrawn: back to what the data shows. Nobody's name anywhere in the answer.
+    const stolen = imeiOf(`35${stamp}3333`.slice(0, 14));
+    const [report] = await db.insert(stolenReports).values({ userId: await userId(SELLER2), imei: stolen, kind: "stolen" }).returning();
+    const danger = (await check(BUYER, stolen)).json();
+    expect(danger).toMatchObject({ verdict: "danger", reported: true });
+    expect(JSON.stringify(danger)).not.toMatch(/userId|police|"seller"|telegram/i);
+    await db.update(stolenReports).set({ withdrawnAt: new Date() }).where(eq(stolenReports.id, report!.id));
+    expect((await check(BUYER, stolen)).json()).toMatchObject({ verdict: "clean", reported: false });
+
+    // The daily limit protects the base from being harvested; an invalid number costs nothing.
+    let last = 200;
+    for (let i = 0; i < 25 && last === 200; i++) last = (await check(ADMIN, imeiOf(`36${String(i).padStart(4, "0")}${stamp}`.slice(0, 14)))).statusCode;
+    expect(last).toBe(429);
+    expect((await check(ADMIN, "abc")).statusCode).toBe(200);
   });
 
   it("evidence: the seller's video check — owner only, video types, 20 MB, shown on the listing and in the passport", async () => {

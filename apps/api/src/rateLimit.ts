@@ -25,6 +25,7 @@ export const ROUTE_LIMITS: Record<string, number> = {
   "GET /wanted": 20,
   "GET /listings/:id/insights": 30,
   "POST /me/stolen": 5,
+  "POST /imei/check": 10,
   "POST /me/export": 3,
   "POST /listings/:id/meetings": 6,
   "POST /orders/:id/dispute": 5,

@@ -8,6 +8,7 @@ import { Assistant } from "./screens/Assistant";
 import { Catalog } from "./screens/Catalog";
 import { Compare } from "./screens/Compare";
 import { HowItWorks } from "./screens/HowItWorks";
+import { ImeiCheck } from "./screens/ImeiCheck";
 import { Inspect } from "./screens/Inspect";
 import { Check } from "./screens/Check";
 import { Checkout } from "./screens/Checkout";
@@ -54,6 +55,7 @@ type Screen =
   | { name: "seller"; id: string }
   | { name: "valuation" }
   | { name: "compare" }
+  | { name: "imei" }
   | { name: "how"; category?: CheckCategory }
   | { name: "inspect"; category: CheckCategory; listingId?: string; title?: string }
   | { name: "admin" };
@@ -110,6 +112,7 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_valuation") return { name: "valuation" };
   if (startParam === "screen_how") return { name: "how" };
   if (startParam === "screen_compare") return { name: "compare" };
+  if (startParam === "screen_imei") return { name: "imei" };
   return { name: "home" };
 }
 
@@ -396,6 +399,9 @@ export function App({ env }: { env: TelegramEnv }) {
         break;
       case "compare":
         body = <Compare api={api} onOpen={(id) => go({ name: "listing", id })} onCatalog={() => go({ name: "catalog" })} />;
+        break;
+      case "imei":
+        body = <ImeiCheck api={api} onInspect={() => go({ name: "inspect", category: "smartphone" })} />;
         break;
       case "how":
         body = (
