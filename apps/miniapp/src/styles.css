@@ -515,6 +515,27 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .specs dd { margin: 2px 0 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .gallery { background: var(--photo-bg); }
 
+/* ---- 13e. Readiness meter, running-inspection banner, recent searches, keyboard focus ---- */
+.meter { height: 8px; border-radius: var(--pill); background: var(--surface-3); overflow: hidden; }
+.meter span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), var(--ok)); transition: width 0.4s var(--ease); }
+.ready-todo { display: grid; grid-template-columns: 20px 1fr; gap: 8px; font-size: 14px; align-items: start; }
+.ready-todo .icon { width: 18px; height: 18px; color: var(--brand); margin-top: 1px; }
+.ready-todo .tag { margin-left: 8px; }
+.inspect-banner { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: var(--brand); color: #fff; border-radius: var(--r-lg); padding: 12px 14px; box-shadow: var(--shadow); }
+.inspect-banner .promise-icon { color: var(--brand); }
+.inspect-banner .hint { color: rgba(255, 255, 255, 0.85); }
+.inspect-banner > .icon { width: 18px; height: 18px; }
+.inspect-banner strong { font-variant-numeric: tabular-nums; }
+.recent-searches { align-items: center; margin-top: -4px; }
+.recent-searches .hint { white-space: nowrap; flex-shrink: 0; }
+.recent-searches .link { white-space: nowrap; flex-shrink: 0; font-size: 13px; }
+/* Keyboard and switch-control users see where they are; pointer users do not get a ring on tap. */
+button:focus-visible, a:focus-visible, [role="button"]:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+button:focus:not(:focus-visible) { outline: none; }
+/* Small round buttons keep a 44 px touch target without growing visually. */
+.item-fav, .item-check, .hero-close, .versus-remove { position: relative; }
+.item-fav::after, .item-check::after, .hero-close::after, .versus-remove::after { content: ""; position: absolute; inset: -6px; }
+
 /* ---- 13d. Catalog: quick filters and the list view ---- */
 .chip .icon { width: 16px; height: 16px; }
 .view-switch { display: inline-flex; background: var(--surface-2); border-radius: var(--pill); padding: 3px; margin-left: auto; }

@@ -33,6 +33,11 @@ export function VideoVerdict({ check, steps, forSeller = false }: { check: Video
           );
         })}
       </div>
+      {check.imeiMatch === true && (
+        <p className="hint ok-text" data-testid="video-imei-ok">
+          <Icon name="ok" /> {t("video.imei_ok")}
+        </p>
+      )}
       {note && <p className="hint">{note}</p>}
     </div>
   );

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { BUYER, OPERATOR, SHOP_OWNER, asBot, catalog, open, resetDemo } from "./helpers";
+import { BUYER, OPERATOR, PRIVATE_SELLER, SHOP_OWNER, asBot, catalog, open, resetDemo } from "./helpers";
 
 test.beforeAll(resetDemo);
 
@@ -104,4 +104,59 @@ test("inspection mode opens from the order while the courier is on the way", asy
   await expect(page.getByTestId("inspect-checklist")).toContainText("Включите технику");
   // No demo note: it is a real order.
   await expect(page.getByTestId("inspect")).not.toContainText("Это пример");
+});
+
+test("catalog: «С видео-паспортом» keeps only listings with a video; recent searches are tappable", async ({ page }) => {
+  await open(page, BUYER, "screen=catalog");
+  await page.evaluate(() => localStorage.removeItem("ishonch.searches"));
+  const cards = page.getByTestId("item-card");
+  await expect(cards.nth(2)).toBeVisible();
+  await page.getByTestId("quick-video").click();
+  await expect(page.getByTestId("quick-video")).toHaveAttribute("aria-pressed", "true");
+  // The demo phone with the AI-checked video is the only one.
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("iPhone 13");
+  await page.getByTestId("quick-video").click();
+  await expect(cards.nth(2)).toBeVisible();
+
+  await page.getByTestId("catalog-search").fill("Samsung");
+  await expect(cards.first()).toContainText("Samsung");
+  await page.getByTestId("catalog-search").fill("");
+  await expect(page.getByTestId("recent-searches")).toContainText("Samsung");
+  await page.getByTestId("recent-search").first().click();
+  await expect(page.getByTestId("catalog-search")).toHaveValue("Samsung");
+  await page.getByTestId("catalog-search").fill("");
+  await page.getByTestId("recent-clear").click();
+  await expect(page.getByTestId("recent-searches")).toHaveCount(0);
+});
+
+test("seller's readiness: shows what is missing and turns green when the passport is full", async ({ page }) => {
+  await open(page, PRIVATE_SELLER, "screen=my");
+  const card = page.locator(".card", { hasText: "iPhone" }).first();
+  await card.getByTestId("my-more").click();
+  await card.locator(".chip").filter({ hasText: "✏️" }).first().click();
+  const meter = page.getByTestId("readiness");
+  await expect(meter).toBeVisible();
+  // The demo iPhone has battery, repairs, kit, account and a video: only the photos (1 of 3) and IMEI are missing.
+  await expect(meter.getByTestId("ready-photos")).toContainText("хотя бы 3, сейчас 1");
+  await expect(meter.getByTestId("ready-video")).toHaveCount(0);
+  await expect(meter.getByTestId("ready-batteryPct")).toHaveCount(0);
+});
+
+test("a running inspection can be resumed from the storefront", async ({ page }) => {
+  await open(page, BUYER);
+  await page.evaluate(() => {
+    localStorage.removeItem("ishonch.inspect_active");
+    localStorage.setItem("ishonch.trust_intro_seen", "1");
+  });
+  await open(page, BUYER, "screen=how");
+  await page.getByTestId("how-try").click();
+  await page.getByTestId("inspect-start").click();
+  await open(page, BUYER);
+  await expect(page.getByTestId("inspect-banner")).toContainText("Осмотр идёт: 9:");
+  await page.getByTestId("inspect-banner").click();
+  await expect(page.getByTestId("inspect")).toBeVisible();
+  await page.getByTestId("inspect-reset").click();
+  await open(page, BUYER);
+  await expect(page.getByTestId("inspect-banner")).toHaveCount(0);
 });

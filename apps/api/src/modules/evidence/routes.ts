@@ -55,11 +55,20 @@ export function evidenceRoutes(
     }
   }
 
-  // Signed URLs: <img> and <video> work without auth headers; ranges are not needed for 20 MB clips.
+  // Signed URLs: <img> and <video> work without auth headers. Byte ranges are answered too: Safari on iPhone (and so
+  // Telegram there) refuses to play a <video> whose server cannot return 206, and seeking needs them everywhere.
   app.get<{ Params: { id: string }; Querystring: { s?: string } }>("/media/:id", async (req, reply) => {
     const file = await svc.read(Number(req.params.id), req.query.s ?? "");
     if (!file) return reply.code(404).send({ error: "not_found" });
-    return reply.header("content-type", file.mime).header("cache-control", "private, max-age=86400").send(file.data);
+    reply.header("content-type", file.mime).header("cache-control", "private, max-age=86400").header("accept-ranges", "bytes");
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+    if (!range || (!range[1] && !range[2])) return reply.send(file.data);
+    const size = file.data.length;
+    // "bytes=a-b", "bytes=a-" and the suffix form "bytes=-n" (the last n bytes).
+    const start = range[1] ? Number(range[1]) : Math.max(size - Number(range[2]), 0);
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start > end) return reply.code(416).header("content-range", `bytes */${size}`).send();
+    return reply.code(206).header("content-range", `bytes ${start}-${end}/${size}`).send(file.data.subarray(start, end + 1));
   });
 
   // The buyer's photos for an open dispute.

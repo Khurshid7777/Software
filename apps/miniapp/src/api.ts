@@ -63,6 +63,7 @@ export function filtersToQuery(f: CatalogFilters, sort?: CatalogSort, offset = 0
   if (f.district) p.set("district", f.district);
   if (f.verifiedOnly) p.set("verifiedOnly", "true");
   if (f.goodGrade) p.set("goodGrade", "true");
+  if (f.withVideo) p.set("withVideo", "true");
   if (sort) p.set("sort", sort);
   if (offset) p.set("offset", String(offset));
   return p.toString();

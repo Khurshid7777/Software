@@ -42,6 +42,7 @@ import {
   type ModerationRecord,
   type PriceSuggestion,
   videoRequiredFor,
+  type VideoCheckResult,
 } from "@ishonch/shared";
 import { startOfTashkentDay, type Repo } from "../../db/repo.js";
 import {
@@ -188,6 +189,25 @@ export interface ListingServiceDeps {
   quietUntil?: (now: Date) => Date | null;
   /** Hook for saved-search alerts (module A). Failures never block publication. */
   onPublished?: (listingId: string) => Promise<unknown>;
+}
+
+/**
+ * Compares the IMEI digits the AI read on the video with the IMEI the seller entered. A mismatch lowers a `pass` to
+ * `warn` with a note for the buyer: the video may show another device. No match is claimed when either side is missing.
+ */
+export function withImeiMatch(check: VideoCheckResult | null, imei: string | null): VideoCheckResult | null {
+  if (!check) return null;
+  const read = check.imeiTailRead ?? null;
+  if (!read || !imei) return { ...check, imeiMatch: null };
+  const match = imei.endsWith(read);
+  if (match) return { ...check, imeiMatch: true };
+  return {
+    ...check,
+    imeiMatch: false,
+    verdict: check.verdict === "fail" ? "fail" : "warn",
+    noteRu: `IMEI на видео не совпадает с указанным в объявлении. ${check.noteRu}`.trim().slice(0, 300),
+    noteUz: `Videodagi IMEI e'londa ko'rsatilganiga mos kelmaydi. ${check.noteUz}`.trim().slice(0, 300),
+  };
 }
 
 export class ListingService {
@@ -561,6 +581,12 @@ export class ListingService {
     const record: ModerationRecord = this.d.moderation
       ? await this.d.moderation.review(l, duplicates!)
       : { decision: "approved", source: "rules", reasons: [], at: new Date().toISOString() };
+    // The video shows another device than the IMEI in the listing: a person looks before it goes live.
+    const videoCheck = withImeiMatch((await this.d.evidence?.listingVideos([id]))?.get(id)?.check ?? null, l.imei);
+    if (record.decision === "approved" && videoCheck?.imeiMatch === false) {
+      record.decision = "needs_review";
+      record.reasons.push({ code: "misleading", note: "IMEI на видео-паспорте не совпадает с указанным в объявлении" });
+    }
     // Archive → republish must not undo a moderator's rejection or a complaint hide: those go back to a person.
     const prev = l.moderation as ModerationRecord | null;
     const [{ open }] = (await this.db
@@ -1395,7 +1421,7 @@ export class ListingService {
         acceptsTrade: l.acceptsTrade,
         grade: (l.grade as Grade | null) ?? null,
         video: videoOf.get(l.id)?.url ?? null,
-        videoCheck: videoOf.get(l.id)?.check ?? null,
+        videoCheck: withImeiMatch(videoOf.get(l.id)?.check ?? null, l.imei),
         ...(isOwner
           ? {
               autoDrop: l.autoDropFloor && l.autoDropAt ? { floor: l.autoDropFloor, nextAt: l.autoDropAt.toISOString() } : null,

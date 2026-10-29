@@ -59,6 +59,7 @@ const ai = mockAiByPrompt({
     identifier_screen: true,
     battery_screen: true,
     account_screen: true,
+    imei_tail: "",
     body_shown: true,
     screen_damage: "none",
     concerns: [],

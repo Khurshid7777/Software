@@ -110,6 +110,8 @@ export const CatalogFiltersSchema = z.object({
   verifiedOnly: z.coerce.boolean().optional(),
   /** Only grade A–B items (see computeGrade). */
   goodGrade: z.coerce.boolean().optional(),
+  /** Only listings with a video passport. */
+  withVideo: z.coerce.boolean().optional(),
   /** Saved searches (stage 33): alert only when the item is this far below the model's market price, %. */
   belowMarketPct: z.coerce
     .number()
@@ -168,6 +170,7 @@ export const VideoCheckSchema = z.object({
   identifier_screen: z.boolean().describe("an IMEI (*#06#), serial number or 'About' screen is readable"),
   battery_screen: z.boolean().describe("a battery health / capacity screen is shown"),
   account_screen: z.boolean().describe("the account (iCloud / Google / Microsoft) screen is shown"),
+  imei_tail: z.string().describe("the LAST 4 digits of the IMEI exactly as readable on an identifier screen (*#06#); empty string if no IMEI is readable"),
   body_shown: z.boolean().describe("the body is shown from more than one side"),
   screen_damage: z.enum(["none", "minor", "major", "unknown"]).describe("visible cracks or dead areas on the screen"),
   concerns: z.array(z.string()).describe("short facts a buyer should know, in Russian; empty when nothing"),

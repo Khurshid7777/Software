@@ -16,7 +16,7 @@ import { LoadError } from "../components/LoadError";
 import { BuyerPromise } from "../components/Promise";
 import { toggleCompare, useCompare } from "../compare";
 import { Toast } from "../components/Toast";
-import { digitsOnly, groupDigits, readPref, writePref } from "../prefs";
+import { clearSearches, digitsOnly, groupDigits, readPref, readSearches, rememberSearch, writePref } from "../prefs";
 import { haptic } from "../telegram";
 import { useT } from "../i18n";
 
@@ -41,6 +41,7 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [searches, setSearches] = useState(readSearches);
   const [view, setView] = useState<"grid" | "list">(() => (readPref("catalog_view") === "list" ? "list" : "grid"));
 
   // Only the latest request may update the list: a slow page for old filters must not land on new results.
@@ -74,7 +75,13 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
 
   // Debounced text search.
   useEffect(() => {
-    const id = setTimeout(() => setFilters((f) => (f.q === (query || undefined) ? f : { ...f, q: query || undefined })), 400);
+    const id = setTimeout(() => {
+      setFilters((f) => (f.q === (query || undefined) ? f : { ...f, q: query || undefined }));
+      if (query.trim().length >= 2) {
+        rememberSearch(query);
+        setSearches(readSearches());
+      }
+    }, 400);
     return () => clearTimeout(id);
   }, [query]);
 
@@ -144,6 +151,26 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
           </button>
         </div>
         <BuyerPromise variant="strip" onOpen={onHow} />
+        {!query && searches.length > 0 && (
+          <div className="chips scroll-x bleed recent-searches" data-testid="recent-searches">
+            <span className="hint">{t("catalog.recent")}</span>
+            {searches.map((s) => (
+              <button key={s} className="chip" onClick={() => setQuery(s)} data-testid="recent-search">
+                {s}
+              </button>
+            ))}
+            <button
+              className="link"
+              onClick={() => {
+                clearSearches();
+                setSearches([]);
+              }}
+              data-testid="recent-clear"
+            >
+              {t("catalog.recent_clear")}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="chips scroll-x bleed">
@@ -163,6 +190,9 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
         </button>
         <button className={filters.belowMarketPct ? "chip active" : "chip"} aria-pressed={!!filters.belowMarketPct} onClick={() => quick({ belowMarketPct: filters.belowMarketPct ? undefined : 10 })} data-testid="quick-deals">
           <Icon name="trend_down" /> {t("catalog.quick.deals")}
+        </button>
+        <button className={filters.withVideo ? "chip active" : "chip"} aria-pressed={!!filters.withVideo} onClick={() => quick({ withVideo: filters.withVideo ? undefined : true })} data-testid="quick-video">
+          <Icon name="video" /> {t("catalog.quick.video")}
         </button>
         <button className={filters.verifiedOnly ? "chip active" : "chip"} aria-pressed={!!filters.verifiedOnly} onClick={() => quick({ verifiedOnly: filters.verifiedOnly ? undefined : true })} data-testid="quick-verified">
           <Icon name="verify" /> {t("catalog.quick.verified")}
@@ -219,6 +249,10 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
               data-testid="verified-only"
             />
             ✔️ {t("catalog.verified_only")}
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={!!draft.withVideo} onChange={(e) => setDraft({ ...draft, withVideo: e.target.checked || undefined })} data-testid="with-video" />
+            🎬 {t("catalog.with_video")}
           </label>
           <label className="check-row">
             <input

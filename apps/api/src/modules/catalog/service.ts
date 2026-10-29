@@ -184,6 +184,9 @@ export class CatalogService {
     if (f.conditions?.length) c.push(inArray(listings.condition, f.conditions));
     if (f.district) c.push(eq(listings.district, f.district));
     if (f.goodGrade) c.push(inArray(listings.grade, GOOD_GRADES));
+    if (f.withVideo) {
+      c.push(sql`exists (select 1 from evidence e where e.listing_id = ${listings.id} and e.kind = 'listing_video')`);
+    }
     if (f.verifiedOnly) {
       c.push(sql`exists (select 1 from ${shops} where ${shops.id} = ${listings.shopId} and ${shops.verified})`);
     }
@@ -717,6 +720,7 @@ export class CatalogService {
       filters.priceMax ? `≤ ${formatUzs(filters.priceMax)}` : null,
       filters.verifiedOnly ? "✔️" : null,
       filters.goodGrade ? "A–B" : null,
+      filters.withVideo ? "🎬" : null,
       filters.belowMarketPct ? t(lang, "searches.below_market_short", { pct: filters.belowMarketPct }) : null,
     ].filter(Boolean);
     return parts.join(" · ") || t(lang, "catalog.title");

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
+import { sql as dsql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { CatalogItem, ListingDto, VideoCheckAi } from "@ishonch/shared";
 import { buildApp } from "../src/app.js";
@@ -68,6 +69,7 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
         identifier_screen: true,
         battery_screen: true,
         account_screen: true,
+        imei_tail: "",
         body_shown: true,
         screen_damage: "none",
         concerns: [],
@@ -86,7 +88,7 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
   const internal = (id: number) => ({ authorization: "Internal internal-secret", "x-telegram-user": JSON.stringify({ id, language_code: "ru" }) });
   const userId = async (tg: number) => (await app.inject({ url: "/me", headers: tma(tg) })).json().id as string;
 
-  async function draft(category: "smartphone" | "monitor" = "smartphone") {
+  async function draft(category: "smartphone" | "monitor" = "smartphone", extra: Partial<typeof listings.$inferInsert> = {}) {
     const [row] = await db
       .insert(listings)
       .values({
@@ -103,6 +105,7 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
         allowedDeliveryModes: ["cod_seller"],
         feePayer: "buyer",
         status: "draft",
+        ...extra,
       })
       .returning();
     const photo = Buffer.from(
@@ -141,6 +144,8 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
       await app.inject({ method: "POST", url: "/me/accept-terms", headers: tma(u), payload: {} });
       await app.inject({ method: "POST", url: "/internal/phone", headers: internal(u), payload: { phone: `+99890${String(u).slice(-7)}` } });
     }
+    // Earlier runs left this seller's listings live: a private seller may have only 10, so start from none.
+    await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved') and seller_user_id = ${await userId(SELLER)}`);
   });
   afterAll(async () => {
     await app?.close();
@@ -174,6 +179,15 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
     expect(published.statusCode, published.body).toBe(200);
     const item = (await app.inject({ url: `/catalog/${phone.id}`, headers: tma(BUYER) })).json() as CatalogItem;
     expect(item.passport!.checks.find((c) => c.code === "video")).toMatchObject({ status: "ok", source: "seller" });
+
+    // The catalog filter «С видео-паспортом» keeps the phone and drops the monitor published without one.
+    const withVideo = (await app.inject({ url: "/catalog?withVideo=true&sort=newest", headers: tma(BUYER) })).json() as { items: CatalogItem[] };
+    const ids = withVideo.items.map((i) => i.listing.id);
+    expect(ids).toContain(phone.id);
+    expect(ids).not.toContain(monitor.id);
+    expect(withVideo.items.every((i) => !!i.listing.video)).toBe(true);
+    const all = (await app.inject({ url: "/catalog?sort=newest", headers: tma(BUYER) })).json() as { items: CatalogItem[] };
+    expect(all.items.map((i) => i.listing.id)).toContain(monitor.id);
   });
 
   it.skipIf(!ffmpeg)("frames are taken from a real clip; the AI verdict lands in the response, the DTO and the passport", async () => {
@@ -212,6 +226,54 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
     expect(fail.json().videoCheck.verdict).toBe("fail");
     const after = (await app.inject({ url: `/catalog/${l.id}`, headers: tma(BUYER) })).json() as CatalogItem;
     expect(after.passport!.checks.find((c) => c.code === "video")).toMatchObject({ status: "fail", source: "ishonch" });
+  });
+
+  it("the media route answers byte ranges (iPhone Safari needs 206 to play a video)", async () => {
+    const l = await draft("smartphone");
+    const clip = Buffer.from(Array.from({ length: 1000 }, (_, i) => i % 251));
+    const up = await upload(l.id, clip);
+    const url = up.json().video as string;
+    const full = await app.inject({ url });
+    expect([full.statusCode, full.headers["accept-ranges"], full.rawPayload.length]).toEqual([200, "bytes", 1000]);
+    const part = await app.inject({ url, headers: { range: "bytes=10-19" } });
+    expect([part.statusCode, part.headers["content-range"], part.rawPayload.equals(clip.subarray(10, 20))]).toEqual([206, "bytes 10-19/1000", true]);
+    const open = await app.inject({ url, headers: { range: "bytes=990-" } });
+    expect([open.statusCode, open.headers["content-range"], open.rawPayload.length]).toEqual([206, "bytes 990-999/1000", 10]);
+    const tail = await app.inject({ url, headers: { range: "bytes=-5" } });
+    expect([tail.statusCode, tail.headers["content-range"]]).toEqual([206, "bytes 995-999/1000"]);
+    const beyond = await app.inject({ url, headers: { range: "bytes=5000-" } });
+    expect([beyond.statusCode, beyond.headers["content-range"]]).toEqual([416, "bytes */1000"]);
+  });
+
+  it.skipIf(!ffmpeg)("the IMEI read on the video is compared with the one the seller entered", async () => {
+    const clip = await import("node:fs").then((fs) => fs.readFileSync(realClip(dir)));
+    const l = await draft("smartphone", { imei: "356938035643809" });
+    seen = { identifier_screen: true, imei_tail: "3809" };
+    const ok = (await upload(l.id, clip)).json().videoCheck;
+    expect(ok.verdict).toBe("pass");
+    const mine = (await app.inject({ url: `/listings/${l.id}`, headers: tma(SELLER) })).json() as ListingDto;
+    expect(mine.videoCheck).toMatchObject({ imeiMatch: true, verdict: "pass" });
+
+    // Another device on the video: the digits differ → a warning for the buyer, the video stays.
+    seen = { identifier_screen: true, imei_tail: "1111" };
+    await upload(l.id, clip);
+    const bad = (await app.inject({ url: `/listings/${l.id}`, headers: tma(SELLER) })).json() as ListingDto;
+    expect(bad.videoCheck).toMatchObject({ imeiMatch: false, verdict: "warn" });
+    expect(bad.videoCheck!.noteRu).toContain("IMEI на видео не совпадает");
+
+    // Nothing readable: no claim either way.
+    seen = { identifier_screen: true, imei_tail: "" };
+    await upload(l.id, clip);
+    const none = (await app.inject({ url: `/listings/${l.id}`, headers: tma(SELLER) })).json() as ListingDto;
+    expect(none.videoCheck!.imeiMatch).toBeNull();
+    // Publishing with the mismatch goes to a moderator instead of straight to the catalog.
+    seen = { identifier_screen: true, imei_tail: "1111" };
+    await upload(l.id, clip);
+    const held = await app.inject({ method: "POST", url: `/listings/${l.id}/publish`, headers: tma(SELLER), payload: {} });
+    expect(held.statusCode, held.body).toBe(200);
+    expect(held.json()).toMatchObject({ moderation: "needs_review" });
+    expect(held.json().listing.status).toBe("pending");
+    seen = {};
   });
 
   it("an AI outage keeps the video and marks the check unknown", async () => {

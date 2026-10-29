@@ -14,6 +14,7 @@ import { confirmDialog } from "../dialogs";
 import { digitsOnly, groupDigits } from "../prefs";
 import { useLang, useT } from "../i18n";
 import { ChecklistEditor } from "./Checklist";
+import { Readiness } from "./Readiness";
 import { VideoCheck } from "./VideoCheck";
 
 interface Props {
@@ -204,6 +205,7 @@ export function ListingEditor({ api, listing, onChange, onSaving }: Props) {
           <span className="hint">{t("sell.imei_hint")}</span>
         </label>
       )}
+      <Readiness listing={listing} />
       <VideoCheck api={api} listing={listing} onChange={onChange} />
 
       <ChecklistEditor category={listing.category} value={listing.checklist} onSave={(checklist) => void save({ checklist })} />

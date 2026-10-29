@@ -46,6 +46,7 @@ export function parseFilters(query: Record<string, unknown>) {
     conditions,
     verifiedOnly: query.verifiedOnly === "true" || query.verifiedOnly === "1" || query.verifiedOnly === true ? true : undefined,
     goodGrade: query.goodGrade === "true" || query.goodGrade === "1" || query.goodGrade === true ? true : undefined,
+    withVideo: query.withVideo === "true" || query.withVideo === "1" || query.withVideo === true ? true : undefined,
     q: typeof query.q === "string" && query.q.trim() ? query.q : undefined,
   });
   return parsed.success ? parsed.data : null;

@@ -6,6 +6,7 @@ import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { LoadError } from "../components/LoadError";
 import { useT } from "../i18n";
 import { readPref, readRecent, writePref } from "../prefs";
+import { inspectLeft, readActiveInspect, type ActiveInspect } from "./Inspect";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
 /** Category circles on the storefront (the catch-all ones live in the catalog filters): icon and tint. */
@@ -35,14 +36,29 @@ interface Props {
   onOpen: (screen: "check" | "sell" | "assistant" | "favorites" | "admin" | "valuation" | "how") => void;
   onCatalog: (filters?: CatalogFilters) => void;
   onListing: (id: string) => void;
+  /** Back to the running 10-minute inspection. */
+  onInspect?: (a: ActiveInspect) => void;
 }
 
 /**
  * Storefront, top to bottom: the blue brand bar with the search, the "how we protect you" hero, category
  * circles, the below-market rail, the tools, recently viewed, fresh listings and the sell banner.
  */
-export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Props) {
+export function Home({ api, staff, remaining, onOpen, onCatalog, onListing, onInspect }: Props) {
   const t = useT();
+  // The 10 minutes at handover are running: the storefront keeps a way back to the checklist.
+  const [active, setActive] = useState(() => readActiveInspect());
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => {
+      const a = readActiveInspect();
+      setActive(a);
+      setTick((n) => n + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  void tick;
   const [fresh, setFresh] = useState<CatalogItem[] | null>(null);
   const [deals, setDeals] = useState<CatalogItem[]>([]);
   const [failed, setFailed] = useState(false);
@@ -114,6 +130,19 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing }: Pr
           </button>
         </form>
       </header>
+
+      {active && onInspect && (
+        <button className="inspect-banner" onClick={() => onInspect(active)} data-testid="inspect-banner">
+          <span className="promise-icon" aria-hidden>
+            <Icon name="timer" />
+          </span>
+          <span className="promise-text">
+            <strong>{t("inspect.active", { time: inspectLeft(active) })}</strong>
+            <span className="hint">{t("inspect.active_hint")}</span>
+          </span>
+          <Icon name="chevron" />
+        </button>
+      )}
 
       {howTo && (
         <section className="hero" data-testid="trust-intro">

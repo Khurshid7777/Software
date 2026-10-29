@@ -318,6 +318,10 @@ export interface VideoCheckResult {
   /** Clip length, seconds, when known. */
   seconds: number | null;
   at: string;
+  /** Last 4 IMEI digits the AI read on the video's identifier screen, if readable. */
+  imeiTailRead?: string | null;
+  /** Whether those digits match the IMEI the seller entered (set when the listing is shown); null = cannot tell. */
+  imeiMatch?: boolean | null;
 }
 /** How many listings fit on the compare screen («Versus»). */
 export const COMPARE_MAX = 4;

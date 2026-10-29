@@ -122,8 +122,10 @@ export async function checkVideo(
       ? "pass"
       : "warn";
   const concerns = data.concerns.slice(0, 3).join("; ");
+  const tail = data.imei_tail.replace(/\D/g, "");
   return {
     verdict,
+    imeiTailRead: data.identifier_screen && tail.length >= 4 ? tail.slice(-4) : null,
     seen: seen.filter((s) => wanted.includes(s)),
     noteRu: [data.note_ru.trim(), concerns].filter(Boolean).join(" ").slice(0, 300),
     noteUz: data.note_uz.trim().slice(0, 300),

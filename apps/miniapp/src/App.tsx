@@ -438,6 +438,7 @@ export function App({ env }: { env: TelegramEnv }) {
             onOpen={(name) => go({ name } as Screen)}
             onCatalog={(filters) => go({ name: "catalog", filters })}
             onListing={(id) => go({ name: "listing", id })}
+            onInspect={(a) => go({ name: "inspect", category: a.category, listingId: a.listingId, title: a.title })}
           />
         );
     }
