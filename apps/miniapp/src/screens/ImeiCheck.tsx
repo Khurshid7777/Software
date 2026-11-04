@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { isValidImei, normalizeImei, type ImeiCheckDto } from "@ishonch/shared/client";
+import { isValidImei, normalizeImei, type FaqId, type ImeiCheckDto } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
+import { FaqLink } from "../components/FaqLink";
 import { Icon, type IconName } from "../components/Icon";
 import { useT } from "../i18n";
 import { haptic } from "../telegram";
@@ -8,7 +9,7 @@ import { haptic } from "../telegram";
 const ICON: Record<ImeiCheckDto["verdict"], IconName> = { invalid: "alert", danger: "cross", caution: "alert", clean: "ok" };
 
 /** «Проверка IMEI»: any phone, before it is bought anywhere. Answers with a verdict and counts, never a name. */
-export function ImeiCheck({ api, onInspect }: { api: Api; onInspect: () => void }) {
+export function ImeiCheck({ api, onInspect, onFaq }: { api: Api; onInspect: () => void; onFaq?: (id: FaqId) => void }) {
   const t = useT();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -105,6 +106,10 @@ export function ImeiCheck({ api, onInspect }: { api: Api; onInspect: () => void 
           <p className="hint center">{t("imei.left", { n: res.checksLeft })}</p>
         </section>
       )}
+      <div className="faq-links stack-tight">
+        <FaqLink id="imei_check" onOpen={onFaq} />
+        <FaqLink id="imei_reg" onOpen={onFaq} />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatUzs, type AdminMetrics, type FunnelStep } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../../api";
+import { useT } from "../../i18n";
 import { saveFile } from "../../dialogs";
 import { STEP_LABEL, FEATURE_LABEL, CANCEL_LABEL, MODE_LABEL, USAGE_LABEL } from "./labels";
 
@@ -8,6 +9,7 @@ const PERIODS = [7, 30, 90] as const;
 
 /** Key numbers, buyer/seller funnels, orders, AI spend and a day-by-day table. Staff UI is Russian-only. */
 export function Dashboard({ api }: { api: Api }) {
+  const t = useT();
   const [days, setDays] = useState<number>(30);
   const [m, setM] = useState<AdminMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +96,20 @@ export function Dashboard({ api }: { api: Api }) {
               ))
             )}
           </section>
+          {m.faqVotes.length > 0 && (
+            <section className="card stack-tight" data-testid="faq-votes">
+              <h3>❓ Ответы, которые не помогли</h3>
+              {m.faqVotes.map((v) => (
+                <div key={v.id} className="row between">
+                  <span>{t(`faq.${v.id}.q` as "faq.money.q")}</span>
+                  <span className="num">
+                    {v.unhelpful} / {v.helpful}
+                  </span>
+                </div>
+              ))}
+              <span className="hint">Не помогло / помогло. Начните сверху: эти ответы стоит переписать.</span>
+            </section>
+          )}
           <Funnel title="Воронка покупателя" steps={m.buyerFunnel} />
           <Funnel title="Воронка продавца" steps={m.sellerFunnel} />
           <Funnel title="Сделки при встрече" steps={m.meetingFunnel} />

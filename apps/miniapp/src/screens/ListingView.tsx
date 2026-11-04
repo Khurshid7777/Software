@@ -11,6 +11,7 @@ import {
   minOffer,
   type CatalogItem,
   type ComplaintReason,
+  type FaqId,
   type ListingDto,
   type OfferDto,
   type ReviewDto,
@@ -27,6 +28,7 @@ import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { BrandLine, MarketBadge, TrustBadge } from "../components/ItemCard";
 import { SellerFacts } from "../components/SellerFacts";
+import { FaqLink } from "../components/FaqLink";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
 import { LoadError } from "../components/LoadError";
@@ -49,6 +51,7 @@ interface Props {
   onHow?: (category: ListingDto["category"]) => void;
   /** Opens «Versus» (after the listing was added, or with the closest similar ones). */
   onCompare?: () => void;
+  onFaq?: (id: FaqId) => void;
 }
 
 /** Why a similar listing may be the better pick: cheaper, a better grade, inspected, has a video passport. */
@@ -60,7 +63,7 @@ function similarNote(t: ReturnType<typeof useT>, base: ListingDto, other: Listin
   return null;
 }
 
-export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, onHow, onCompare }: Props) {
+export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, onHow, onCompare, onFaq }: Props) {
   const t = useT();
   const lang = useLang();
   const compareIds = useCompare();
@@ -253,6 +256,12 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
       </div>
       </div>
       {!own && l.status === "active" && <BuyerPromise onOpen={onHow ? () => onHow(l.category) : undefined} />}
+      {!own && l.status === "active" && (
+        <div className="faq-links stack-tight">
+          <FaqLink id="money" onOpen={onFaq} />
+          <FaqLink id="seller" onOpen={onFaq} />
+        </div>
+      )}
       {/* At a glance, like a marketplace product page: what protects the buyer on this very item. */}
       <div className="pills" data-testid="listing-pills">
         {l.status === "active" && !own && (

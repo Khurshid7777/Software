@@ -13,6 +13,8 @@ export interface AdminMetrics {
   checks: { users: number };
   /** Distinct users per Mini App screen / action (UI_EVENTS) in the period. */
   usage: Array<{ name: string; users: number }>;
+  /** FAQ answers people voted on, the ones that did not help first (faq id from FAQ_IDS). */
+  faqVotes: Array<{ id: string; helpful: number; unhelpful: number }>;
   buyerFunnel: FunnelStep[];
   sellerFunnel: FunnelStep[];
   /** Stage 21: deals that happen in person — contact → meeting asked → agreed → bought. */

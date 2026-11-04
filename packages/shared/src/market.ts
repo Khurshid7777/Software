@@ -331,6 +331,8 @@ export const VIDEO_KEEP_DAYS_AFTER_SALE = 30;
 export const UI_EVENTS = [
   "ui_how_open",
   "ui_faq_open",
+  "ui_faq_helpful",
+  "ui_faq_unhelpful",
   "ui_imei_open",
   "ui_compare_open",
   "ui_inspect_start",

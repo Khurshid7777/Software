@@ -1,6 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { eq } from "drizzle-orm";
-import { AWAY_MAX_DAYS, GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, UI_EVENTS, t, type Lang, type NotifyType } from "@ishonch/shared";
+import { AWAY_MAX_DAYS, GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, UI_EVENTS, isFaqId, t, type Lang, type NotifyType } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import { users } from "../../db/schema.js";
 import type { Notifier } from "../../telegram/publisher.js";
@@ -66,9 +66,13 @@ export function userRoutes(
 
   // The Mini App reports which screens and actions people use (a name from UI_EVENTS, nothing else is stored).
   app.post("/events", { preHandler: requireUser }, async (req, reply) => {
-    const name = (req.body as { name?: unknown } | null)?.name;
+    const body = (req.body ?? {}) as { name?: unknown; id?: unknown };
+    const name = body.name;
     if (typeof name !== "string" || !(UI_EVENTS as readonly string[]).includes(name)) return reply.code(400).send({ error: "bad_request" });
-    await repo.event(req.user!.id, name, {});
+    // A vote on a FAQ answer names the answer (an id from our own list, never free text).
+    const vote = name === "ui_faq_helpful" || name === "ui_faq_unhelpful";
+    if (vote && !isFaqId(body.id)) return reply.code(400).send({ error: "bad_request" });
+    await repo.event(req.user!.id, name, vote ? { id: body.id as string } : {});
     return { ok: true };
   });
 

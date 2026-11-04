@@ -11,10 +11,12 @@ import {
   type DeliveryMode,
   type DeliveryQuote,
   type District,
+  type FaqId,
   type ListingDto,
 } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
 import { BuyerPromise } from "../components/Promise";
+import { FaqLink } from "../components/FaqLink";
 import { useLang, useT } from "../i18n";
 import { sharePhoneAndWait } from "../phone";
 import { useLeaveGuard } from "../leave";
@@ -26,10 +28,11 @@ interface Props {
   listing: ListingDto;
   onDone: (orderId: string) => void;
   onHow?: () => void;
+  onFaq?: (id: FaqId) => void;
 }
 
 /** "Buy with delivery": mode, district and address → price breakdown → order request to the seller. */
-export function Checkout({ api, listing, onDone, onHow }: Props) {
+export function Checkout({ api, listing, onDone, onHow, onFaq }: Props) {
   const t = useT();
   const lang = useLang();
   const modes = listing.allowedDeliveryModes;
@@ -278,6 +281,11 @@ export function Checkout({ api, listing, onDone, onHow }: Props) {
 
       {district && !quote && !error && <p className="hint center">⏳ {t("checkout.calculating")}</p>}
       <BuyerPromise onOpen={onHow} />
+      <div className="faq-links stack-tight">
+        <FaqLink id="notfit" onOpen={onFaq} />
+        <FaqLink id="paymodes" onOpen={onFaq} />
+        <FaqLink id="address" onOpen={onFaq} />
+      </div>
       <p className="hint-card" data-testid="checkout-inspection">
         {t("checkout.inspection", { min: INSPECTION_MINUTES })}
         <br />

@@ -36,7 +36,7 @@ test("catalog filter «Класс A–B» keeps only good items", async ({ page 
   const before = await page.getByTestId("item-card").count();
   await page.getByRole("button", { name: /Фильтры/ }).click();
   await page.getByTestId("good-grade").check();
-  await page.getByRole("button", { name: /Показать|Применить/ }).click();
+  await page.getByTestId("apply-filters").click();
   await expect(page.getByTestId("item-card").first()).toBeVisible();
   const grades = await page.getByTestId("item-card").getByTestId("grade-chip").allTextContents();
   expect(grades.length).toBeGreaterThan(0);

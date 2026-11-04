@@ -239,3 +239,51 @@ test("an order shows its steps and what to do next, for the buyer and for the se
   await open(page, SHOP_OWNER, `startapp=order_${order.id}`);
   await expect(page.locator(`#order-${order.id}`).getByTestId("order-next")).toContainText("xaridor uni qabul qilishda");
 });
+
+test("FAQ: search, topics, an answer's button, votes, a link from checkout and a deep link", async ({ page }) => {
+  await open(page, BUYER, "screen=faq");
+  await expect(page.getByTestId("faq")).toBeVisible();
+  const items = page.locator("details.faq-item");
+  expect(await items.count()).toBeGreaterThanOrEqual(50);
+
+  // Search across questions and answers, both words must be there.
+  await page.getByTestId("faq-search").fill("предоплата");
+  await expect(page.getByTestId("faq-prepay")).toBeVisible();
+  await expect(page.getByTestId("faq-count")).toContainText("Найдено");
+  expect(await items.count()).toBeLessThan(10);
+  await page.getByTestId("faq-search").fill("ничегонетакого");
+  await expect(page.getByTestId("faq-none")).toBeVisible();
+  await page.getByTestId("faq-none").getByRole("button", { name: "Очистить поиск" }).click();
+  await expect(page.getByTestId("faq-search")).toHaveValue("");
+
+  // A topic narrows the list; an answer carries its own button.
+  await page.getByTestId("faq-group-video").click();
+  await expect(page.getByTestId("faq-video_how")).toBeVisible();
+  await expect(page.getByTestId("faq-money")).toHaveCount(0);
+  await page.getByTestId("faq-group-safety").click();
+  await page.getByTestId("faq-stolen").locator("summary").click();
+  await page.getByTestId("faq-action-stolen").click();
+  await expect(page.getByTestId("imei-check")).toBeVisible();
+
+  // Numbers in the answers come from the constants.
+  await open(page, BUYER, "startapp=faq_offer");
+  await expect(page.getByTestId("faq-offer")).toHaveAttribute("open", "");
+  await expect(page.getByTestId("faq-offer")).toContainText("не ниже 50%");
+  await expect(page.getByTestId("faq-offer")).toContainText("24 ч");
+
+  // Votes are remembered for the visit.
+  await page.getByTestId("faq-yes-offer").click();
+  await expect(page.getByTestId("faq-vote-offer")).toContainText("Спасибо");
+  await expect(page.getByTestId("faq-yes-offer")).toHaveCount(0);
+});
+
+test("hesitant screens link to the matching answer", async ({ page }) => {
+  const item = (await catalog()).find((i) => i.listing.titleRu.includes("Ryzen"))!;
+  await open(page, BUYER, `startapp=listing_${item.listing.id}`);
+  await page.getByTestId("faq-link-money").click();
+  await expect(page.getByTestId("faq-money")).toHaveAttribute("open", "");
+  await open(page, BUYER, "screen=imei");
+  await page.getByTestId("faq-link-imei_reg").click();
+  await expect(page.getByTestId("faq-imei_reg")).toHaveAttribute("open", "");
+  await expect(page.getByTestId("faq-imei_reg")).toContainText("*1170#");
+});

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { listingTitle, loadLanguage, normalizeLang, t, type CatalogFilters, type CheckCategory, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared/client";
+import { isFaqId, type FaqAction, type FaqId, listingTitle, loadLanguage, normalizeLang, t, type CatalogFilters, type CheckCategory, type CheckResult, type Lang, type ListingDto } from "@ishonch/shared/client";
 import { ApiError, createApi, SESSION_EXPIRED_EVENT, setApiLang, type Me } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { alertDialog, closeApp, confirmDialog } from "./dialogs";
@@ -39,7 +39,7 @@ type Screen =
   | { name: "valuation" }
   | { name: "compare" }
   | { name: "imei" }
-  | { name: "faq" }
+  | { name: "faq"; open?: FaqId }
   | { name: "how"; category?: CheckCategory }
   | { name: "inspect"; category: CheckCategory; listingId?: string; title?: string }
   | { name: "admin" };
@@ -118,6 +118,8 @@ function initialScreen(startParam?: string): Screen {
   if (startParam === "screen_compare") return { name: "compare" };
   if (startParam === "screen_imei") return { name: "imei" };
   if (startParam === "screen_faq") return { name: "faq" };
+  const fq = startParam?.match(/^faq_([a-z_]+)$/);
+  if (fq && isFaqId(fq[1])) return { name: "faq", open: fq[1] };
   return { name: "home" };
 }
 
@@ -149,6 +151,19 @@ export function App({ env }: { env: TelegramEnv }) {
       setStack((st) => [...st, entry(s)]);
     },
     [top.key],
+  );
+  /** What an answer's own button does. */
+  const faqAction = useCallback(
+    (a: FaqAction) => {
+      if (a === "catalog") go({ name: "catalog" });
+      else if (a === "compare") go({ name: "compare" });
+      else if (a === "valuation") go({ name: "valuation" });
+      else if (a === "check") go({ name: "check" });
+      else if (a === "imei") go({ name: "imei" });
+      else if (a === "sell") go({ name: "sell" });
+      else go({ name: "inspect", category: "smartphone" });
+    },
+    [go],
   );
   /** Replaces the current screen (after checkout → orders, Back leads to the listing, not the form). */
   const replace = useCallback((s: Screen) => {
@@ -356,11 +371,20 @@ export function App({ env }: { env: TelegramEnv }) {
             onSeller={(id) => go({ name: "seller", id })}
             onHow={(category) => go({ name: "how", category })}
             onCompare={() => go({ name: "compare" })}
+            onFaq={(id) => go({ name: "faq", open: id })}
           />
         );
         break;
       case "checkout":
-        body = <Checkout api={api} listing={screen.listing} onDone={(id) => replace({ name: "orders", focusId: id })} onHow={() => go({ name: "how", category: screen.listing.category })} />;
+        body = (
+          <Checkout
+            api={api}
+            listing={screen.listing}
+            onDone={(id) => replace({ name: "orders", focusId: id })}
+            onHow={() => go({ name: "how", category: screen.listing.category })}
+            onFaq={(id) => go({ name: "faq", open: id })}
+          />
+        );
         break;
       case "admin":
         body =
@@ -418,10 +442,17 @@ export function App({ env }: { env: TelegramEnv }) {
         body = <Compare api={api} onOpen={(id) => go({ name: "listing", id })} onCatalog={() => go({ name: "catalog" })} />;
         break;
       case "faq":
-        body = <Faq onHow={() => go({ name: "how" })} />;
+        body = (
+          <Faq
+            open={screen.open}
+            onHow={() => go({ name: "how" })}
+            onAction={faqAction}
+            onVote={(id, helpful) => api.track(helpful ? "ui_faq_helpful" : "ui_faq_unhelpful", id)}
+          />
+        );
         break;
       case "imei":
-        body = <ImeiCheck api={api} onInspect={() => go({ name: "inspect", category: "smartphone" })} />;
+        body = <ImeiCheck api={api} onInspect={() => go({ name: "inspect", category: "smartphone" })} onFaq={(id) => go({ name: "faq", open: id })} />;
         break;
       case "how":
         body = (
@@ -434,7 +465,7 @@ export function App({ env }: { env: TelegramEnv }) {
         );
         break;
       case "inspect":
-        body = <Inspect category={screen.category} listingId={screen.listingId} title={screen.title} onStart={() => api.track("ui_inspect_start")} />;
+        body = <Inspect category={screen.category} listingId={screen.listingId} title={screen.title} onStart={() => api.track("ui_inspect_start")} onFaq={(id) => go({ name: "faq", open: id })} />;
         break;
       case "seller":
         body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;

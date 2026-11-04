@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { INSPECTION_MINUTES, inspectionChecklist, type CheckCategory } from "@ishonch/shared/client";
+import { INSPECTION_MINUTES, inspectionChecklist, type CheckCategory, type FaqId } from "@ishonch/shared/client";
+import { FaqLink } from "../components/FaqLink";
 import { Icon } from "../components/Icon";
 import { useLang, useT } from "../i18n";
 import { readPref, writePref } from "../prefs";
@@ -32,7 +33,7 @@ function read(key: string): Saved {
  * checklist to tick off. Ishonch changes no status here and moves no money: it only helps the buyer not to forget
  * a step; the decision ("беру" / "не беру") is told to the courier. Progress is kept on the device per listing.
  */
-export function Inspect({ category, listingId, title, onStart }: { category: CheckCategory; listingId?: string; title?: string; onStart?: () => void }) {
+export function Inspect({ category, listingId, title, onStart, onFaq }: { category: CheckCategory; listingId?: string; title?: string; onStart?: () => void; onFaq?: (id: FaqId) => void }) {
   const t = useT();
   const lang = useLang();
   const items = useMemo(() => inspectionChecklist(lang, category), [lang, category]);
@@ -138,6 +139,10 @@ export function Inspect({ category, listingId, title, onStart }: { category: Che
       <p className={allDone ? "hint-card verdict-ok" : "hint-card"} data-testid="inspect-verdict">
         <Icon name={allDone ? "ok" : "alert"} /> {allDone ? t("inspect.all_ok") : over ? t("inspect.over_not_ok") : t("inspect.not_ok")}
       </p>
+      <div className="faq-links stack-tight">
+        <FaqLink id="notfit" onOpen={onFaq} />
+        <FaqLink id="refund" onOpen={onFaq} />
+      </div>
       {!listingId && <p className="hint center">{t("inspect.demo_note")}</p>}
     </div>
   );

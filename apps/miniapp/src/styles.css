@@ -548,6 +548,14 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .link-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; background: var(--brand); color: var(--brand-ink); border-radius: var(--pill); min-height: 48px; font-weight: 600; }
 .link-button .icon { width: 18px; height: 18px; }
 
+/* FAQ: topics, group titles, votes, and the small links next to hesitant screens */
+.faq-group-title { margin-top: 6px; }
+.faq-vote { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 12px; }
+.faq-vote .chip { min-height: 34px; }
+.faq-links { display: flex; flex-direction: column; gap: 6px; }
+.faq-link { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; text-align: left; color: var(--brand-fg); font-size: 13px; font-weight: 500; min-height: 32px; }
+.faq-link .icon { width: 16px; height: 16px; flex-shrink: 0; }
+
 /* ---- 13g. «Ishonch против обычной доски» ---- */
 .vs-table { display: flex; flex-direction: column; gap: 8px; }
 .vs-head, .vs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

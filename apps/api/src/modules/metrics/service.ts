@@ -63,6 +63,14 @@ export class MetricsService {
         and name in (${sql.join([...BUYER_FUNNEL, "listing_draft_created", "listing_published", "check_created"].map((n) => sql`${n}`), sql`, `)})
       group by name`);
     const byEvent = new Map(eventUsers.map((r) => [String(r.name), num(r.n)]));
+    // FAQ answers by votes: the ones that did not help come first, they are the ones to rewrite.
+    const faqVotes = await this.rows(sql`
+      select props->>'id' as id,
+        count(*) filter (where name = 'ui_faq_helpful') as helpful,
+        count(*) filter (where name = 'ui_faq_unhelpful') as unhelpful
+      from events
+      where created_at >= ${ts(from)} and name in ('ui_faq_helpful', 'ui_faq_unhelpful') and props->>'id' is not null
+      group by props->>'id' order by unhelpful desc, helpful desc limit 8`);
     const usage = await this.rows(sql`
       select name, count(distinct user_id) as n from events
       where created_at >= ${ts(from)} and user_id is not null
@@ -181,6 +189,7 @@ export class MetricsService {
       },
       checks: { users: byEvent.get("check_created") ?? 0 },
       usage: usage.map((r) => ({ name: String(r.name), users: num(r.n) })),
+      faqVotes: faqVotes.map((r) => ({ id: String(r.id), helpful: num(r.helpful), unhelpful: num(r.unhelpful) })),
       meetingFunnel: funnel([
         ["buyer_contacted_seller", byEvent.get("buyer_contacted_seller") ?? 0],
         ["meeting_requested", num(meetings.requested)],

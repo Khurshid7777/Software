@@ -22,7 +22,9 @@ export const STEP_LABEL: Record<string, string> = {
 
 export const USAGE_LABEL: Record<string, string> = {
   ui_how_open: "«Как проходит проверка»",
-  ui_faq_open: "«Вопросы и ответы»",
+  ui_faq_open: "«Вопросы и ответы»: открыли",
+  ui_faq_helpful: "«Вопросы и ответы»: «помогло»",
+  ui_faq_unhelpful: "«Вопросы и ответы»: «не помогло»",
   ui_imei_open: "Проверка IMEI: открыли экран",
   imei_checked: "Проверка IMEI: проверили номер",
   ui_compare_open: "Сравнение: открыли",

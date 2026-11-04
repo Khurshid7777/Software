@@ -183,6 +183,10 @@ Realistic product photo of a used <ITEM>, lying on a light neutral table, soft d
 | `demo-coffee_machine.png` | silver-black bean-to-cup coffee machine on a kitchen counter |
 | `demo-washer.png` | white front-loading washing machine in a bathroom |
 | `demo-fridge.png` | tall silver two-door fridge in a kitchen |
+| `demo-tab_s7.png` | tablet with a stylus pen next to it, on a desk |
+| `demo-watch_se.png` | smartwatch with a sport band, lying on a table |
+| `demo-sony_xm4.png` | over-ear wireless headphones with a carrying case |
+| `demo-ssd_980.png` | M.2 NVMe SSD with a small heatsink, on an anti-static mat |
 
 ---
 

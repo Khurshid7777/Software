@@ -14,5 +14,6 @@ export * from "./search.js";
 export * from "./delivery.js";
 export * from "./market.js";
 export * from "./passport.js";
+export * from "./faq.js";
 export * from "./admin.js";
 export type * from "./schemas.js";

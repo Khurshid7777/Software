@@ -191,6 +191,15 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
     expect((await send("ui_faq_open", null)).statusCode).toBe(401);
     expect((await send("drop table users")).statusCode).toBe(400);
     expect((await send(42)).statusCode).toBe(400);
+    // A vote on a FAQ answer must name one of our own answers.
+    const vote = (name: string, id?: unknown) => app.inject({ method: "POST", url: "/events", headers: tma(BUYER), payload: { name, id } });
+    expect((await vote("ui_faq_unhelpful", "money")).statusCode).toBe(200);
+    expect((await vote("ui_faq_helpful", "notfit")).statusCode).toBe(200);
+    expect((await vote("ui_faq_unhelpful")).statusCode).toBe(400);
+    expect((await vote("ui_faq_unhelpful", "'; drop table users; --")).statusCode).toBe(400);
+    expect((await vote("ui_faq_open", "money")).statusCode).toBe(200); // other events ignore the id
+    const [stored] = await db.execute(dsql`select props from events where name = 'ui_faq_unhelpful' and user_id = ${await userId(BUYER)} order by id desc limit 1`);
+    expect((stored as { props: { id: string } }).props).toEqual({ id: "money" });
     const [row] = await db.execute(dsql`select count(*)::int as n from events where name = 'ui_faq_open' and user_id = ${await userId(BUYER)}`);
     expect((row as { n: number }).n).toBeGreaterThanOrEqual(1);
   });
