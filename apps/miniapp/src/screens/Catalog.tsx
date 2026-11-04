@@ -112,6 +112,8 @@ export function Catalog({ api, initial, onOpen, onFiltersChange, onHow }: Props)
   /** One-tap filters under the categories; they use the same fields as the filter panel and keep it in sync. */
   function quick(patch: Partial<CatalogFilters>) {
     haptic("selection");
+    // Counted only when a filter is switched on.
+    if (Object.values(patch).some((v) => v !== undefined)) api.track("withVideo" in patch ? "ui_video_filter" : "ui_quick_filter");
     setFilters((f) => ({ ...f, ...patch }));
     setDraft((d) => ({ ...d, ...patch }));
   }

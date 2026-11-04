@@ -1,6 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { eq } from "drizzle-orm";
-import { AWAY_MAX_DAYS, GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, t, type Lang, type NotifyType } from "@ishonch/shared";
+import { AWAY_MAX_DAYS, GUARANTEE_DAYS, LANGS, NOTIFY_TYPES, UI_EVENTS, t, type Lang, type NotifyType } from "@ishonch/shared";
 import type { Repo } from "../../db/repo.js";
 import { users } from "../../db/schema.js";
 import type { Notifier } from "../../telegram/publisher.js";
@@ -62,6 +62,14 @@ export function userRoutes(
     await repo.db.update(users).set({ awayUntil: until }).where(eq(users.id, req.user!.id));
     await repo.event(req.user!.id, until ? "away_on" : "away_off");
     return { awayUntil: until?.toISOString() ?? null };
+  });
+
+  // The Mini App reports which screens and actions people use (a name from UI_EVENTS, nothing else is stored).
+  app.post("/events", { preHandler: requireUser }, async (req, reply) => {
+    const name = (req.body as { name?: unknown } | null)?.name;
+    if (typeof name !== "string" || !(UI_EVENTS as readonly string[]).includes(name)) return reply.code(400).send({ error: "bad_request" });
+    await repo.event(req.user!.id, name, {});
+    return { ok: true };
   });
 
   app.post("/me/accept-terms", { preHandler: requireUser }, async (req) => {

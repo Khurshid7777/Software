@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { sql as dsql } from "drizzle-orm";
+import { eq, sql as dsql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import type { CatalogItem, ListingDto, VideoCheckAi } from "@ishonch/shared";
+import { VIDEO_CHECKS_PER_DAY, type CatalogItem, type ListingDto, type VideoCheckAi } from "@ishonch/shared";
 import { buildApp } from "../src/app.js";
 import { buildInitData } from "../src/auth/telegram.js";
 import { loadConfig } from "../src/config.js";
@@ -88,6 +88,21 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
   const internal = (id: number) => ({ authorization: "Internal internal-secret", "x-telegram-user": JSON.stringify({ id, language_code: "ru" }) });
   const userId = async (tg: number) => (await app.inject({ url: "/me", headers: tma(tg) })).json().id as string;
 
+  /** A valid IMEI of our own (14 digits + the Luhn check digit), different every time. */
+  let imeiSeq = 0;
+  const newImei = () => {
+    const base = `35${String(Date.now()).slice(-8)}${String(++imeiSeq).padStart(4, "0")}`.slice(0, 14);
+    let sum = 0;
+    for (let i = 0; i < 14; i++) {
+      let d = Number(base[i]);
+      if (i % 2 === 1) {
+        d *= 2;
+        if (d > 9) d -= 9;
+      }
+      sum += d;
+    }
+    return base + String((10 - (sum % 10)) % 10);
+  };
   async function draft(category: "smartphone" | "monitor" = "smartphone", extra: Partial<typeof listings.$inferInsert> = {}) {
     const [row] = await db
       .insert(listings)
@@ -105,6 +120,8 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
         allowedDeliveryModes: ["cod_seller"],
         feePayer: "buyer",
         status: "draft",
+        // With the video passport required, a phone also needs its IMEI (the video is compared with it).
+        ...(category === "smartphone" ? { imei: newImei() } : {}),
         ...extra,
       })
       .returning();
@@ -146,12 +163,54 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
     }
     // Earlier runs left this seller's listings live: a private seller may have only 10, so start from none.
     await db.execute(dsql`update listings set status = 'archived' where status in ('active', 'pending', 'reserved') and seller_user_id = ${await userId(SELLER)}`);
+    // The daily AI allowance is counted per day: start every run with all of it.
+    await db.execute(dsql`delete from events where name = 'video_check' and user_id = ${await userId(SELLER)}`);
   });
   afterAll(async () => {
     await app?.close();
     await close?.();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("a phone also needs its IMEI when the video passport is required", async () => {
+    const l = await draft("smartphone", { imei: null });
+    await upload(l.id, Buffer.alloc(30_000, 5));
+    const noImei = await app.inject({ method: "POST", url: `/listings/${l.id}/publish`, headers: tma(SELLER), payload: {} });
+    expect(noImei.statusCode).toBe(400);
+    expect(noImei.json()).toMatchObject({ error: "need_imei" });
+    expect(noImei.json().message).toContain("IMEI");
+    await db.update(listings).set({ imei: newImei() }).where(eq(listings.id, l.id));
+    const ok = await app.inject({ method: "POST", url: `/listings/${l.id}/publish`, headers: tma(SELLER), payload: {} });
+    expect(ok.statusCode, ok.body).toBe(200);
+  });
+
+  it("usage events: only known names are stored, and only for signed-in users", async () => {
+    const send = (name: unknown, who: number | null = BUYER) =>
+      app.inject({ method: "POST", url: "/events", headers: who ? tma(who) : {}, payload: { name } });
+    expect((await send("ui_faq_open")).statusCode).toBe(200);
+    expect((await send("ui_faq_open", null)).statusCode).toBe(401);
+    expect((await send("drop table users")).statusCode).toBe(400);
+    expect((await send(42)).statusCode).toBe(400);
+    const [row] = await db.execute(dsql`select count(*)::int as n from events where name = 'ui_faq_open' and user_id = ${await userId(BUYER)}`);
+    expect((row as { n: number }).n).toBeGreaterThanOrEqual(1);
+  });
+
+  it.skipIf(!ffmpeg)("the AI reads at most VIDEO_CHECKS_PER_DAY videos a day per seller; the rest are stored unread", async () => {
+    const clip = await import("node:fs").then((fs) => fs.readFileSync(realClip(dir)));
+    const l = await draft("smartphone");
+    seen = {};
+    aiCalls.length = 0;
+    const verdicts: string[] = [];
+    for (let i = 0; i < VIDEO_CHECKS_PER_DAY + 2; i++) verdicts.push((await upload(l.id, clip)).json().videoCheck.verdict);
+    expect(aiCalls).toHaveLength(VIDEO_CHECKS_PER_DAY);
+    expect(verdicts.slice(0, VIDEO_CHECKS_PER_DAY).every((v) => v === "pass")).toBe(true);
+    expect(verdicts.slice(VIDEO_CHECKS_PER_DAY)).toEqual(["unknown", "unknown"]);
+    // The video is still there and counts as the passport.
+    const mine = (await app.inject({ url: `/listings/${l.id}`, headers: tma(SELLER) })).json() as ListingDto;
+    expect(mine.video).toBeTruthy();
+    // Cleanup of the allowance for the next tests of this file.
+    await db.execute(dsql`delete from events where name = 'video_check' and user_id = ${await userId(SELLER)}`);
+  }, 90_000);
 
   it("config: VIDEO_REQUIRED is on in production only unless set", () => {
     expect(loadConfig({ NODE_ENV: "production", BOT_TOKEN: "x", INTERNAL_API_TOKEN: "a".repeat(40) } as NodeJS.ProcessEnv).VIDEO_REQUIRED).toBe(true);

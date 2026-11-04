@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MAX_INSPECTION_PHOTOS, formatUzs, inspectionChecks, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
+import { MAX_INSPECTION_PHOTOS, formatUzs, inspectionChecks, videoSteps, type DisputeResolution, operatorNextStatuses, type InspectionCheck, type OrderStatus } from "@ishonch/shared/client";
 import { ApiError, apiUrl, compressImage, type AdminDispute, type Api, type ChatReport, type ComplaintRow, type OperatorOrder, type QueueItem } from "../../api";
 import { confirmDialog } from "../../dialogs";
 import { Toast } from "../../components/Toast";
+import { VideoVerdict } from "../../components/VideoVerdict";
 import { INSPECTION_LABEL, MODE_LABEL, NEXT_LABEL, REASON_LABEL, STATUS_LABEL, districtName } from "./labels";
 
 function useLoad<T>(load: () => Promise<T>) {
@@ -46,6 +47,12 @@ export function ModerationQueue({ api, onOpen }: { api: Api; onOpen: (id: string
               </span>
             </span>
           </button>
+          {l.video && (
+            <div className="stack-tight" data-testid="queue-video">
+              <video className="video-check" src={apiUrl(l.video)} controls playsInline preload="metadata" />
+              {l.videoCheck && <VideoVerdict check={l.videoCheck} steps={videoSteps(l.category)} />}
+            </div>
+          )}
           <ul className="plain">
             {(moderation?.reasons ?? []).map((r, i) => (
               <li key={i}>

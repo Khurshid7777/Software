@@ -20,6 +20,19 @@ export const STEP_LABEL: Record<string, string> = {
   listing_sold_platform: "Продали через Ishonch",
 };
 
+export const USAGE_LABEL: Record<string, string> = {
+  ui_how_open: "«Как проходит проверка»",
+  ui_faq_open: "«Вопросы и ответы»",
+  ui_imei_open: "Проверка IMEI: открыли экран",
+  imei_checked: "Проверка IMEI: проверили номер",
+  ui_compare_open: "Сравнение: открыли",
+  ui_compare_ai: "Сравнение: спросили AI",
+  ui_inspect_start: "Осмотр: запустили таймер",
+  ui_quick_filter: "Каталог: быстрые фильтры",
+  ui_video_filter: "Каталог: «С видео-паспортом»",
+  ui_theme_change: "Сменили тему",
+};
+
 export const FEATURE_LABEL: Record<string, string> = {
   "check.extract": "Проверка: разбор",
   "check.report": "Проверка: отчёт",

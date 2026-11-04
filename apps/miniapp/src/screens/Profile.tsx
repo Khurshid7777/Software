@@ -1,4 +1,4 @@
-import { COMPARE_MAX, GUARANTEE_DAYS, INSPECTION_MINUTES, type Lang } from "@ishonch/shared/client";
+import { COMPARE_MAX, GUARANTEE_DAYS, INSPECTION_MINUTES, type Lang, type UiEvent } from "@ishonch/shared/client";
 import { useLang, useT } from "../i18n";
 import { useState } from "react";
 import { DocLink } from "../components/DocLink";
@@ -18,12 +18,14 @@ interface Props {
   onOpen: (s: Target) => void;
   onLanguage: (lang: Lang) => void;
   onDeleteAccount: () => void;
+  /** Usage events (which screens are used). */
+  onTrack?: (e: UiEvent) => void;
   /** «Скачать мои данные»: the bot sends a JSON file. */
   onExport: () => void;
 }
 
 /** Everything personal: the seller's cabinet, saved items, language, legal texts, account removal. */
-export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, onExport }: Props) {
+export function Profile({ onTrack, staff, hasPhone, onOpen, onLanguage, onDeleteAccount, onExport }: Props) {
   const t = useT();
   const lang = useLang();
   const [theme, setTheme] = useState<ThemePref>(readThemePref);
@@ -65,6 +67,7 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
               onClick={() => {
                 setTheme(v);
                 setThemePref(v);
+                onTrack?.("ui_theme_change");
               }}
             >
               {t(`profile.theme.${v}`)}

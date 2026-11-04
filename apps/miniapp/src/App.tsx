@@ -4,31 +4,13 @@ import { ApiError, createApi, SESSION_EXPIRED_EVENT, setApiLang, type Me } from 
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { alertDialog, closeApp, confirmDialog } from "./dialogs";
 import { LangContext } from "./i18n";
-import { Assistant } from "./screens/Assistant";
 import { Catalog } from "./screens/Catalog";
-import { Compare } from "./screens/Compare";
-import { HowItWorks } from "./screens/HowItWorks";
-import { ImeiCheck } from "./screens/ImeiCheck";
-import { Inspect } from "./screens/Inspect";
-import { Check } from "./screens/Check";
 import { Checkout } from "./screens/Checkout";
-import { Faq } from "./screens/Faq";
 import { Favorites } from "./screens/Favorites";
 import { Home } from "./screens/Home";
 import { ListingView } from "./screens/ListingView";
-import { MyListings } from "./screens/MyListings";
 import { Orders } from "./screens/Orders";
-import { Sell } from "./screens/Sell";
-import { Shop } from "./screens/Shop";
-import { Terms } from "./screens/Terms";
 import { Profile } from "./screens/Profile";
-import { SellerPage } from "./screens/SellerPage";
-import { Blocks } from "./screens/Blocks";
-import { Wanted } from "./screens/Wanted";
-import { Stolen } from "./screens/Stolen";
-import { Away } from "./screens/Away";
-import { Notifications } from "./screens/Notifications";
-import { Valuation } from "./screens/Valuation";
 import { CompareTray } from "./components/CompareTray";
 import { useCompare } from "./compare";
 import { TabBar, type Tab } from "./components/TabBar";
@@ -86,6 +68,26 @@ const TAB_OF: Partial<Record<Screen["name"], Tab>> = {
 export function similarFilters(check: Pick<CheckResult, "title" | "category">): CatalogFilters {
   return { q: check.title, category: check.category === "other" ? undefined : check.category, verifiedOnly: true };
 }
+
+// Screens off the first-paint path load on demand: the storefront and the catalog stay light.
+const Assistant = lazy(() => import("./screens/Assistant").then((m) => ({ default: m.Assistant })));
+const Check = lazy(() => import("./screens/Check").then((m) => ({ default: m.Check })));
+const Compare = lazy(() => import("./screens/Compare").then((m) => ({ default: m.Compare })));
+const Faq = lazy(() => import("./screens/Faq").then((m) => ({ default: m.Faq })));
+const HowItWorks = lazy(() => import("./screens/HowItWorks").then((m) => ({ default: m.HowItWorks })));
+const ImeiCheck = lazy(() => import("./screens/ImeiCheck").then((m) => ({ default: m.ImeiCheck })));
+const Inspect = lazy(() => import("./screens/Inspect").then((m) => ({ default: m.Inspect })));
+const Valuation = lazy(() => import("./screens/Valuation").then((m) => ({ default: m.Valuation })));
+const Wanted = lazy(() => import("./screens/Wanted").then((m) => ({ default: m.Wanted })));
+const Stolen = lazy(() => import("./screens/Stolen").then((m) => ({ default: m.Stolen })));
+const Away = lazy(() => import("./screens/Away").then((m) => ({ default: m.Away })));
+const Blocks = lazy(() => import("./screens/Blocks").then((m) => ({ default: m.Blocks })));
+const Notifications = lazy(() => import("./screens/Notifications").then((m) => ({ default: m.Notifications })));
+const Shop = lazy(() => import("./screens/Shop").then((m) => ({ default: m.Shop })));
+const MyListings = lazy(() => import("./screens/MyListings").then((m) => ({ default: m.MyListings })));
+const SellerPage = lazy(() => import("./screens/SellerPage").then((m) => ({ default: m.SellerPage })));
+const Sell = lazy(() => import("./screens/Sell").then((m) => ({ default: m.Sell })));
+const Terms = lazy(() => import("./screens/Terms").then((m) => ({ default: m.Terms })));
 
 // Staff-only panel: a separate chunk, buyers and sellers never download it.
 const Admin = lazy(() => import("./screens/admin/Admin").then((m) => ({ default: m.Admin })));
@@ -221,6 +223,13 @@ export function App({ env }: { env: TelegramEnv }) {
   // «Versus» tray floats over the lists while the buyer collects listings; the page leaves room for it.
   const tray = useCompare().length > 0 && ["home", "catalog", "favorites", "seller", "assistant"].includes(screen.name);
 
+  // Which new screens people open (counted as distinct users in the admin panel; nothing else is sent).
+  useEffect(() => {
+    if (!me?.acceptedTerms) return;
+    const ev = ({ how: "ui_how_open", faq: "ui_faq_open", imei: "ui_imei_open", compare: "ui_compare_open" } as const)[screen.name as "how"];
+    if (ev) api.track(ev);
+  }, [screen.name, me?.acceptedTerms, api]);
+
   // Bot button "Find similar" → similar_<checkId>: open the catalog with the checked item.
   useEffect(() => {
     const m = env.startParam?.match(/^similar_([0-9a-f-]{36})$/i);
@@ -276,7 +285,12 @@ export function App({ env }: { env: TelegramEnv }) {
       </div>
     );
   else if (!me) content = <p className="center hint">{t(lang, "common.loading")}</p>;
-  else if (!me.acceptedTerms) content = <Terms onAccept={acceptTerms} busy={busy} />;
+  else if (!me.acceptedTerms)
+    content = (
+      <Suspense fallback={<p className="center hint">{t(lang, "common.loading")}</p>}>
+        <Terms onAccept={acceptTerms} busy={busy} />
+      </Suspense>
+    );
   else {
     const render = (screen: Screen, key: number, visible: boolean) => {
     let body;
@@ -420,7 +434,7 @@ export function App({ env }: { env: TelegramEnv }) {
         );
         break;
       case "inspect":
-        body = <Inspect category={screen.category} listingId={screen.listingId} title={screen.title} />;
+        body = <Inspect category={screen.category} listingId={screen.listingId} title={screen.title} onStart={() => api.track("ui_inspect_start")} />;
         break;
       case "seller":
         body = <SellerPage api={api} sellerId={screen.id} onOpen={(id) => go({ name: "listing", id })} />;
@@ -428,6 +442,7 @@ export function App({ env }: { env: TelegramEnv }) {
       case "profile":
         body = (
           <Profile
+            onTrack={api.track}
             staff={staff}
             hasPhone={me.hasPhone}
             onOpen={(name) => go({ name } as Screen)}
@@ -462,7 +477,7 @@ export function App({ env }: { env: TelegramEnv }) {
     const screens = stack.map((e, idx) => (
       <section key={e.key} hidden={idx !== stack.length - 1} className="screen">
         <ErrorBoundary message={t(lang, "app.crashed")} action={t(lang, "app.reload")}>
-          {render(e.screen, e.key, idx === stack.length - 1)}
+          <Suspense fallback={<p className="center hint">{t(lang, "common.loading")}</p>}>{render(e.screen, e.key, idx === stack.length - 1)}</Suspense>
         </ErrorBoundary>
       </section>
     ));

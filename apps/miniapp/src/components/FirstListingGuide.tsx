@@ -19,7 +19,7 @@ export function FirstListingGuide() {
   };
   return (
     <section className="card stack" data-testid="first-listing-guide">
-      <h3>{t("guide.title")}</h3>
+      <h2 className="h-sub">{t("guide.title")}</h2>
       <ol className="stack-tight">
         {STEPS.map((s) => (
           <li key={s}>{t(`guide.step.${s}`)}</li>

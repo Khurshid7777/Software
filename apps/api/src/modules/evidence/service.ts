@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
-import type { CheckCategory, VideoCheckResult } from "@ishonch/shared";
+import { VIDEO_CHECKS_PER_DAY, type CheckCategory, type VideoCheckResult } from "@ishonch/shared";
 import type { AiService } from "../../ai/aiService.js";
 import type { Repo } from "../../db/repo.js";
 import { evidence } from "../../db/schema.js";
@@ -120,9 +120,12 @@ export class EvidenceService {
     if (!VIDEO_TYPES.test(file.mimeType) || !file.data.length) throw new EvidenceRejected("bad_video");
     await this.removeVideo(listingId);
     const ext = file.mimeType.split("/")[1] === "quicktime" ? "mov" : file.mimeType.split("/")[1]!;
+    // Every reading is a paid model call: a seller who re-uploads all day keeps their videos, but past the daily
+    // cap they are stored unread (the passport then says "the seller's word").
+    const reservation = this.d.ai ? await this.d.repo.reserveDaily(userId, "video_check", VIDEO_CHECKS_PER_DAY) : null;
     const key = `evidence/listings/${listingId}/video-${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
     await this.d.storage.put(key, file.data, file.mimeType);
-    const check = await this.inspect(file.data, ext, listing);
+    const check = reservation == null ? unknownCheck() : await this.inspect(file.data, ext, listing, reservation);
     const [row] = await this.db
       .insert(evidence)
       .values({ kind: "listing_video", listingId, uploadedBy: userId, storageKey: key, mime: file.mimeType, bytes: file.data.length, meta: check })
@@ -130,13 +133,17 @@ export class EvidenceService {
     return { url: this.url(row!), check };
   }
 
-  private async inspect(data: Buffer, ext: string, listing: { category: CheckCategory; title: string }): Promise<VideoCheckResult> {
+  private async inspect(data: Buffer, ext: string, listing: { category: CheckCategory; title: string }, reservation: number): Promise<VideoCheckResult> {
     if (!this.d.ai) return unknownCheck();
     try {
-      return await checkVideo(this.d.ai, await extractFrames(data, ext), listing);
+      const frames = await extractFrames(data, ext);
+      // Nothing readable (not a real video): no model call was made, so the daily allowance is given back.
+      if (!frames.jpegs.length) await this.d.repo.refundDaily(reservation);
+      return await checkVideo(this.d.ai, frames, listing);
     } catch (err) {
       // No key, the monthly budget, a provider outage: the video stays, the passport says "the seller's word".
       this.d.logger?.warn({ err: String(err) }, "video check skipped");
+      await this.d.repo.refundDaily(reservation);
       return unknownCheck();
     }
   }

@@ -1,6 +1,6 @@
 import { MAX_ATTEMPTS } from "../../jobs/queue.js";
 import { sql, type SQL } from "drizzle-orm";
-import { formatUzs, type AdminMetrics, type FunnelStep } from "@ishonch/shared";
+import { formatUzs, UI_EVENTS, type AdminMetrics, type FunnelStep } from "@ishonch/shared";
 import { startOfMonthUtc, startOfTashkentDay, type Repo } from "../../db/repo.js";
 
 const DAY = 24 * 3600_000;
@@ -63,6 +63,11 @@ export class MetricsService {
         and name in (${sql.join([...BUYER_FUNNEL, "listing_draft_created", "listing_published", "check_created"].map((n) => sql`${n}`), sql`, `)})
       group by name`);
     const byEvent = new Map(eventUsers.map((r) => [String(r.name), num(r.n)]));
+    const usage = await this.rows(sql`
+      select name, count(distinct user_id) as n from events
+      where created_at >= ${ts(from)} and user_id is not null
+        and name in (${sql.join([...UI_EVENTS, "imei_checked"].map((n) => sql`${n}`), sql`, `)})
+      group by name order by n desc`);
     // Order steps from the orders table (exact, also for history before events existed).
     const sellerOrders = await this.one(sql`
       select count(distinct seller_user_id)
@@ -175,6 +180,7 @@ export class MetricsService {
         banned: num(users.banned),
       },
       checks: { users: byEvent.get("check_created") ?? 0 },
+      usage: usage.map((r) => ({ name: String(r.name), users: num(r.n) })),
       meetingFunnel: funnel([
         ["buyer_contacted_seller", byEvent.get("buyer_contacted_seller") ?? 0],
         ["meeting_requested", num(meetings.requested)],

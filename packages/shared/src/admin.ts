@@ -11,6 +11,8 @@ export interface AdminMetrics {
   period: { from: string; to: string; days: number };
   users: { total: number; new: number; active: number; sellers: number; banned: number };
   checks: { users: number };
+  /** Distinct users per Mini App screen / action (UI_EVENTS) in the period. */
+  usage: Array<{ name: string; users: number }>;
   buyerFunnel: FunnelStep[];
   sellerFunnel: FunnelStep[];
   /** Stage 21: deals that happen in person — contact → meeting asked → agreed → bought. */

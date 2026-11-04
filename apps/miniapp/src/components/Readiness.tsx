@@ -38,7 +38,7 @@ export function Readiness({ listing: l }: { listing: ListingDto }) {
   return (
     <section className="card stack readiness" data-testid="readiness">
       <div className="row between">
-        <h3>{t("ready.title")}</h3>
+        <h2 className="h-sub">{t("ready.title")}</h2>
         <span className={missing.length ? "pill" : "pill ok"} data-testid="readiness-count">
           {done} / {steps.length}
         </span>

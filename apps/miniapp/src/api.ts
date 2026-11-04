@@ -28,6 +28,7 @@ import type {
   ListingDto,
   VideoCheckResult,
   ImeiCheckDto,
+  UiEvent,
   ListingInsights,
   ListingSeller,
   ListingStatus,
@@ -322,6 +323,8 @@ export function createApi(initData: string | null) {
     setSearchPublic: (id: number, on: boolean) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { public: on })),
     setSearchBelowMarket: (id: number, pct: number | null) => request<SavedSearch>(`/searches/${id}`, json("PATCH", { belowMarketPct: pct })),
     wanted: () => request<WantedRequest[]>("/wanted"),
+    /** Fire-and-forget usage event (UI_EVENTS); failures never reach the user. */
+    track: (name: UiEvent) => void request<{ ok: true }>("/events", json("POST", { name })).catch(() => undefined),
     checkImei: (imei: string) => request<ImeiCheckDto>("/imei/check", json("POST", { imei })),
     stolenReports: () => request<StolenReportDto[]>("/me/stolen"),
     reportStolen: (body: { imei: string; kind: "stolen" | "lost"; policeReport?: string }) =>

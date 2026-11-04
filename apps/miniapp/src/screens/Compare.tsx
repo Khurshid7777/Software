@@ -72,6 +72,7 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
     if (!items || items.length < 2 || busy) return;
     setBusy(true);
     setError(null);
+    api.track("ui_compare_ai");
     try {
       setAi(await api.compare(items.map((i) => i.listing.id), lang));
     } catch (e) {
@@ -251,7 +252,9 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
         <table className="versus-table">
           <thead>
             <tr>
-              <th />
+              <th>
+                <span className="sr-only">{t("versus.title")}</span>
+              </th>
               {items.map((i) => (
                 <th key={i.listing.id}>
                   <div className="versus-item">

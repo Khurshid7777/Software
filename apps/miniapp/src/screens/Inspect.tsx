@@ -4,8 +4,8 @@ import { Icon } from "../components/Icon";
 import { useLang, useT } from "../i18n";
 import { readPref, writePref } from "../prefs";
 import { haptic } from "../telegram";
+import { ACTIVE_KEY, TOTAL_MS, clock, type ActiveInspect } from "./inspectState";
 
-const TOTAL_MS = INSPECTION_MINUTES * 60_000;
 const RADIUS = 54;
 const CIRC = 2 * Math.PI * RADIUS;
 
@@ -26,35 +26,13 @@ function read(key: string): Saved {
   return { start: null, done: [] };
 }
 
-/** The inspection that is running now, so the storefront can offer a way back to it (one per device). */
-export interface ActiveInspect {
-  category: CheckCategory;
-  listingId?: string;
-  title?: string;
-  start: number;
-}
-const ACTIVE_KEY = "inspect_active";
-export function readActiveInspect(now = Date.now()): ActiveInspect | null {
-  try {
-    const v = JSON.parse(readPref(ACTIVE_KEY) ?? "null") as ActiveInspect | null;
-    return v && typeof v.start === "number" && v.category && now - v.start < TOTAL_MS ? v : null;
-  } catch {
-    return null;
-  }
-}
-export const inspectLeft = (a: ActiveInspect, now = Date.now()) => clock(TOTAL_MS - (now - a.start));
-
-const clock = (ms: number) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-};
 
 /**
  * «Осмотр при получении»: the buyer's 10 minutes at handover as a screen — a countdown and the category's
  * checklist to tick off. Ishonch changes no status here and moves no money: it only helps the buyer not to forget
  * a step; the decision ("беру" / "не беру") is told to the courier. Progress is kept on the device per listing.
  */
-export function Inspect({ category, listingId, title }: { category: CheckCategory; listingId?: string; title?: string }) {
+export function Inspect({ category, listingId, title, onStart }: { category: CheckCategory; listingId?: string; title?: string; onStart?: () => void }) {
   const t = useT();
   const lang = useLang();
   const items = useMemo(() => inspectionChecklist(lang, category), [lang, category]);
@@ -80,6 +58,7 @@ export function Inspect({ category, listingId, title }: { category: CheckCategor
   };
   const start = () => {
     haptic("medium");
+    onStart?.();
     const at = Date.now();
     setNow(at);
     update({ ...saved, start: at });
@@ -134,7 +113,7 @@ export function Inspect({ category, listingId, title }: { category: CheckCategor
 
       <section className="card stack" data-testid="inspect-checklist">
         <div className="row between">
-          <h3>{t("how.checklist_title", { min: INSPECTION_MINUTES })}</h3>
+          <h2 className="h-sub">{t("how.checklist_title", { min: INSPECTION_MINUTES })}</h2>
           <span className={allDone ? "pill ok" : "pill"} data-testid="inspect-progress">
             {t("inspect.progress", { done, total: items.length })}
           </span>

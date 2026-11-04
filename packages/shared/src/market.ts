@@ -323,6 +323,21 @@ export interface VideoCheckResult {
   /** Whether those digits match the IMEI the seller entered (set when the listing is shown); null = cannot tell. */
   imeiMatch?: boolean | null;
 }
+/** AI readings of video passports one seller may trigger a day (each costs a model call); more uploads are kept unread. */
+export const VIDEO_CHECKS_PER_DAY = 12;
+/** Screens and actions the Mini App reports, counted as distinct users in the admin panel (no content, no ids). */
+export const UI_EVENTS = [
+  "ui_how_open",
+  "ui_faq_open",
+  "ui_imei_open",
+  "ui_compare_open",
+  "ui_inspect_start",
+  "ui_quick_filter",
+  "ui_video_filter",
+  "ui_compare_ai",
+  "ui_theme_change",
+] as const;
+export type UiEvent = (typeof UI_EVENTS)[number];
 /** How many listings fit on the compare screen («Versus»). */
 export const COMPARE_MAX = 4;
 

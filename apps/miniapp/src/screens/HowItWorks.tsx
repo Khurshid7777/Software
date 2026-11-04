@@ -53,7 +53,7 @@ export function HowItWorks({ category, onCatalog, onTry, onFaq }: { category?: C
       </ol>
 
       <section className="stack-tight" data-testid="how-vs">
-        <h3>{t("vs.title")}</h3>
+        <h2 className="h-sub">{t("vs.title")}</h2>
         <div className="vs-table" role="table">
           <div className="vs-head" role="row">
             <span role="columnheader">{t("vs.board")}</span>
@@ -75,7 +75,7 @@ export function HowItWorks({ category, onCatalog, onTry, onFaq }: { category?: C
       </section>
 
       <section className="card stack" data-testid="how-checklist">
-        <h3>{t("how.checklist_title", { min: INSPECTION_MINUTES })}</h3>
+        <h2 className="h-sub">{t("how.checklist_title", { min: INSPECTION_MINUTES })}</h2>
         <div className="chips scroll-x bleed">
           {CATEGORIES.map((c) => (
             <button key={c} className={c === cat ? "chip active" : "chip"} onClick={() => setCat(c)}>
@@ -98,7 +98,7 @@ export function HowItWorks({ category, onCatalog, onTry, onFaq }: { category?: C
       </section>
 
       <section className="stack-tight">
-        <h3>{t("how.before_title")}</h3>
+        <h2 className="h-sub">{t("how.before_title")}</h2>
         <ul className="plain how-before">
           {before.map((b) => (
             <li key={b.text}>

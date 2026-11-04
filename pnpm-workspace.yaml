@@ -3,5 +3,7 @@ packages:
   - "packages/*"
 
 overrides:
+  # fastify's ajv pulls fast-uri < 3.1.9 (URI scheme spoofing / host confusion, moderate); 3.x is API-compatible.
+  fast-uri: ^3.1.9
   # @telegram-apps/sdk pins valibot 1.0.0 (ReDoS GHSA-vqpr-j7v3-hqw9, flatten() GHSA-5qjj-4xww-7phc); 1.x is API-compatible.
   valibot: ^1.4.2

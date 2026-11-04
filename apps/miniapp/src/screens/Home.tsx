@@ -6,7 +6,7 @@ import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { LoadError } from "../components/LoadError";
 import { useT } from "../i18n";
 import { readPref, readRecent, writePref } from "../prefs";
-import { inspectLeft, readActiveInspect, type ActiveInspect } from "./Inspect";
+import { inspectLeft, readActiveInspect, type ActiveInspect } from "./inspectState";
 import { canAddToHomeScreen, haptic, promptAddToHomeScreen } from "../telegram";
 
 /** Category circles on the storefront (the catch-all ones live in the catalog filters): icon and tint. */
@@ -101,12 +101,12 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing, onIn
     <div className="stack home" data-testid="home">
       <header className="brand-bar">
         <div className="brand-row">
-          <span className="brand-logo">
+          <h1 className="brand-logo">
             {t("app.name")}
             <span className="spark" aria-hidden>
               ✦
             </span>
-          </span>
+          </h1>
         </div>
         <span className="brand-tagline">{t("app.tagline")}</span>
         <form
@@ -180,9 +180,9 @@ export function Home({ api, staff, remaining, onOpen, onCatalog, onListing, onIn
         </section>
       )}
 
-      <div className="category-strip scroll-x bleed" role="list">
+      <div className="category-strip scroll-x bleed">
         {CATEGORIES.map((c) => (
-          <button key={c} role="listitem" className="category" onClick={() => onCatalog({ category: c })}>
+          <button key={c} className="category" onClick={() => onCatalog({ category: c })}>
             <span className="category-icon" aria-hidden style={{ "--tint": CATEGORY_ICONS[c]!.tint } as CSSProperties}>
               <Icon name={CATEGORY_ICONS[c]!.icon} />
             </span>

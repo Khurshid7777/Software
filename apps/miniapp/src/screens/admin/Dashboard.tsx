@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { formatUzs, type AdminMetrics, type FunnelStep } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../../api";
 import { saveFile } from "../../dialogs";
-import { STEP_LABEL, FEATURE_LABEL, CANCEL_LABEL, MODE_LABEL } from "./labels";
+import { STEP_LABEL, FEATURE_LABEL, CANCEL_LABEL, MODE_LABEL, USAGE_LABEL } from "./labels";
 
 const PERIODS = [7, 30, 90] as const;
 
@@ -81,6 +81,19 @@ export function Dashboard({ api }: { api: Api }) {
               в таблице jobs (last_error).
             </p>
           )}
+          <section className="card stack-tight" data-testid="usage">
+            <h3>🧭 Чем пользуются (человек за период)</h3>
+            {m.usage.length === 0 ? (
+              <span className="hint">Пока никто не открывал новые экраны</span>
+            ) : (
+              m.usage.map((u) => (
+                <div key={u.name} className="row between">
+                  <span>{USAGE_LABEL[u.name] ?? u.name}</span>
+                  <span className="num">{u.users}</span>
+                </div>
+              ))
+            )}
+          </section>
           <Funnel title="Воронка покупателя" steps={m.buyerFunnel} />
           <Funnel title="Воронка продавца" steps={m.sellerFunnel} />
           <Funnel title="Сделки при встрече" steps={m.meetingFunnel} />

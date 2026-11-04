@@ -19,6 +19,7 @@ const I18N_KEY: Record<string, string> = {
   fill_required: "sell.fill_required",
   need_photo: "sell.need_photo",
   need_video: "sell.need_video",
+  need_imei: "sell.need_imei",
   limit_reached: "sell.limit_reached",
   not_found: "listing.not_found",
   contact_info: "sell.contact_info",

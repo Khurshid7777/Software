@@ -41,6 +41,7 @@ import {
   type ListingStatus,
   type ModerationRecord,
   type PriceSuggestion,
+  IMEI_CATEGORIES,
   videoRequiredFor,
   type VideoCheckResult,
 } from "@ishonch/shared";
@@ -94,6 +95,7 @@ export type ListingError =
   | "phone_required"
   | "need_photo"
   | "need_video"
+  | "need_imei"
   | "fill_required"
   | "limit_reached"
   | "bump_too_soon"
@@ -569,6 +571,10 @@ export class ListingService {
     // Phones, tablets and laptops: the scripted video passport is part of the listing, not an extra.
     if (this.d.videoRequired && videoRequiredFor(l.category) && !(await this.d.evidence?.listingVideos([id]))?.has(id)) {
       throw new ListingRejected("need_video", 400);
+    }
+    // The video is compared with this number: without it the passport cannot show that it is the same phone.
+    if (this.d.videoRequired && (IMEI_CATEGORIES as readonly string[]).includes(l.category) && !l.imei) {
+      throw new ListingRejected("need_imei", 400);
     }
     if (hasContactInfo(l)) throw new ListingRejected("contact_info", 400);
 

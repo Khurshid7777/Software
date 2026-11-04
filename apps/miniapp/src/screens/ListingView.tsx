@@ -291,7 +291,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
       {l.imeiTail && <p className="hint-card" data-testid="imei-hint">🔐 {t("listing.imei", { tail: l.imeiTail })}</p>}
       {l.attributes.specs.length > 0 && (
         <section className="stack-tight" data-testid="listing-specs">
-          <h3>{t("listing.specs")}</h3>
+          <h2 className="h-sub">{t("listing.specs")}</h2>
           <dl className="specs">
             {l.attributes.specs.slice(0, 8).map((s) => (
               <div key={s.name}>

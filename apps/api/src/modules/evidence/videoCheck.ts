@@ -16,7 +16,8 @@ const run = promisify(execFile);
 /** How many stills the AI gets from a clip and how big they are: enough to read a *#06# screen, cheap to send. */
 const FRAMES = 5;
 const FRAME_WIDTH = 768;
-const FFMPEG_TIMEOUT_MS = 20_000;
+/** Per ffmpeg / ffprobe call: a hostile file must not hold the upload request for minutes (6 calls at most). */
+const FFMPEG_TIMEOUT_MS = 8_000;
 
 export interface VideoFrames {
   jpegs: Buffer[];

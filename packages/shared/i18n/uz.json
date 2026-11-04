@@ -1255,5 +1255,6 @@
   "faq.seller.q": "Yangi sotuvchiga ishonsa bo‘ladimi?",
   "faq.seller.a": "Akkaunt yoshiga emas, faktlarga qarang: tovar pasporti, video-pasport, kuryer ko‘rigi, xabarlarga javoblar va Ishonch orqali yetkazilgandan keyingi sharhlar. Ular har bir e’londa o‘zicha.",
   "faq.fee.q": "Bu qancha turadi?",
-  "faq.fee.a": "Ishonch’dan foydalanish bepul. Faqat yetkazishni tanlasangiz, shu uchun to‘laysiz: summa buyurtmani tasdiqlashdan oldin ko‘rsatiladi. Tovar uchun sotuvchiga qabul qilishda to‘laysiz."
+  "faq.fee.a": "Ishonch’dan foydalanish bepul. Faqat yetkazishni tanlasangiz, shu uchun to‘laysiz: summa buyurtmani tasdiqlashdan oldin ko‘rsatiladi. Tovar uchun sotuvchiga qabul qilishda to‘laysiz.",
+  "sell.need_imei": "IMEI ni kiriting: xaridor videoda aynan shu telefon ekanini ko‘rishi uchun kerak"
 }
