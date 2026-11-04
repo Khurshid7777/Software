@@ -13,7 +13,7 @@ import { ApiError, photoUrl, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { GradeChip } from "../components/Passport";
-import { ForecastControls, MiniChart, forecastInput } from "../components/Forecast";
+import { ForecastControls, MiniChart, forecastInput, useCompactUzs } from "../components/Forecast";
 import { useForecastSettings } from "../forecast";
 import { clearCompare, removeFromCompare, useCompare } from "../compare";
 import { useLang, useT } from "../i18n";
@@ -51,6 +51,7 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
   const [onlyDiff, setOnlyDiff] = useState(false);
   const [settings, setSettings] = useForecastSettings();
   const [chart, setChart] = useState<"price" | "battery">("price");
+  const money = useCompactUzs();
 
   useEffect(() => {
     let current = true;
@@ -349,7 +350,8 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
         <MiniChart
           label={t(`versus.chart.${chart}`)}
           max={chart === "battery" ? 100 : undefined}
-          format={(v) => (chart === "battery" ? `${Math.round(v)}%` : formatUzs(v))}
+          active={settings.years}
+          format={(v) => (chart === "battery" ? `${Math.round(v)}%` : money(v))}
           series={items.flatMap((i, idx) => {
             const f = forecastDevice(forecastInput(i.listing), settings.usage, settings.years);
             const color = ["var(--brand)", "var(--ok)", "var(--warn)", "var(--bad)"][idx]!;

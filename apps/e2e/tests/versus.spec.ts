@@ -139,6 +139,12 @@ test("Forecast in the comparison: battery / first service / price rows, chart to
   const before = await page.getByTestId("compare-row-fc_price").textContent();
   await page.getByTestId("years-5").click();
   await expect.poll(async () => page.getByTestId("compare-row-fc_price").textContent()).not.toBe(before);
+  // Touching the chart shows another year: the legend values follow the pointer.
+  const legend = page.getByTestId("compare-forecast").locator(".chart-legend");
+  const atEnd = await legend.textContent();
+  const box = (await page.getByTestId("compare-forecast").locator(".mini-chart svg").boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
+  await expect.poll(async () => legend.textContent()).not.toBe(atEnd);
   await page.getByTestId("chart-battery").click();
   await expect(page.getByTestId("chart-battery")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("forecast-chart")).toBeVisible();
