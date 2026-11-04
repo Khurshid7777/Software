@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   COMPARE_MAX,
   CONDITION_RANK,
+  forecastDevice,
   formatUzs,
   listingTitle,
   type CatalogItem,
@@ -12,6 +13,8 @@ import { ApiError, photoUrl, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { GradeChip } from "../components/Passport";
+import { ForecastControls, MiniChart, forecastInput } from "../components/Forecast";
+import { useForecastSettings } from "../forecast";
 import { clearCompare, removeFromCompare, useCompare } from "../compare";
 import { useLang, useT } from "../i18n";
 
@@ -46,6 +49,8 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [onlyDiff, setOnlyDiff] = useState(false);
+  const [settings, setSettings] = useForecastSettings();
+  const [chart, setChart] = useState<"price" | "battery">("price");
 
   useEffect(() => {
     let current = true;
@@ -216,12 +221,42 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
         return r && r.count > 0 && r.avg != null ? { node: `★ ${r.avg} (${r.count})`, score: r.avg } : { node: <span className="hint">{t("versus.no_reviews")}</span>, score: null };
       }),
     },
+    ...forecastRows(items),
     {
       key: "district",
       label: t("compare.district"),
       cells: items.map(({ listing: l }) => ({ node: l.district ? t(`district.${l.district}`) : unknown, score: null, sig: l.district ?? "" })),
     },
   ];
+  function forecastRows(list: CatalogItem[]): Row[] {
+    const fc = list.map((i) => forecastDevice(forecastInput(i.listing), settings.usage, settings.years));
+    const n = settings.years;
+    return [
+      {
+        key: "fc_battery",
+        label: t("versus.row.fc_battery", { n }),
+        cells: fc.map((f) => (f.battery ? { node: `${Math.round(f.battery.series[n]!)}%`, score: f.battery.series[n]! } : { node: "—", score: null })),
+      },
+      {
+        key: "fc_service",
+        label: t("versus.row.fc_service"),
+        cells: fc.map((f) => {
+          const first = f.maintenance[0];
+          return first
+            ? { node: <span>{t(`forecast.maint.${first.key}`)}<br /><span className="hint">{t("versus.months", { n: first.inMonths })}</span></span>, score: first.inMonths }
+            : { node: <span className="hint">{t("versus.no_service")}</span>, score: 1000 };
+        }),
+      },
+      {
+        key: "fc_price",
+        label: t("versus.row.fc_price", { n }),
+        cells: fc.map((f) => {
+          const p = f.price?.series[n];
+          return p ? { node: <span>{formatUzs(p.mid)}<br /><span className="hint">{formatUzs(p.low)} — {formatUzs(p.high)}</span></span>, score: p.mid } : { node: "—", score: null };
+        }),
+      },
+    ];
+  }
   // The best cell of a row is highlighted only when the row actually differs.
   const bestOf = (row: Row) => {
     const scores = row.cells.map((c) => c.score).filter((s): s is number => s !== null);
@@ -297,6 +332,33 @@ export function Compare({ api, onOpen, onCatalog }: { api: Api; onOpen: (id: str
           </tbody>
         </table>
       </div>
+
+      <section className="card stack" data-testid="compare-forecast">
+        <h2 className="h-sub">
+          <Icon name="trend_down" /> {t("versus.forecast_title")}
+        </h2>
+        <p className="hint">{t("versus.forecast_hint")}</p>
+        <ForecastControls settings={settings} onChange={setSettings} />
+        <div className="chips" role="group" aria-label={t("versus.forecast_title")}>
+          {(["price", "battery"] as const).map((k) => (
+            <button key={k} className={chart === k ? "chip active" : "chip"} aria-pressed={chart === k} onClick={() => setChart(k)} data-testid={`chart-${k}`}>
+              {t(`versus.chart.${k}`)}
+            </button>
+          ))}
+        </div>
+        <MiniChart
+          label={t(`versus.chart.${chart}`)}
+          max={chart === "battery" ? 100 : undefined}
+          format={(v) => (chart === "battery" ? `${Math.round(v)}%` : formatUzs(v))}
+          series={items.flatMap((i, idx) => {
+            const f = forecastDevice(forecastInput(i.listing), settings.usage, settings.years);
+            const color = ["var(--brand)", "var(--ok)", "var(--warn)", "var(--bad)"][idx]!;
+            const label = listingTitle(i.listing, lang);
+            if (chart === "battery") return f.battery ? [{ key: i.listing.id, label, color, values: f.battery.series }] : [];
+            return f.price ? [{ key: i.listing.id, label, color, values: f.price.series.map((p) => p.mid) }] : [];
+          })}
+        />
+      </section>
 
       {ai ? (
         <section className="card stack" data-testid="compare-ai">

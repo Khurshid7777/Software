@@ -1,7 +1,7 @@
 // «Вопросы и ответы»: the structure (groups, order, the button an answer may carry). The texts live in the
 // dictionaries as faq.<id>.q / faq.<id>.a, so both languages are checked like everything else.
 export const FAQ_GROUPS = [
-  { id: "buying", items: ["find", "grades", "passport", "compare", "price", "offer", "trade", "chat", "favorites", "wanted"] },
+  { id: "buying", items: ["find", "grades", "passport", "compare", "forecast", "price", "offer", "trade", "chat", "favorites", "wanted"] },
   { id: "money", items: ["money", "fee", "paymodes", "deliveryfee", "prepay", "cashless", "installments"] },
   { id: "delivery", items: ["how_order", "timing", "inspection", "notfit", "cancel", "bigitems", "bundle", "meet"] },
   { id: "protection", items: ["refund", "dispute_how", "payback", "complain", "address"] },

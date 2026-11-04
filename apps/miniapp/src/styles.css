@@ -556,6 +556,29 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .faq-link { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; text-align: left; color: var(--brand-fg); font-size: 13px; font-weight: 500; min-height: 32px; }
 .faq-link .icon { width: 16px; height: 16px; flex-shrink: 0; }
 
+/* ---- Forecast: the card on the listing, the chart, the rows in the comparison ---- */
+.forecast { padding: 0; }
+.forecast > .stack { padding: 0 16px 16px; }
+.forecast-summary { display: flex; align-items: center; gap: 8px; padding: 14px 16px; cursor: pointer; list-style: none; min-height: 48px; }
+.forecast-summary::-webkit-details-marker { display: none; }
+.forecast-summary strong { flex: 1; font-size: 15px; }
+.forecast-summary > .icon:first-child { color: var(--brand-fg); width: 20px; height: 20px; }
+.forecast-summary > .icon:last-child { width: 18px; height: 18px; color: var(--ink-3); transition: transform 0.2s var(--ease); }
+.forecast[open] .forecast-summary > .icon:last-child { transform: rotate(90deg); }
+.forecast-controls .chips { align-items: center; }
+.forecast-controls .chip { min-height: 34px; }
+.forecast-line { margin: 0; font-size: 14px; }
+.forecast-tasks { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.forecast-tasks li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; }
+.forecast-tasks .icon { width: 18px; height: 18px; color: var(--brand-fg); margin-top: 2px; }
+.forecast-tasks span > span { display: block; }
+.mini-chart { margin: 0; }
+.mini-chart svg { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-axis { fill: var(--ink-2); font-size: 10px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+.chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+
 /* ---- 13g. «Ishonch против обычной доски» ---- */
 .vs-table { display: flex; flex-direction: column; gap: 8px; }
 .vs-head, .vs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

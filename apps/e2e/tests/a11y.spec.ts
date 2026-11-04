@@ -13,6 +13,11 @@ const SCREENS: Array<{ name: string; query: (ids: Record<string, string>) => str
   { name: "home", query: () => "" },
   { name: "catalog", query: () => "screen=catalog" },
   { name: "listing", query: (ids) => `startapp=listing_${ids.listing}` },
+  { name: "listing-forecast", query: (ids) => `startapp=listing_${ids.listing}`, prepare: async (p) => {
+      await p.getByTestId("forecast").locator("summary").click();
+      await p.getByTestId("forecast-disclaimer").waitFor();
+    },
+  },
   { name: "compare", query: () => "screen=compare" },
   { name: "how", query: () => "screen=how" },
   { name: "inspect", query: () => "screen=how", prepare: async (p) => {

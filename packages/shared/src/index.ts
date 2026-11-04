@@ -12,5 +12,6 @@ export * from "./delivery.js";
 export * from "./market.js";
 export * from "./passport.js";
 export * from "./faq.js";
+export * from "./forecast.js";
 export * from "./admin.js";
 export * from "./schemas.js";

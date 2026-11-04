@@ -28,6 +28,7 @@ import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { BrandLine, MarketBadge, TrustBadge } from "../components/ItemCard";
 import { SellerFacts } from "../components/SellerFacts";
+import { ForecastCard } from "../components/Forecast";
 import { FaqLink } from "../components/FaqLink";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
@@ -53,6 +54,9 @@ interface Props {
   onCompare?: () => void;
   onFaq?: (id: FaqId) => void;
 }
+
+/** The estimate needs a category it knows something about; "other" has no typical values worth showing. */
+const isCargoOnlyUnknown = (l: ListingDto) => l.category === "other";
 
 /** Why a similar listing may be the better pick: cheaper, a better grade, inspected, has a video passport. */
 function similarNote(t: ReturnType<typeof useT>, base: ListingDto, other: ListingDto): string | null {
@@ -292,6 +296,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
       )}
       {item.passport && <Passport passport={item.passport} />}
       <ChecklistView category={l.category} value={l.checklist} />
+      {!isCargoOnlyUnknown(l) && <ForecastCard listing={l} />}
       {isCargo(l.category) && (
         <p className="hint-card" data-testid="listing-cargo">
           {t("listing.cargo")}

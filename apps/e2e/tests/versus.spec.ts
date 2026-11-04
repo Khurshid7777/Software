@@ -98,3 +98,48 @@ test("video passport in the seller's editor: the script, «required» for phones
   // The dev mock has no real video: the AI did not look.
   await expect(block.getByTestId("video-verdict")).toContainText("AI его не проверял");
 });
+
+test("Forecast: «Что будет с устройством» on the listing — usage and horizon change the numbers, estimate disclaimer is shown", async ({ page }) => {
+  const phone = (await catalog()).find((i) => i.listing.titleRu.includes("Lenovo"))!;
+  await open(page, BUYER, `startapp=listing_${phone.listing.id}`);
+  await page.evaluate(() => {
+    localStorage.removeItem("ishonch.forecast_usage");
+    localStorage.removeItem("ishonch.forecast_years");
+  });
+  await page.reload();
+  const card = page.getByTestId("forecast");
+  await expect(card).toBeVisible();
+  await card.locator("summary").click();
+  await expect(page.getByTestId("forecast-disclaimer")).toContainText(/оценк|предполож/i);
+  await expect(page.getByTestId("forecast-price")).toContainText(/\d/);
+  await expect(page.getByTestId("forecast-chart").first()).toBeVisible();
+
+  const battery = async () => (await page.getByTestId("forecast-battery").locator(".forecast-line").first().textContent()) ?? "";
+  await page.getByTestId("usage-light").click();
+  const light = await battery();
+  await page.getByTestId("usage-heavy").click();
+  const heavy = await battery();
+  expect(heavy).not.toBe(light);
+  expect(Number(light.match(/(\d+)%/)![1])).toBeGreaterThan(Number(heavy.match(/(\d+)%/)![1]));
+  await page.getByTestId("years-5").click();
+  await expect(page.getByTestId("years-5")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Forecast in the comparison: battery / first service / price rows, chart toggle and the shared settings", async ({ page }) => {
+  const items = await catalog();
+  await open(page, BUYER, "screen=compare");
+  await page.evaluate((ids) => localStorage.setItem("ishonch.compare", ids.join(",")), items.slice(0, 3).map((i) => i.listing.id));
+  await page.reload();
+  await expect(page.getByTestId("compare")).toBeVisible();
+  for (const row of ["fc_battery", "fc_service", "fc_price"]) {
+    await expect(page.getByTestId(`compare-row-${row}`).locator("td")).toHaveCount(3);
+  }
+  await expect(page.getByTestId("compare-forecast")).toContainText(/предполож|оценк/i);
+  await expect(page.getByTestId("forecast-chart")).toBeVisible();
+  const before = await page.getByTestId("compare-row-fc_price").textContent();
+  await page.getByTestId("years-5").click();
+  await expect.poll(async () => page.getByTestId("compare-row-fc_price").textContent()).not.toBe(before);
+  await page.getByTestId("chart-battery").click();
+  await expect(page.getByTestId("chart-battery")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("forecast-chart")).toBeVisible();
+});
