@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CatalogItem, ListingSeller, ReviewDto, TrustLevel } from "@ishonch/shared/client";
 import { ApiError, type Api } from "../api";
 import { Empty } from "../components/Empty";
+import { Icon } from "../components/Icon";
 import { LoadError } from "../components/LoadError";
 import { MiniCard, MiniCardSkeleton } from "../components/MiniCard";
 import { useLang, useT } from "../i18n";
@@ -111,7 +112,10 @@ export function SellerPage({ api, sellerId, onOpen }: { api: Api; sellerId: stri
                   {"★".repeat(r.rating)}
                   {"☆".repeat(5 - r.rating)}
                 </span>{" "}
-                <span className="hint">{date(r.createdAt)}</span>
+                <span className="hint">{date(r.createdAt)}</span>{" "}
+                <span className="pill ok review-verified">
+                  <Icon name="check" /> {t("review.verified")}
+                </span>
                 {r.text && <p>{r.text}</p>}
               </div>
             ))}

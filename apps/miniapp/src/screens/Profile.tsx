@@ -10,7 +10,7 @@ const LINKS = {
   privacy: import.meta.env.VITE_PRIVACY_URL ?? "",
 };
 
-type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications" | "stolen" | "away" | "how" | "compare" | "imei";
+type Target = "my" | "shop" | "favorites" | "check" | "admin" | "blocks" | "notifications" | "stolen" | "away" | "how" | "compare" | "imei" | "faq";
 
 interface Props {
   staff?: "admin" | "operator" | null;
@@ -81,6 +81,7 @@ export function Profile({ staff, hasPhone, onOpen, onLanguage, onDeleteAccount, 
         {row("compare", "compare", t("versus.title"), t("versus.menu_desc", { n: COMPARE_MAX }))}
         {row("check", "verify", t("home.tekshir.title"), t("home.tekshir.desc"))}
         {row("imei", "lock", t("imei.open"), t("imei.desc"))}
+        {row("faq", "chat", t("faq.title"), t("faq.desc"))}
         {row("how", "timer", t("how.open"), t("how.desc", { min: INSPECTION_MINUTES, days: GUARANTEE_DAYS }))}
         {row("notifications", "bell", t("notify.open"), t("notify.desc"))}
         {row("away", "sun", t("away.open"), t("away.desc"))}

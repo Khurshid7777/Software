@@ -515,6 +515,36 @@ tbody th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 .specs dd { margin: 2px 0 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .gallery { background: var(--photo-bg); }
 
+/* ---- 13h. Seller facts, order track, FAQ ---- */
+.seller-facts { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.seller-facts li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; color: var(--ink-2); }
+.seller-facts li.ok { color: var(--ink); }
+.seller-facts li.bad { color: var(--bad); font-weight: 600; }
+.seller-facts .icon { width: 18px; height: 18px; margin-top: 1px; }
+.seller-facts li.ok .icon { color: var(--ok); }
+.seller-facts li.bad .icon { color: var(--bad); }
+.review-verified { font-size: 11px; padding: 2px 8px; vertical-align: middle; }
+.review-verified .icon { width: 12px; height: 12px; }
+.order-track { display: flex; flex-direction: column; gap: 10px; }
+.track-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; }
+.track-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; font-size: 11px; color: var(--ink-3); }
+.track-steps li + li::before { content: ""; position: absolute; top: 13px; right: 50%; width: 100%; height: 2px; background: var(--surface-3); z-index: 0; }
+.track-steps li.done + li::before, .track-steps li.now::before { background: var(--brand); }
+.track-dot { position: relative; z-index: 1; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+.track-dot .icon { width: 14px; height: 14px; }
+.track-steps li.done .track-dot { background: var(--brand); color: #fff; }
+.track-steps li.now .track-dot { background: var(--card); color: var(--brand); box-shadow: 0 0 0 2px var(--brand); }
+.track-steps li.now, .track-steps li.done { color: var(--ink); font-weight: 600; }
+.track-next { margin: 0; font-size: 14px; background: var(--brand-soft); border-radius: 12px; padding: 10px 12px; }
+.faq-item { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 0 14px; }
+.faq-item summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; font-weight: 600; font-size: 15px; cursor: pointer; list-style: none; min-height: 44px; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary .icon { width: 18px; height: 18px; color: var(--ink-3); transition: transform 0.2s var(--ease); flex-shrink: 0; }
+.faq-item[open] summary .icon { transform: rotate(90deg); color: var(--brand); }
+.faq-item p { margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.link-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; background: var(--brand); color: var(--brand-ink); border-radius: var(--pill); min-height: 48px; font-weight: 600; }
+.link-button .icon { width: 18px; height: 18px; }
+
 /* ---- 13g. «Ishonch против обычной доски» ---- */
 .vs-table { display: flex; flex-direction: column; gap: 8px; }
 .vs-head, .vs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

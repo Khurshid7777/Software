@@ -26,6 +26,7 @@ import { setCompare, toggleCompare, useCompare } from "../compare";
 import { digitsOnly, groupDigits, rememberViewed } from "../prefs";
 import { ChecklistView } from "../components/Checklist";
 import { BrandLine, MarketBadge, TrustBadge } from "../components/ItemCard";
+import { SellerFacts } from "../components/SellerFacts";
 import { Toast } from "../components/Toast";
 import { TradeForm } from "../components/TradeForm";
 import { LoadError } from "../components/LoadError";
@@ -99,7 +100,18 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
   }, [item, meId]);
 
   if (error) return <LoadError text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!item) return <p className="center hint">{t("common.loading")}</p>;
+  if (!item)
+    return (
+      <div className="stack" aria-busy="true" aria-label={t("common.loading")} data-testid="listing-skeleton">
+        <div className="gallery skeleton">
+          <span className="mini-photo" style={{ aspectRatio: "1 / 0.8", display: "block" }} />
+        </div>
+        <span className="sk-line" style={{ width: "45%" }} />
+        <span className="sk-line" style={{ height: 24, width: "80%" }} />
+        <span className="sk-line" style={{ height: 30, width: "50%" }} />
+        <span className="sk-line short" />
+      </div>
+    );
   const l = item.listing;
   const own = l.seller?.id === meId;
   // «В отъезде» (stage 28): the card still opens by link, but nothing can be ordered until the seller is back.
@@ -325,6 +337,7 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
           <h3>{t("listing.seller")}</h3>
           <TrustBadge item={item} />
           <SellerBadges badges={l.seller.badges} />
+          <SellerFacts seller={l.seller} />
           <BundleBadge discount={l.seller.shop?.bundleDiscount} />
           {l.seller.rating.count > 0 ? (
             <button className="link" onClick={toggleReviews} data-testid="seller-rating">
@@ -340,7 +353,10 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
             <div className="reviews" data-testid="seller-reviews">
               {reviews.map((r) => (
                 <div key={r.id} className="review">
-                  <span>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</span> <span className="hint">{date(r.createdAt)}</span>
+                  <span>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</span> <span className="hint">{date(r.createdAt)}</span>{" "}
+                  <span className="pill ok review-verified">
+                    <Icon name="check" /> {t("review.verified")}
+                  </span>
                   {r.text && <p>{r.text}</p>}
                 </div>
               ))}
@@ -352,23 +368,10 @@ export function ListingView({ api, id, meId, onBuy, onEdit, onOpen, onSeller, on
               {l.seller.shop.marketLocation && <span className="hint">{l.seller.shop.marketLocation}</span>}
             </p>
           )}
-          <p className="hint">{t("listing.seller_since", { date: date(l.seller.registeredAt) })}</p>
-          <p className="hint">{t("listing.sales", { n: l.seller.platformSales })}</p>
           {onSeller && !own && (
             <button className="link" onClick={() => onSeller(l.seller!.id)} data-testid="open-seller">
               {t("listing.seller_all")} →
             </button>
-          )}
-          {l.seller.inspections.passed > 0 && (
-            <p className="hint">✅ {t("verified.seller", { n: l.seller.inspections.passed })}</p>
-          )}
-          {l.seller.responseMinutes != null && (
-            <p className="hint" data-testid="response-time">
-              ⚡️{" "}
-              {l.seller.responseMinutes < 60
-                ? t("listing.response_min", { n: l.seller.responseMinutes })
-                : t("listing.response_hours", { n: Math.round(l.seller.responseMinutes / 60) })}
-            </p>
           )}
         </section>
       )}

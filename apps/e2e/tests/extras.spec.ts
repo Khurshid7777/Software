@@ -191,3 +191,51 @@ test("the storefront opens Versus from a tile; «Как проходит про�
   await expect(page.getByTestId("how-vs")).toContainText("Видео-паспорт");
   await expect(page.getByTestId("how-vs")).toContainText("денег не берёт");
 });
+
+test("trust: facts about the seller on the listing, verified-purchase reviews, FAQ with answers", async ({ page }) => {
+  // Not the coffee machine: the order tests above reserve it, and a reserved item leaves the public list.
+  const item = (await catalog()).find((i) => i.listing.titleRu.includes("Ryzen"))!;
+  await open(page, BUYER, `startapp=listing_${item.listing.id}`);
+  const facts = page.getByTestId("seller-facts");
+  await expect(facts).toBeVisible();
+  await expect(facts).toContainText("подтверждён через Telegram");
+  await expect(facts).toContainText("Проверенный магазин");
+  await expect(facts).toContainText("Проигранных споров нет");
+
+  await open(page, BUYER, "screen=faq");
+  await expect(page.getByTestId("faq")).toBeVisible();
+  await page.getByTestId("faq-money").locator("summary").click();
+  await expect(page.getByTestId("faq-money")).toContainText("деньги не берёт");
+  await page.getByTestId("faq-notfit").locator("summary").click();
+  await expect(page.getByTestId("faq-notfit")).toContainText("10 минут");
+  await page.getByTestId("faq-how").click();
+  await expect(page.getByTestId("how")).toBeVisible();
+});
+
+test("an order shows its steps and what to do next, for the buyer and for the seller", async ({ page }) => {
+  const item = (await catalog()).find((i) => i.listing.titleRu.includes("Микроволновка"))!;
+  const order = await asBot<{ id: string }>("POST", "/orders", BUYER, {
+    listingId: item.listing.id,
+    mode: "cod_seller",
+    district: "olmazor",
+    address: "Olmazor 4, kv 7",
+  });
+  await open(page, BUYER, `startapp=order_${order.id}`);
+  let card = page.locator(`#order-${order.id}`);
+  await expect(card.getByTestId("order-track")).toBeVisible();
+  await expect(card.getByTestId("order-next")).toContainText("Ждём ответа продавца");
+  await expect(card.locator(".track-steps li.now")).toContainText("Заявка");
+
+  await asBot("POST", `/orders/${order.id}/confirm`, SHOP_OWNER);
+  for (const status of ["courier_assigned", "picked_up"]) {
+    await asBot("POST", `/operator/orders/${order.id}/status`, OPERATOR, { status });
+  }
+  await open(page, BUYER, `startapp=order_${order.id}`);
+  card = page.locator(`#order-${order.id}`);
+  await expect(card.locator(".track-steps li.now")).toContainText("В пути");
+  await expect(card.locator(".track-steps li.done")).toHaveCount(3);
+  await expect(card.getByTestId("order-next")).toContainText("Подготовьте чек-лист");
+
+  await open(page, SHOP_OWNER, `startapp=order_${order.id}`);
+  await expect(page.locator(`#order-${order.id}`).getByTestId("order-next")).toContainText("xaridor uni qabul qilishda");
+});

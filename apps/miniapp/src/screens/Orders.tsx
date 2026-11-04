@@ -4,6 +4,7 @@ import { MeetingCard } from "../components/Meeting";
 import { photoUrl, ApiError, compressImage, type Api } from "../api";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { OrderTrack } from "../components/OrderTrack";
 import { LoadError } from "../components/LoadError";
 import { Guarantee } from "../components/Guarantee";
 import { Toast } from "../components/Toast";
@@ -186,6 +187,8 @@ function OrderCard({
           </span>
         </span>
       </button>
+
+      <OrderTrack order={o} />
 
       {o.bundle.length > 0 && (
         <p className="hint" data-testid="order-bundle">
