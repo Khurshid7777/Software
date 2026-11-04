@@ -325,6 +325,8 @@ export interface VideoCheckResult {
 }
 /** AI readings of video passports one seller may trigger a day (each costs a model call); more uploads are kept unread. */
 export const VIDEO_CHECKS_PER_DAY = 12;
+/** A sold item's video passport is deleted this many days after the sale. */
+export const VIDEO_KEEP_DAYS_AFTER_SALE = 30;
 /** Screens and actions the Mini App reports, counted as distinct users in the admin panel (no content, no ids). */
 export const UI_EVENTS = [
   "ui_how_open",

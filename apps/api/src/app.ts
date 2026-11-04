@@ -302,6 +302,7 @@ export async function buildApp({ config, db, ai, storage, stt, publisher, courie
     repo,
     trust,
     metrics,
+    evidence: evidenceSvc,
     digest: (now?: Date) => maybeSendDigest({ repo, metrics, staff, adminLink }, config.DIGEST_HOUR, now),
   });
   return app;
@@ -318,6 +319,7 @@ declare module "fastify" {
       repo: Repo;
       trust: TrustService;
       metrics: MetricsService;
+      evidence: EvidenceService;
       digest: (now?: Date) => Promise<boolean>;
     };
   }

@@ -134,3 +134,47 @@ export async function checkVideo(
     at: new Date().toISOString(),
   };
 }
+
+/** Stored clips are at most this tall: a phone screen shows 720 px at full sharpness, the rest is storage and mobile data. */
+export const MAX_STORED_HEIGHT = 720;
+/** Longest stored clip, seconds (the script takes 20-40 s). */
+const MAX_STORED_SECONDS = 90;
+/** Re-encoding is CPU-heavy: at most this many at once, the rest are stored as uploaded. */
+const MAX_PARALLEL_ENCODES = 2;
+const ENCODE_TIMEOUT_MS = 60_000;
+let encoding = 0;
+
+/**
+ * The clip as it will be stored: H.264, at most 720 px tall, no sound (a video passport needs none, and a
+ * bystander's conversation does not belong in the file), the index first so playback starts and seeks at once.
+ * Returns null when it is not worth it or not possible (no ffmpeg, a file that is not a video, a busy server, a
+ * result that is not clearly smaller): the caller then keeps the original. The AI reads the original frames,
+ * never this copy, so the IMEI stays as readable as the seller filmed it.
+ */
+export async function compressVideo(video: Buffer, ext: string): Promise<Buffer | null> {
+  if (!looksLikeVideo(video) || encoding >= MAX_PARALLEL_ENCODES) return null;
+  encoding++;
+  const dir = await mkdtemp(join(tmpdir(), "ishonch-encode-"));
+  try {
+    const src = join(dir, `clip.${ext}`);
+    const out = join(dir, "out.mp4");
+    await writeFile(src, video);
+    await run(
+      "ffmpeg",
+      [
+        "-v", "error", "-y", "-i", src, "-t", String(MAX_STORED_SECONDS),
+        "-vf", `scale=-2:'min(${MAX_STORED_HEIGHT},ih)'`,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", out,
+      ],
+      { timeout: ENCODE_TIMEOUT_MS },
+    );
+    const packed = await readFile(out);
+    // Not clearly smaller: keep what the seller uploaded.
+    return packed.length > 0 && packed.length < video.length * 0.9 ? packed : null;
+  } catch {
+    return null;
+  } finally {
+    encoding--;
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}

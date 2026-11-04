@@ -53,6 +53,7 @@ const hourly = () =>
     await step("review_reminders", () => orders.remindReviews());
     await step("jobs_cleanup", () => queue.cleanup());
     await step("privacy_retention", () => app.services.repo.runRetention());
+    await step("video_purge", () => app.services.evidence.purgeSoldVideos());
     await step("pending_replies", () => app.services.catalog.cleanupPendingReplies());
     if (r?.reminded || r?.archived || staleOrders) app.log.info({ ...r, staleOrders }, "hourly job");
   }).catch((err) => app.log.error({ err }, "hourly job failed")));

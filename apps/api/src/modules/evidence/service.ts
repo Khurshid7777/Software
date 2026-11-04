@@ -1,12 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
-import { VIDEO_CHECKS_PER_DAY, type CheckCategory, type VideoCheckResult } from "@ishonch/shared";
+import { and, asc, count, desc, eq, inArray, lt } from "drizzle-orm";
+import { VIDEO_CHECKS_PER_DAY, VIDEO_KEEP_DAYS_AFTER_SALE, type CheckCategory, type VideoCheckResult } from "@ishonch/shared";
 import type { AiService } from "../../ai/aiService.js";
 import type { Repo } from "../../db/repo.js";
-import { evidence } from "../../db/schema.js";
+import { evidence, listings } from "../../db/schema.js";
 import { processImage } from "../../storage/images.js";
 import type { Storage } from "../../storage/storage.js";
-import { checkVideo, extractFrames, unknownCheck } from "./videoCheck.js";
+import { checkVideo, compressVideo, extractFrames, unknownCheck } from "./videoCheck.js";
 
 /** dispute_photo: the buyer's, inspection_photo: the courier's at pickup, listing_video: the seller's check. */
 export type EvidenceKind = "dispute_photo" | "inspection_photo" | "listing_video";
@@ -120,15 +120,21 @@ export class EvidenceService {
     if (!VIDEO_TYPES.test(file.mimeType) || !file.data.length) throw new EvidenceRejected("bad_video");
     await this.removeVideo(listingId);
     const ext = file.mimeType.split("/")[1] === "quicktime" ? "mov" : file.mimeType.split("/")[1]!;
+    let stored = { data: file.data, mime: file.mimeType, ext };
     // Every reading is a paid model call: a seller who re-uploads all day keeps their videos, but past the daily
     // cap they are stored unread (the passport then says "the seller's word").
     const reservation = this.d.ai ? await this.d.repo.reserveDaily(userId, "video_check", VIDEO_CHECKS_PER_DAY) : null;
-    const key = `evidence/listings/${listingId}/video-${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
-    await this.d.storage.put(key, file.data, file.mimeType);
-    const check = reservation == null ? unknownCheck() : await this.inspect(file.data, ext, listing, reservation);
+    // The AI reads the frames of the original (sharpest IMEI), while the clip that is kept is the compact copy.
+    const [check, packed] = await Promise.all([
+      reservation == null ? Promise.resolve(unknownCheck()) : this.inspect(file.data, ext, listing, reservation),
+      compressVideo(file.data, ext),
+    ]);
+    if (packed) stored = { data: packed, mime: "video/mp4", ext: "mp4" };
+    const key = `evidence/listings/${listingId}/video-${Date.now()}-${randomBytes(6).toString("hex")}.${stored.ext}`;
+    await this.d.storage.put(key, stored.data, stored.mime);
     const [row] = await this.db
       .insert(evidence)
-      .values({ kind: "listing_video", listingId, uploadedBy: userId, storageKey: key, mime: file.mimeType, bytes: file.data.length, meta: check })
+      .values({ kind: "listing_video", listingId, uploadedBy: userId, storageKey: key, mime: stored.mime, bytes: stored.data.length, meta: check })
       .returning();
     return { url: this.url(row!), check };
   }
@@ -146,6 +152,22 @@ export class EvidenceService {
       await this.d.repo.refundDaily(reservation);
       return unknownCheck();
     }
+  }
+
+  /**
+   * Videos of items sold more than VIDEO_KEEP_DAYS_AFTER_SALE days ago are deleted (file and row): the passport of a
+   * sold item is not shown any more, and the file is the largest thing we store per listing. Archived and expired
+   * listings keep theirs: a seller may relist them.
+   */
+  async purgeSoldVideos(now = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - VIDEO_KEEP_DAYS_AFTER_SALE * 86_400_000);
+    const rows = await this.db
+      .select({ listingId: evidence.listingId })
+      .from(evidence)
+      .innerJoin(listings, eq(listings.id, evidence.listingId))
+      .where(and(eq(evidence.kind, "listing_video"), eq(listings.status, "sold"), lt(listings.soldAt, cutoff)));
+    for (const id of new Set(rows.map((r) => r.listingId))) await this.removeVideo(id);
+    return new Set(rows.map((r) => r.listingId)).size;
   }
 
   async removeVideo(listingId: string) {

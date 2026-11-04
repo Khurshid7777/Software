@@ -335,6 +335,57 @@ describe.skipIf(!reachable)("video passport: AI check of the frames, required fo
     seen = {};
   });
 
+  it.skipIf(!ffmpeg)("the stored clip is compact: at most 720 px, no sound, the index first; the AI reads the original", async () => {
+    // A 1080p clip with sound, 4 seconds of moving test pattern: large enough that re-encoding clearly pays.
+    const big = join(dir, "big.mp4");
+    execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=1920x1080:d=4:r=30", "-f", "lavfi", "-i", "sine=f=440:d=4", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "12", "-c:a", "aac", "-shortest", big],
+      { stdio: "ignore" },
+    );
+    const original = await import("node:fs").then((fs) => fs.readFileSync(big));
+    const l = await draft("smartphone");
+    seen = {};
+    const up = await upload(l.id, original);
+    expect(up.statusCode, up.body).toBe(200);
+    expect(up.json().videoCheck.verdict).toBe("pass"); // read from the original frames
+    const media = await app.inject({ url: up.json().video });
+    expect(media.statusCode).toBe(200);
+    expect(media.headers["content-type"]).toBe("video/mp4");
+    expect(media.rawPayload.length).toBeLessThan(original.length * 0.5);
+    const probe = join(dir, "stored.mp4");
+    await import("node:fs").then((fs) => fs.writeFileSync(probe, media.rawPayload));
+    const info = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,height", "-of", "csv=p=0", probe]).toString();
+    expect(info).toContain("video,720");
+    expect(info).not.toContain("audio");
+    // moov before mdat: playback can start from the first bytes (the "faststart" layout).
+    const head = media.rawPayload.subarray(0, 4096).toString("latin1");
+    expect(head.indexOf("moov")).toBeGreaterThan(-1);
+    expect(head.indexOf("moov")).toBeLessThan(media.rawPayload.indexOf("mdat"));
+  }, 60_000);
+
+  it("videos of items sold more than 30 days ago are deleted; everything else stays", async () => {
+    const mk = async (extra: Partial<typeof listings.$inferInsert>) => {
+      // A video can only be added while the listing is open; the sale or archive happens afterwards.
+      const l = await draft("monitor", { status: "active" });
+      const up = await upload(l.id, Buffer.alloc(40_000, 3));
+      expect(up.statusCode, up.body).toBe(200);
+      if (Object.keys(extra).length) await db.update(listings).set(extra).where(eq(listings.id, l.id));
+      return { id: l.id, url: up.json().video as string };
+    };
+    const longSold = await mk({ status: "sold", soldAt: new Date(Date.now() - 40 * 864e5) });
+    const freshSold = await mk({ status: "sold", soldAt: new Date(Date.now() - 5 * 864e5) });
+    const live = await mk({});
+    const archived = await mk({ status: "archived", updatedAt: new Date(Date.now() - 90 * 864e5) });
+
+    const purged = await app.services.evidence.purgeSoldVideos();
+    expect(purged).toBeGreaterThanOrEqual(1);
+    expect((await app.inject({ url: longSold.url })).statusCode).toBe(404);
+    for (const keep of [freshSold, live, archived]) expect((await app.inject({ url: keep.url })).statusCode).toBe(200);
+    // Running it again is harmless.
+    expect(await app.services.evidence.purgeSoldVideos()).toBe(0);
+  });
+
   it("an AI outage keeps the video and marks the check unknown", async () => {
     if (!ffmpeg) return;
     const l = await draft("smartphone");
